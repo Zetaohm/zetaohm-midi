@@ -1,0 +1,22 @@
+[package]
+name = "zmidi-ble"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "BLE-MIDI (MIDI over Bluetooth Low Energy) packet codec and GATT data, no_std, no alloc and sans-IO"
+license = "MIT"
+
+[lib]
+name = "zmidi_ble"
+path = "src/lib.rs"
+
+[dependencies]
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false, features = ["full"] }
+zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features = false, features = ["midi2-protocol"] }
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-002, DEC-016: the core API needs no alloc and no BLE stack.
+default = []
+
+[dev-dependencies]
+proptest = "1"

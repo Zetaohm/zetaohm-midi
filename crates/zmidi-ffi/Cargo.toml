@@ -1,0 +1,65 @@
+[package]
+name = "zmidi-ffi"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "C ABI of zetaohm-midi for C, C++ and other languages, no_std and no alloc"
+license = "MIT"
+
+[lib]
+name = "zmidi"
+path = "src/lib.rs"
+# DEC-019: the packaging builds give `--crate-type staticlib` or `cdylib` to `cargo rustc` (Corrosion:
+# OVERRIDE_CRATE_TYPE), so the workspace gates and the feature matrix build an rlib only.
+crate-type = ["rlib"]
+
+[dependencies]
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-ble = { path = "../zmidi-ble", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-ci = { path = "../zmidi-ci", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-ci-pe = { path = "../zmidi-ci-pe", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-file = { path = "../zmidi-file", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-net = { path = "../zmidi-net", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features = false, features = ["midi2-protocol"], optional = true }
+
+[features]
+# DEC-002, DEC-019: the C ABI needs no alloc. The parts of the C ABI are opt-in features.
+default = []
+# MIDI 1.0 byte stream to UMP and back (module Io, zmidi-io).
+io = ["dep:zmidi-io", "dep:zmidi-ump"]
+# UMP word count, parse, MIDI 2.0 Channel Voice writers, translation and scaling (module Ump).
+ump = ["dep:zmidi-ump", "zmidi-ump/full"]
+# BLE-MIDI packets to UMP and back (module Ble, zmidi-ble).
+ble = ["dep:zmidi-ble"]
+# MIDI Clip File reader and writer (module File, zmidi-file).
+file = ["dep:zmidi-file", "zmidi-file/full", "dep:zmidi-ump"]
+# MIDI-CI (module Ci, zmidi-ci, zmidi-ci-pe): all of the Device, as before the split (OPT-023,
+# REQ-FFI-CI-009). The bindings build with `ci`.
+ci = ["ci-device", "ci-initiator", "ci-profiles", "ci-property-exchange", "ci-process-inquiry"]
+# The MIDI-CI Device with no category and no Initiator role: a Responder to Discovery and Endpoint
+# Information, with Invalidate MUID, ACK and NAK. The features below add to it, as the zmidi-ci
+# features do (DEC-017, DEC-CI-001).
+ci-device = ["dep:zmidi-ci"]
+# The Initiator role: Discovery, the inquiries and requests, and the replies to them.
+ci-initiator = ["ci-device", "zmidi-ci/initiator"]
+# Profile Configuration (M2-101 7, M2-102).
+ci-profiles = ["ci-device", "zmidi-ci/profiles"]
+# Property Exchange with the zmidi-ci-pe one-chunk Responder (M2-101 8, M2-103).
+ci-property-exchange = ["ci-device", "zmidi-ci/property-exchange", "dep:zmidi-ci-pe"]
+# Process Inquiry with MIDI Message Report (M2-101 9).
+ci-process-inquiry = ["ci-device", "zmidi-ci/process-inquiry"]
+# Network MIDI 2.0 Host and Client, sans-IO (module Net, zmidi-net).
+net = ["dep:zmidi-net"]
+# Invitation with Authentication and with User Authentication of the net part (SHA-256,
+# zmidi-net auth; off by default as DEC-013 keeps it).
+net-auth = ["net", "zmidi-net/auth"]
+# USB-MIDI 1.0 Event Packets and USB MIDI 2.0 UMP words (module Usb, zmidi-usb MidiLink).
+usb = ["dep:zmidi-usb", "zmidi-usb/alt0"]
+# A `#[panic_handler]` for bare-metal (`target_os = "none"`) and WASM builds of the staticlib
+# (DEC-019). It has no effect on other targets.
+panic-handler = []
+# Host builds of the staticlib and the `cdylib` (DEC-019: a no_std `cdylib` does not link on macOS).
+std = []
+
+[dev-dependencies]
+proptest = "1"

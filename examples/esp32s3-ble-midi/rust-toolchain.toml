@@ -1,0 +1,4 @@
+# The ESP32-S3 is an Xtensa CPU: the Espressif toolchain (`espup install`).
+[toolchain]
+channel = "esp"
+components = ["rust-src"]

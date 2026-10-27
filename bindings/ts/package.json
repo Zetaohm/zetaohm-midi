@@ -1,0 +1,25 @@
+{
+  "name": "zetaohm-midi",
+  "version": "0.1.0-alpha.1",
+  "description": "MIDI 2.0 for TypeScript and JavaScript: UMP, MIDI-CI with Property Exchange, Network MIDI 2.0, BLE-MIDI, USB-MIDI and MIDI Clip Files, through the WASM build of the zetaohm-midi C ABI",
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./zmidi.wasm": "./wasm/zmidi.wasm"
+  },
+  "files": ["dist", "wasm/zmidi.wasm"],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@10.15.0",
+  "devDependencies": {
+    "@types/node": "^22.18.0",
+    "typescript": "^5.9.0",
+    "vitest": "^3.2.0"
+  }
+}

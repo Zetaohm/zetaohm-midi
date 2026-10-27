@@ -1,0 +1,10 @@
+[build]
+target = "thumbv7em-none-eabihf"
+
+[target.thumbv7em-none-eabihf]
+# The ST-LINK of the P-NUCLEO-WB55. Set PROBE_SELECTOR when more than one probe is attached.
+runner = "probe-rs run --chip STM32WB55RGVx"
+rustflags = ["-C", "link-arg=-Tlink.x", "-C", "link-arg=-Tdefmt.x"]
+
+[env]
+DEFMT_LOG = "info"

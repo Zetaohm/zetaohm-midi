@@ -1,0 +1,23 @@
+[package]
+name = "zmidi"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "Complete MIDI 2.0 implementation"
+license = "MIT"
+
+[dependencies]
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1" }
+zmidi-ci = { path = "../zmidi-ci", version = "0.1.0-alpha.1" }
+zmidi-ci-pe = { path = "../zmidi-ci-pe", version = "0.1.0-alpha.1" }
+zmidi-file = { path = "../zmidi-file", version = "0.1.0-alpha.1" }
+zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1" }
+zmidi-net = { path = "../zmidi-net", version = "0.1.0-alpha.1" }
+zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1" }
+zmidi-ble = { path = "../zmidi-ble", version = "0.1.0-alpha.1" }
+
+[features]
+default = []
+# "zlib+Mcoded7" Property Data (zmidi-ci-pe, DEC-PE-001).
+zlib = ["zmidi-ci-pe/zlib"]
+# Network MIDI 2.0 authentication (zmidi-net, DEC-013).
+auth = ["zmidi-net/auth"]

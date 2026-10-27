@@ -1,0 +1,43 @@
+[workspace]
+members = [
+  "crates/zmidi",
+  "crates/zmidi-ble",
+  "crates/zmidi-ble-trouble",
+  "crates/zmidi-ci",
+  "crates/zmidi-ci-pe",
+  "crates/zmidi-ump",
+  "crates/zmidi-ffi",
+  "crates/zmidi-file",
+  "crates/zmidi-io",
+  "crates/zmidi-net",
+  "crates/zmidi-py",
+  "crates/zmidi-usb",
+  "crates/zmidi-usb-device",
+  "crates/zmidi-usb-embassy",
+]
+# DEC-019: crates/zmidi-py (PyO3) needs a Python interpreter; it builds from bindings/python and
+# with `-p zmidi-py`.
+default-members = [
+  "crates/zmidi",
+  "crates/zmidi-ble",
+  "crates/zmidi-ble-trouble",
+  "crates/zmidi-ci",
+  "crates/zmidi-ci-pe",
+  "crates/zmidi-ump",
+  "crates/zmidi-ffi",
+  "crates/zmidi-file",
+  "crates/zmidi-io",
+  "crates/zmidi-net",
+  "crates/zmidi-usb",
+  "crates/zmidi-usb-device",
+  "crates/zmidi-usb-embassy",
+]
+resolver = "2"
+
+# The packaging builds of the C ABI (DEC-019): small code for firmware, one codegen unit and LTO,
+# so the linker of the C program removes what the program does not call.
+[profile.ffi]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1

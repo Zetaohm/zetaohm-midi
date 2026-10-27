@@ -1,0 +1,19 @@
+name: zetaohm_midi
+description: >-
+  MIDI 2.0 for Dart: UMP, MIDI-CI with Property Exchange, Network MIDI 2.0, BLE-MIDI, USB-MIDI and
+  MIDI Clip Files, through dart:ffi and the zetaohm-midi C ABI.
+version: 0.1.0-alpha.1
+publish_to: none
+
+environment:
+  sdk: ^3.10.0
+
+dependencies:
+  code_assets: ^2.1.0
+  ffi: ^2.2.0
+  hooks: ^2.2.0
+
+dev_dependencies:
+  ffigen: ^23.0.0
+  lints: ^6.1.0
+  test: ^1.33.0

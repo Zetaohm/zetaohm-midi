@@ -1,0 +1,34 @@
+[package]
+name = "esp32s3-usb-midi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "USB MIDI 2.0 and 1.0 echo firmware for the ESP32-S3 (USB OTG) with zmidi-usb-embassy"
+license = "MIT"
+
+# DEC-003: examples are outside the Cargo workspace.
+[workspace]
+
+[dependencies]
+zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false }
+zmidi-usb-embassy = { path = "../../crates/zmidi-usb-embassy" }
+esp-hal = { version = "1.0.0", features = ["esp32s3", "unstable"] }
+esp-rtos = { version = "0.2.0", features = ["esp32s3", "embassy"] }
+esp-backtrace = { version = "0.18.1", features = ["esp32s3", "panic-handler", "println"] }
+esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32s3"] }
+esp-println = { version = "0.16.1", features = ["esp32s3"] }
+embassy-executor = "0.9.1"
+embassy-futures = "0.1.2"
+embassy-sync = "0.8.0"
+embassy-usb = { version = "0.6.0", default-features = false }
+static_cell = "2.1.1"
+heapless = "0.9"
+
+[profile.release]
+debug = 2
+lto = "fat"
+opt-level = "s"
+codegen-units = 1
+
+[profile.dev]
+opt-level = "s"

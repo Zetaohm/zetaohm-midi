@@ -1,0 +1,21 @@
+[package]
+name = "rs-midi2"
+version = "0.0.0"
+edition = "2021"
+publish = false
+[workspace]
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+mk20dx-hal = { path = "../../../../firmware/mk20dx/mk20dx-hal", features = ["critical-section", "mk20d7", "rt", "usb-endpoints-4"] }
+midi2 = { version = "0.11", default-features = false, features = ["channel-voice2", "system-common"] }
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+[features]
+lean = []
+full = []
+allmt = ["midi2/flex-data", "midi2/ump-stream", "midi2/utility", "midi2/sysex7", "midi2/sysex8", "midi2/channel-voice1"]
+ci = ["midi2/ci"]

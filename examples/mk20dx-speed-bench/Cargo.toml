@@ -1,0 +1,38 @@
+[package]
+name = "mk20dx-speed-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Cycle counts of the speed-probe benches on the MK20DX256 (FLXS1), DWT CYCCNT (OPT-029 step 2)"
+license = "MIT"
+
+# DEC-003: examples are outside the Cargo workspace. The benches are the modules of
+# tools/speed-probe (src/main.rs includes them with #[path]).
+[workspace]
+
+[dependencies]
+mk20dx-hal = { version = "0.2.2", features = ["mk20d7", "rt", "critical-section", "defmt"] }
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+defmt = "1"
+defmt-rtt = "1"
+panic-probe = { version = "1", features = ["print-defmt"] }
+zmidi-ump = { path = "../../crates/zmidi-ump", default-features = false, features = ["full"] }
+zmidi-io = { path = "../../crates/zmidi-io", default-features = false, features = ["midi2-protocol"] }
+zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false, features = ["alt0"] }
+zmidi-ble = { path = "../../crates/zmidi-ble", default-features = false }
+zmidi-file = { path = "../../crates/zmidi-file", default-features = false }
+zmidi-net = { path = "../../crates/zmidi-net", default-features = false }
+zmidi-ci = { path = "../../crates/zmidi-ci", default-features = false, features = ["property-exchange"] }
+zmidi-ci-pe = { path = "../../crates/zmidi-ci-pe", default-features = false, features = ["initiator"] }
+
+# The WDOG unlock needs opt-level 1 or more (mk20dx-hal `watchdog`).
+[profile.dev]
+opt-level = 1
+
+# The speed-probe profile: opt-level "s", fat LTO, one codegen unit.
+[profile.release]
+debug = 2
+lto = "fat"
+codegen-units = 1
+opt-level = "s"

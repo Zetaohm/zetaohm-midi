@@ -1,0 +1,35 @@
+[package]
+name = "speed-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Instruction count of the main entry points on an emulated Cortex-M4 (OPT-029)"
+
+# Outside the Cargo workspace, like examples/ (DEC-003). The firmware runs on the QEMU machine
+# mps2-an386 (Cortex-M4F); qemu/insn_mark.c counts the instructions between two calls of
+# `speed_mark`. scripts/speed-check.py builds it, runs it and compares the counts with the budgets.
+
+[workspace]
+
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+cortex-m-semihosting = "0.5"
+zmidi-ump = { path = "../../crates/zmidi-ump", default-features = false, features = ["full"] }
+zmidi-io = { path = "../../crates/zmidi-io", default-features = false, features = ["midi2-protocol"] }
+zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false, features = ["alt0"] }
+zmidi-ble = { path = "../../crates/zmidi-ble", default-features = false }
+zmidi-file = { path = "../../crates/zmidi-file", default-features = false }
+zmidi-net = { path = "../../crates/zmidi-net", default-features = false }
+zmidi-ci = { path = "../../crates/zmidi-ci", default-features = false, features = ["property-exchange"] }
+zmidi-ci-pe = { path = "../../crates/zmidi-ci-pe", default-features = false, features = ["initiator"] }
+
+[features]
+
+# The flxs1 settings of the size probe: opt-level "s", fat LTO, one codegen unit, panic abort.
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+debug = true

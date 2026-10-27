@@ -1,0 +1,33 @@
+[package]
+name = "zmidi-file"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "MIDI Clip File (MIDI 2.0) and Standard MIDI File 1.0 reader and writer"
+license = "MIT"
+
+[lib]
+name = "zmidi_file"
+path = "src/lib.rs"
+
+[dependencies]
+# The families that the Clip reader and writer need for their own rules (M2-116): Delta Clockstamps,
+# Start and End of Clip, the PE SysEx check, Set Tempo and Set Time Signature. The SMF code needs none
+# (DEC-021). The other families come with the feature `full` (DEC-017, OPT-048).
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false, features = [
+    "utility",
+    "ump-stream",
+    "sysex7",
+    "flex-data",
+] }
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-002: the core API needs no alloc. DEC-017: all message families are decoded by default; with
+# `full` off, the Clip reader gives a message of another family as `Ump::Unknown`.
+default = ["full"]
+full = ["zmidi-ump/full"]
+
+[dev-dependencies]
+# The Clip tests read every family, also when the feature matrix turns `full` off.
+zmidi-ump = { path = "../zmidi-ump", features = ["full"] }
+proptest = "1"

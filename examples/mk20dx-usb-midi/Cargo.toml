@@ -1,0 +1,30 @@
+[package]
+name = "mk20dx-usb-midi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "USB MIDI 2.0 and 1.0 echo firmware for the MK20DX256 (Teensy 3.2, FLXS1) with zmidi-usb-device"
+license = "MIT"
+
+# DEC-003: examples are outside the Cargo workspace.
+[workspace]
+
+[dependencies]
+zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false }
+zmidi-usb-device = { path = "../../crates/zmidi-usb-device" }
+mk20dx-hal = { version = "0.2.2", features = ["mk20d7", "rt", "critical-section", "defmt"] }
+usb-device = { version = "0.3.2", features = ["control-buffer-256"] }
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+defmt = "1"
+defmt-rtt = "1"
+panic-probe = { version = "1", features = ["print-defmt"] }
+
+# The WDOG unlock needs opt-level 1 or more (mk20dx-hal `watchdog`).
+[profile.dev]
+opt-level = 1
+
+[profile.release]
+debug = 2
+lto = true
+opt-level = "s"

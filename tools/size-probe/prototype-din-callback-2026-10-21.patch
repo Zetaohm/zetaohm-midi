@@ -1,0 +1,283 @@
+diff --git a/crates/zmidi-io/src/byte_stream.rs b/crates/zmidi-io/src/byte_stream.rs
+index 3d0d711..fd96584 100644
+--- a/crates/zmidi-io/src/byte_stream.rs
++++ b/crates/zmidi-io/src/byte_stream.rs
+@@ -336,7 +336,7 @@ pub struct UmpToBytes {
+ 
+ impl UmpToBytes {
+     /// Creates a writer, with or without running status (M1 Running Status).
+-    pub fn new(running_status: bool) -> Self {
++    pub const fn new(running_status: bool) -> Self {
+         Self {
+             running_status,
+             last_status: 0,
+@@ -1324,3 +1324,208 @@ mod tests {
+         });
+     }
+ }
++
++// ---- EXPERIMENT: a callback reader with no return value.
++impl BytesToUmpCore {
++    /// [`Self::push_with`] with no translator: gives the words of each completed UMP to `f`.
++    pub fn feed(&mut self, byte: u8, mut f: impl FnMut(&[u32])) {
++        let g = u32::from(self.group.into_bits()) << 24;
++        let one = |f: &mut dyn FnMut(&[u32]), mt: u32, s: u8, d0: u8, d1: u8| {
++            f(&[mt << 28 | g | u32::from(s) << 16 | u32::from(d0) << 8 | u32::from(d1)])
++        };
++        match byte {
++            0xF8..=0xFF => {
++                if !undefined(byte) {
++                    one(&mut f, 0x1, byte, 0, 0);
++                }
++            }
++            0x80..=0xF7 => {
++                if self.in_sysex {
++                    let s = if self.started { SYSEX_END } else { SYSEX_COMPLETE };
++                    self.sysex_feed(s, &mut f);
++                    self.in_sysex = false;
++                }
++                self.status = 0;
++                self.count = 0;
++                match byte {
++                    0x80..=0xEF => {
++                        self.running = byte;
++                        self.status = byte;
++                    }
++                    SOX => {
++                        self.running = 0;
++                        self.in_sysex = true;
++                        self.chunk_len = 0;
++                        self.started = false;
++                    }
++                    0xF6 => {
++                        self.running = 0;
++                        one(&mut f, 0x1, byte, 0, 0);
++                    }
++                    _ => {
++                        self.running = 0;
++                        if data_len(byte) > 0 {
++                            self.status = byte;
++                        }
++                    }
++                }
++            }
++            _ => {
++                if self.in_sysex {
++                    if self.chunk_len == self.chunk.len() {
++                        let s = if self.started { SYSEX_CONTINUE } else { SYSEX_START };
++                        self.sysex_feed(s, &mut f);
++                        self.started = true;
++                    }
++                    if let Some(slot) = self.chunk.get_mut(self.chunk_len) {
++                        *slot = byte;
++                        self.chunk_len += 1;
++                    }
++                    return;
++                }
++                if self.status == 0 {
++                    if self.running == 0 {
++                        return;
++                    }
++                    self.status = self.running;
++                    self.count = 0;
++                }
++                if let Some(slot) = self.data.get_mut(self.count) {
++                    *slot = byte;
++                }
++                self.count += 1;
++                if self.count == data_len(self.status) {
++                    let (status, d0, d1) = (self.status, self.data[0], self.data[1]);
++                    let d1 = if self.count == 2 { d1 } else { 0 };
++                    self.status = 0;
++                    self.count = 0;
++                    one(&mut f, if status < 0xF0 { 0x2 } else { 0x1 }, status, d0, d1);
++                }
++            }
++        }
++    }
++
++    fn sysex_feed(&mut self, status: u8, f: &mut dyn FnMut(&[u32])) {
++        let n = self.chunk_len.min(6);
++        let c = &self.chunk;
++        let byte = |i: usize| if i < n { u32::from(c[i]) } else { 0 };
++        let w0 = 0x3 << 28 | u32::from(self.group.into_bits()) << 24 | u32::from(status) << 20
++            | (n as u32) << 16 | byte(0) << 8 | byte(1);
++        let w1 = byte(2) << 24 | byte(3) << 16 | byte(4) << 8 | byte(5);
++        self.chunk_len = 0;
++        f(&[w0, w1]);
++    }
++}
++
++#[cfg(test)]
++mod feed_tests {
++    extern crate std;
++    use super::*;
++    use proptest::prelude::*;
++    use std::vec::Vec;
++
++    #[test]
++    fn prop_feed_equals_push() {
++        proptest!(ProptestConfig::with_cases(20_000), |(bytes in proptest::collection::vec(any::<u8>(), 0..96))| {
++            let mut a = BytesToUmpCore::new(Group::from_bits(3));
++            let mut b = BytesToUmpCore::new(Group::from_bits(3));
++            for &x in &bytes {
++                let pa: Vec<Vec<u32>> = a.push_with(x, None).map(|p| p.words().to_vec()).collect();
++                let mut pb: Vec<Vec<u32>> = Vec::new();
++                b.feed(x, |w| pb.push(w.to_vec()));
++                prop_assert_eq!(pa, pb);
++            }
++        });
++    }
++}
++
++// ---- EXPERIMENT: a callback writer with no staging buffer.
++impl UmpToBytes {
++    /// [`Self::write`] that gives each byte to `f` (no buffer, so no BufferTooSmall).
++    pub fn write_each(&mut self, words: &[u32], mut f: impl FnMut(u8)) {
++        let Some(&w0) = words.first() else { return };
++        if words.len() < MessageType::from_bits((w0 >> 28) as u8).word_count() {
++            return;
++        }
++        let status = (w0 >> 16) as u8;
++        let mut last = self.last_status;
++        let rs = self.running_status;
++        let mut channel = |w: u32, last: &mut u8, f: &mut dyn FnMut(u8)| {
++            let s = (w >> 16) as u8;
++            if !(rs && *last == s) {
++                f(s);
++            }
++            *last = s;
++            f((w >> 8) as u8 & 0x7F);
++            if data_len(s) == 2 {
++                f(w as u8 & 0x7F);
++            }
++        };
++        match w0 >> 28 {
++            0x1 if matches!(status, 0xF1..=0xF3 | 0xF6 | 0xF8 | 0xFA..=0xFC | 0xFE | 0xFF) => {
++                f(status);
++                if status < 0xF8 {
++                    last = 0;
++                    for i in 0..data_len(status) {
++                        f((w0 >> (8 - 8 * i)) as u8 & 0x7F);
++                    }
++                }
++            }
++            0x2 if (0x80..=0xEF).contains(&status) => channel(w0, &mut last, &mut f),
++            0x4 => {
++                if let Some(m) = midi2_to_midi1(words) {
++                    for &w in m.as_slice() {
++                        channel(w, &mut last, &mut f);
++                    }
++                }
++            }
++            0x3 if (w0 >> 20) & 0xF <= 3 && (w0 >> 16) & 0xF <= 6 => {
++                let sysex = (w0 >> 20) & 0xF;
++                let n = ((w0 >> 16) & 0xF) as usize;
++                if sysex == 0 || sysex == 1 {
++                    f(SOX);
++                    last = 0;
++                }
++                let w1 = words[1];
++                for i in 0..n {
++                    let b = if i < 2 { w0 >> (8 - 8 * i) } else { w1 >> (24 - 8 * (i - 2)) };
++                    f(b as u8 & 0x7F);
++                }
++                if sysex == 0 || sysex == 3 {
++                    f(EOX);
++                }
++            }
++            _ => {}
++        }
++        self.last_status = last;
++    }
++}
++
++#[cfg(test)]
++mod write_each_tests {
++    extern crate std;
++    use super::*;
++    use proptest::prelude::*;
++    use std::vec::Vec;
++
++    #[test]
++    fn prop_write_each_equals_write() {
++        proptest!(ProptestConfig::with_cases(30_000), |(
++            mt in prop_oneof![Just(1u32), Just(2), Just(3), Just(4), 0u32..16],
++            w0 in any::<u32>(), w1 in any::<u32>(), rs in any::<bool>(), prev in 0u32..16,
++        )| {
++            let words = [mt << 28 | (w0 & 0x0FFF_FFFF), w1, 0, 0];
++            let (mut a, mut b) = (UmpToBytes::new(rs), UmpToBytes::new(rs));
++            let first = [0x2090_3C40 | prev << 16];
++            let mut t = [0u8; 16];
++            a.write(&first, &mut t).unwrap();
++            b.write_each(&first, |_| {});
++            let mut oa = [0u8; 16];
++            let n = a.write(&words, &mut oa).unwrap();
++            let mut ob = Vec::new();
++            b.write_each(&words, |x| ob.push(x));
++            prop_assert_eq!(&oa[..n], ob.as_slice());
++            prop_assert_eq!(a, b);
++        });
++    }
++}
+diff --git a/tools/size-probe/Cargo.toml b/tools/size-probe/Cargo.toml
+index 7de7421..34810e6 100644
+--- a/tools/size-probe/Cargo.toml
++++ b/tools/size-probe/Cargo.toml
+@@ -74,6 +74,8 @@ bytes_out = ["io"]
+ rx_assign = ["ump_full"]
+ down_words = ["ump_full"]
+ bytes_core = ["io"]
++bytes_feed = ["io"]
++bytes_out_each = ["io"]
+ 
+ [profile.release]
+ opt-level = "s"
+diff --git a/tools/size-probe/src/main.rs b/tools/size-probe/src/main.rs
+index 5969d17..eac8e7d 100644
+--- a/tools/size-probe/src/main.rs
++++ b/tools/size-probe/src/main.rs
+@@ -75,7 +75,7 @@ fn main() -> ! {
+         remote::run(&w);
+         #[cfg(feature = "inject")]
+         inject::run(&w);
+-        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core"))]
++        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each"))]
+         lean::run(&w);
+         black_box(&w);
+     }
+@@ -752,7 +752,7 @@ mod inject {
+ }
+ 
+ // ---------------------------------------------------------------- lean variants
+-#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core"))]
++#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each"))]
+ mod lean {
+     use super::*;
+     #[allow(unused_imports)]
+@@ -819,6 +819,25 @@ mod lean {
+         if let Some(m) = zmidi_ump::midi2_to_midi1(&w[8..]) {
+             black_box(m.as_slice());
+         }
++        #[cfg(feature = "bytes_out_each")]
++        {
++            static mut OUT: zmidi_io::UmpToBytes = zmidi_io::UmpToBytes::new(true);
++            let out = unsafe { &mut *(&raw mut OUT) };
++            out.write_each(&w[16..20], |b| {
++                black_box(b);
++            });
++        }
++        #[cfg(feature = "bytes_feed")]
++        {
++            static mut IN: zmidi_io::BytesToUmpCore =
++                zmidi_io::BytesToUmpCore::new(zmidi_ump::Group::from_bits(0));
++            let inp = unsafe { &mut *(&raw mut IN) };
++            for &b in input_bytes() {
++                inp.feed(b, |w| {
++                    black_box(w[0] ^ w.get(1).copied().unwrap_or(0));
++                });
++            }
++        }
+         #[cfg(feature = "bytes_core")]
+         {
+             static mut IN: zmidi_io::BytesToUmpCore =

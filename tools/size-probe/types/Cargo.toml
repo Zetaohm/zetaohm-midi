@@ -1,0 +1,18 @@
+# RAM of the MIDI-CI types on Cortex-M (OPT-049, step 0): sh tools/size-probe/types.sh
+[package]
+name = "size-types"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[features]
+full = ["zmidi-ci/full"]
+
+[dependencies]
+zmidi-ci = { path = "../../../crates/zmidi-ci", default-features = false }
+zmidi-ump = { path = "../../../crates/zmidi-ump", default-features = false }
+
+[workspace]

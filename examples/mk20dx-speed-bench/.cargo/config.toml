@@ -1,0 +1,11 @@
+[build]
+target = "thumbv7em-none-eabi"
+
+[target.thumbv7em-none-eabi]
+# probe-rs with the Kinetis fixes, as examples/mk20dx-usb-midi. Set PROBE_SELECTOR when more than
+# one probe is attached.
+runner = "sh ./run.sh"
+rustflags = ["-C", "link-arg=-Tlink.x", "-C", "link-arg=-Tdefmt.x"]
+
+[env]
+DEFMT_LOG = "info"

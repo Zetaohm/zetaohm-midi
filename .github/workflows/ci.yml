@@ -1,0 +1,109 @@
+# CI of the public repository. The compile gates (scripts/compile-gates.sh in the root and in each
+# binding package) are generated files: do not edit them by hand. The other steps are the checks
+# that the scripts in scripts/ run.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # The bare-metal gate of each crate, and the MK20DX example (no FPU).
+          targets: thumbv7em-none-eabihf, thumbv7em-none-eabi
+          components: clippy, llvm-tools
+      - name: compile gates (the library crates)
+        run: sh scripts/compile-gates.sh
+      # The USB and BLE adapter crates.
+      - name: adapter crates
+        run: sh scripts/adapters-check.sh
+      # The C ABI: the header is current, the CMake package and the C tests, the bare-metal link.
+      - name: C ABI tools
+        run: |
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi
+          cargo install --locked cbindgen
+      - name: C ABI
+        run: sh scripts/ffi-check.sh
+      # The Python package (uv and maturin; stubtest, pytest, pyright, ruff).
+      - uses: astral-sh/setup-uv@v6
+      - name: Python package
+        run: cd bindings/python && sh scripts/compile-gates.sh
+      # The TypeScript package over the WASM build of the C ABI.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: bindings/ts/package.json
+      - name: TypeScript package
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cd bindings/ts && sh scripts/compile-gates.sh
+      # The Dart package over dart:ffi (its build hook runs cargo for the cdylib of zmidi-ffi), and on
+      # the web over the TypeScript build of the step above (Chrome, dart2js and dart2wasm).
+      - uses: dart-lang/setup-dart@v1
+      - name: Dart package
+        run: cd bindings/dart && sh scripts/compile-gates.sh
+      - name: example firmware
+        run: sh scripts/examples-check.sh
+      # Budgets: stack depth of the main entry points, flash and RAM of each job (docs/sizes.md), and
+      # the instruction count of each hot path in QEMU (docs/speeds.md).
+      - name: stack check
+        run: python3 scripts/stack-check.py
+      - name: size check
+        run: python3 scripts/size-check.py
+      - name: speed check tools
+        run: sudo apt-get install -y --no-install-recommends qemu-system-arm libglib2.0-dev pkg-config
+      - name: speed check
+        run: python3 scripts/speed-check.py
+
+  # Every crate builds and passes its tests for each Cargo feature alone and each pair, in 4 parallel
+  # jobs (scripts/feature-matrix.sh).
+  feature-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: thumbv7em-none-eabihf
+          components: clippy
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack,cargo-nextest
+      - name: feature matrix part ${{ matrix.part }} of 4
+        env:
+          PARTITION: ${{ matrix.part }}/4
+        run: sh scripts/feature-matrix.sh
+
+  # The ESP32-S3 examples need the Espressif Xtensa toolchain; esp-hal 1.2 and esp-radio of the
+  # BLE-MIDI example need rustc 1.95.
+  esp32s3-examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: false
+          buildtargets: esp32s3
+          ldproxy: false
+          version: "1.95.0.0"
+      - name: ESP32-S3 Network MIDI 2.0 example
+        working-directory: examples/esp32s3-net-echo
+        run: cargo build --release && cargo clippy --release -- -D warnings
+      - name: ESP32-S3 USB MIDI example
+        working-directory: examples/esp32s3-usb-midi
+        run: cargo build --release && cargo clippy --release -- -D warnings
+      - name: ESP32-S3 BLE-MIDI example
+        working-directory: examples/esp32s3-ble-midi
+        run: cargo build --release && cargo clippy --release -- -D warnings

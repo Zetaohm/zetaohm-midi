@@ -1,0 +1,36 @@
+[package]
+name = "zmidi-ble-trouble"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "trouble-host 0.7 adapter for the zmidi-ble BLE-MIDI codec: GATT service and connection loop, async, no_std, no alloc"
+license = "MIT"
+
+[lib]
+name = "zmidi_ble_trouble"
+path = "src/lib.rs"
+
+[dependencies]
+# DEC-016: the adapter connects zmidi-ble to trouble-host and adds no protocol logic.
+zmidi-ble = { path = "../zmidi-ble", version = "0.1.0-alpha.1", default-features = false }
+# trouble-host 0.7 is on bt-hci 0.9, as esp-radio 1.0.0-beta.1 (user decision of 2026-10-22).
+# Peripheral role and the GATT server only; the firmware selects the packet pool and the queue sizes.
+trouble-host = { version = "0.7.0", default-features = false, features = ["peripheral", "gatt"] }
+bt-hci = { version = "0.9.0", default-features = false }
+embassy-time = { version = "0.5.1", default-features = false }
+embassy-sync = { version = "0.8.0", default-features = false }
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-002: no alloc.
+default = []
+
+[dev-dependencies]
+# The host tests use the attribute table only; these give the embassy-time driver and the
+# critical section that the trouble-host code needs to link on the host.
+embassy-time = { version = "0.5.1", features = ["std", "generic-queue-8"] }
+critical-section = { version = "1", features = ["std"] }
+# tests/example_ble.rs type-checks the BLE part of examples/esp32s3-ble-midi, with the default
+# packet pool of the example.
+trouble-host = { version = "0.7.0", default-features = false, features = ["peripheral", "gatt", "default-packet-pool"] }
+embassy-futures = { version = "0.1.2", default-features = false }
+heapless = { version = "0.9", default-features = false }

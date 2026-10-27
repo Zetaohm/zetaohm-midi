@@ -1,0 +1,33 @@
+[package]
+name = "zmidi-ci"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "MIDI Capability Inquiry (MIDI-CI, M2-101-UM) for MIDI 2.0, no_std and sans-IO"
+license = "MIT"
+
+[lib]
+name = "zmidi_ci"
+path = "src/lib.rs"
+
+[dependencies]
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false, features = ["full"] }
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-002: the core API needs no alloc. DEC-017: all categories on by default. A category that is
+# off is not in the Discovery category bits, and its messages get a NAK (M2-101 5.11,
+# AMB-M2-101-26).
+default = ["full"]
+full = ["profiles", "property-exchange", "process-inquiry", "initiator"]
+# The Initiator role (DEC-CI-001): Discovery, the inquiries and requests, the replies they get and the
+# Discovery window. Off: a responder-only Device that ignores such a reply (no event, no NAK).
+initiator = []
+# Profile Configuration (M2-101 7, M2-102).
+profiles = []
+# Property Exchange message framing (M2-101 8; the PE engine is zmidi-ci-pe).
+property-exchange = []
+# Process Inquiry (M2-101 9).
+process-inquiry = []
+
+[dev-dependencies]
+proptest = "1"

@@ -1,0 +1,25 @@
+[package]
+name = "zmidi-usb-embassy"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "embassy-usb 0.6 adapter for the zmidi-usb USB-MIDI 2.0 and 1.0 codecs, async, no_std, no alloc"
+license = "MIT"
+
+[lib]
+name = "zmidi_usb_embassy"
+path = "src/lib.rs"
+
+[dependencies]
+# DEC-014, DEC-015: the adapter connects zmidi-usb to embassy-usb and adds no protocol logic.
+zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1", default-features = false }
+embassy-usb = { version = "0.6.0", default-features = false }
+embassy-sync = { version = "0.8.0", default-features = false }
+embassy-futures = { version = "0.1.2", default-features = false }
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-002: no alloc. DEC-017: all features on by default.
+default = ["alt0"]
+# The USB-MIDI 1.0 data path of Alternate Setting 0 (zmidi-usb `alt0`). Off: Alternate Setting 0 has no Jack and no
+# endpoint (DEC-014 addendum of 2026-10-23).
+alt0 = ["zmidi-usb/alt0"]

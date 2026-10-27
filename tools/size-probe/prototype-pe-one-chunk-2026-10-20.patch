@@ -1,0 +1,593 @@
+diff --git a/crates/zmidi-ci-pe/Cargo.toml b/crates/zmidi-ci-pe/Cargo.toml
+index 61f9827..2c42055 100644
+--- a/crates/zmidi-ci-pe/Cargo.toml
++++ b/crates/zmidi-ci-pe/Cargo.toml
+@@ -18,6 +18,7 @@ thiserror = { version = "2", default-features = false }
+ default = []
+ # "zlib+Mcoded7" (DEC-PE-004: own inflater, no dependency).
+ zlib = []
++proto_full_header = []
+ 
+ [dev-dependencies]
+ proptest = "1"
+diff --git a/crates/zmidi-ci-pe/proptest-regressions/json.txt b/crates/zmidi-ci-pe/proptest-regressions/json.txt
+new file mode 100644
+index 0000000..b8404d4
+--- /dev/null
++++ b/crates/zmidi-ci-pe/proptest-regressions/json.txt
+@@ -0,0 +1,9 @@
++# Seeds for failure cases proptest has generated in the past. It is
++# automatically read and these particular cases re-run before any
++# novel cases are generated.
++#
++# It is recommended to check this file in to source control so that
++# everyone who runs the test benefits from these saved cases.
++cc 81ce78816d0bc5f542b7f8868ac1cfaa06d039b54a6c3f279eef8839e284378f # shrinks to h = [123, 34, 114, 101, 115, 111, 117, 114, 99, 101, 34, 58, 123, 34, 97, 34, 58, 91, 49, 44, 50, 44, 123, 34, 98, 34, 58, 34, 99, 92, 34, 100, 34, 125, 93, 125, 44, 32, 34, 114, 101, 115, 111, 117, 114, 99, 101, 34, 32, 58, 32, 123, 34, 97, 34, 58, 91, 49, 44, 50, 44, 123, 34, 98, 34, 58, 34, 99, 92, 34, 100, 34, 125, 93, 125, 32, 44, 32, 34, 99, 111, 109, 109, 97, 110, 100, 34, 32, 58, 32, 49, 50, 32, 44, 34, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 97, 34, 58, 34, 88, 45, 83, 116, 97, 116, 101, 34, 44, 34, 114, 101, 115, 73, 100, 34, 58, 49, 50, 125], cut = 135, b = 128, mode = 1
++cc 3eba3fcfd9477447eae396ad0b72ebe96afbb32acd81dd6e53fc6dd940e73453 # shrinks to h = [123, 32, 34, 120, 34, 32, 58, 32, 34, 99, 97, 102, 195, 169, 34, 32, 44, 32, 34, 111, 102, 102, 115, 101, 116, 34, 32, 58, 32, 34, 88, 45, 83, 116, 97, 116, 101, 34, 32, 125], cut = 190, b = 0, mode = 2
++cc 106760052fd31a87ab1f4b553e40018540de60caa57ce3aacfb4227e80e8fe62 # shrinks to h = [123, 34, 109, 117, 116, 117, 97, 108, 69, 110, 99, 111, 100, 105, 110, 103, 34, 58, 34, 88, 45, 83, 116, 97, 116, 101, 34, 44, 10, 9, 34, 99, 111, 109, 109, 97, 110, 100, 34, 10, 9, 58, 10, 9, 45, 48, 46, 53, 101, 51, 10, 9, 125], cut = 178, b = 0, mode = 2
+diff --git a/crates/zmidi-ci-pe/src/header.rs b/crates/zmidi-ci-pe/src/header.rs
+index e08318d..b64eb94 100644
+--- a/crates/zmidi-ci-pe/src/header.rs
++++ b/crates/zmidi-ci-pe/src/header.rs
+@@ -482,9 +482,22 @@ impl<'a> Header<'a> {
+     /// Reads Header Data (REQ-PE-JSON-001, REQ-PE-HDR-002 to -004). Unknown Properties of
+     /// any type are skipped; the Properties can come in any order.
+     pub fn parse(kind: HeaderKind, bytes: &'a [u8]) -> Result<Self, HeaderError> {
++        Self::parse_with(kind, bytes, true)
++    }
++
++    /// PROTOTYPE: `slice` true uses the slice walker, false the streaming one.
++    pub fn parse_with(kind: HeaderKind, bytes: &'a [u8], slice: bool) -> Result<Self, HeaderError> {
+         let mut h = Header::default();
+         let (mut have_offset, mut have_limit) = (false, false);
+-        crate::json::for_each_member(bytes, |name, raw| match name.and_then(known) {
++        if !slice {
++            crate::json::for_each_member(bytes, |name, raw| match name.and_then(known) {
++                Some(name) => h.set(name, classify(raw), &mut have_offset, &mut have_limit),
++                None => Ok(()),
++            })?;
++            h.check(kind, have_offset, have_limit)?;
++            return Ok(h);
++        }
++        crate::json::for_each_member_slice(bytes, |name, raw| match name.and_then(known_bytes) {
+             Some(name) => h.set(name, classify(raw), &mut have_offset, &mut have_limit),
+             None => Ok(()),
+         })?;
+@@ -784,8 +797,15 @@ impl<'a> Header<'a> {
+ }
+ 
+ /// The Header Property names that the parser knows.
++fn known_bytes(name: &[u8]) -> Option<&'static str> {
++    KNOWN_NAMES.into_iter().find(|k| k.as_bytes() == name)
++}
++
+ fn known(name: &str) -> Option<&'static str> {
+-    const KNOWN: [&str; 16] = [
++    KNOWN_NAMES.into_iter().find(|k| *k == name)
++}
++
++const KNOWN_NAMES: [&str; 16] = [
+         "resource",
+         "resId",
+         "mutualEncoding",
+@@ -803,8 +823,6 @@ fn known(name: &str) -> Option<&'static str> {
+         "cacheTime",
+         "totalCount",
+     ];
+-    KNOWN.into_iter().find(|k| *k == name)
+-}
+ 
+ #[cfg(test)]
+ mod tests {
+diff --git a/crates/zmidi-ci-pe/src/json.rs b/crates/zmidi-ci-pe/src/json.rs
+index 33df706..7acba8b 100644
+--- a/crates/zmidi-ci-pe/src/json.rs
++++ b/crates/zmidi-ci-pe/src/json.rs
+@@ -1422,3 +1422,304 @@ mod tests {
+         });
+     }
+ }
++
++// ---- PROTOTYPE (size experiment): a slice-based member walker for a complete JSON object.
++/// [`for_each_member`] for bytes that hold the whole object: the same calls of `f` and the same
++/// errors, with no streaming reader. Names are decoded into 24 bytes; a longer name, or one with
++/// a character that is not ASCII, is given as `None`.
++pub(crate) fn for_each_member_slice<'a, E: From<JsonError>>(
++    bytes: &'a [u8],
++    mut f: impl FnMut(Option<&[u8]>, &'a [u8]) -> Result<(), E>,
++) -> Result<(), E> {
++    let mut s = Scan { b: bytes, i: 0 };
++    s.ws();
++    if s.next() != Some(b'{') {
++        return Err(JsonError::Syntax.into());
++    }
++    s.ws();
++    if s.peek() == Some(b'}') {
++        s.i += 1;
++    } else {
++        loop {
++            let mut name = [0u8; 24];
++            let n = s.name(&mut name)?;
++            s.ws();
++            if s.next() != Some(b':') {
++                return Err(JsonError::Syntax.into());
++            }
++            s.ws();
++            let start = s.i;
++            s.value(1)?;
++            let raw = &bytes[start..s.i];
++            f(n.map(|n| &name[..n]), raw)?;
++            s.ws();
++            match s.next() {
++                Some(b',') => s.ws(),
++                Some(b'}') => break,
++                _ => return Err(JsonError::Syntax.into()),
++            }
++        }
++    }
++    s.ws();
++    if s.i != bytes.len() {
++        return Err(JsonError::Syntax.into());
++    }
++    Ok(())
++}
++
++pub(crate) struct Scan<'a> {
++    b: &'a [u8],
++    i: usize,
++}
++
++impl Scan<'_> {
++    fn peek(&self) -> Option<u8> {
++        self.b.get(self.i).copied()
++    }
++    fn next(&mut self) -> Option<u8> {
++        let c = self.peek()?;
++        self.i += 1;
++        Some(c)
++    }
++    fn ws(&mut self) {
++        while matches!(self.peek(), Some(b' ' | b'\t' | b'\n' | b'\r')) {
++            self.i += 1;
++        }
++    }
++    fn hex4(&mut self) -> Result<u16, JsonError> {
++        let mut v = 0u16;
++        for _ in 0..4 {
++            let d = match self.next() {
++                Some(c @ b'0'..=b'9') => c - b'0',
++                Some(c @ b'a'..=b'f') => c - b'a' + 10,
++                Some(c @ b'A'..=b'F') => c - b'A' + 10,
++                _ => return Err(JsonError::Syntax),
++            };
++            v = v << 4 | u16::from(d);
++        }
++        Ok(v)
++    }
++    /// A string; each decoded ASCII byte goes to `put` (None for a character that is not ASCII).
++    fn string(&mut self, mut put: impl FnMut(Option<u8>)) -> Result<(), JsonError> {
++        if self.next() != Some(b'"') {
++            return Err(JsonError::Syntax);
++        }
++        loop {
++            match self.next().ok_or(JsonError::Syntax)? {
++                b'"' => return Ok(()),
++                b'\\' => {
++                    let c = match self.next().ok_or(JsonError::Syntax)? {
++                        b'"' => b'"',
++                        b'\\' => b'\\',
++                        b'/' => b'/',
++                        b'b' => 8,
++                        b'f' => 12,
++                        b'n' => b'\n',
++                        b'r' => b'\r',
++                        b't' => b'\t',
++                        b'u' => {
++                            let v = self.hex4()?;
++                            put(u8::try_from(v).ok().filter(u8::is_ascii));
++                            continue;
++                        }
++                        _ => return Err(JsonError::Syntax),
++                    };
++                    put(Some(c));
++                }
++                c if c < 0x20 => return Err(JsonError::Syntax),
++                c => put(Some(c).filter(u8::is_ascii)),
++            }
++        }
++    }
++    /// Decodes the string at the start of `raw` (a token that the walker checked) into `out`;
++    /// None when it is longer than `out` or has a character that is not ASCII.
++    pub(crate) fn decode_into(raw: &[u8], out: &mut [u8]) -> Option<usize> {
++        let mut s = Scan { b: raw, i: 0 };
++        let (mut n, mut ok) = (0usize, true);
++        s.string(|c| match (c, out.get_mut(n)) {
++            (Some(c), Some(slot)) => {
++                *slot = c;
++                n += 1;
++            }
++            _ => ok = false,
++        })
++        .ok()?;
++        ok.then_some(n)
++    }
++
++    fn name(&mut self, out: &mut [u8; 24]) -> Result<Option<usize>, JsonError> {
++        let mut n = 0usize;
++        let mut ok = true;
++        self.string(|c| match c {
++            Some(c) if n < 24 => {
++                out[n] = c;
++                n += 1;
++            }
++            _ => ok = false,
++        })?;
++        Ok(ok.then_some(n))
++    }
++    fn digits(&mut self) -> usize {
++        let s = self.i;
++        while matches!(self.peek(), Some(b'0'..=b'9')) {
++            self.i += 1;
++        }
++        self.i - s
++    }
++    fn value(&mut self, depth: u8) -> Result<(), JsonError> {
++        match self.peek().ok_or(JsonError::Syntax)? {
++            b'"' => self.string(|_| {}),
++            b'{' | b'[' => {
++                if depth >= MAX_DEPTH {
++                    return Err(JsonError::Depth);
++                }
++                let close = if self.next() == Some(b'{') { b'}' } else { b']' };
++                self.ws();
++                if self.peek() == Some(close) {
++                    self.i += 1;
++                    return Ok(());
++                }
++                loop {
++                    if close == b'}' {
++                        self.string(|_| {})?;
++                        self.ws();
++                        if self.next() != Some(b':') {
++                            return Err(JsonError::Syntax);
++                        }
++                        self.ws();
++                    }
++                    self.value(depth + 1)?;
++                    self.ws();
++                    match self.next() {
++                        Some(b',') => self.ws(),
++                        Some(c) if c == close => return Ok(()),
++                        _ => return Err(JsonError::Syntax),
++                    }
++                }
++            }
++            b't' | b'f' | b'n' => {
++                for lit in [&b"true"[..], b"false", b"null"] {
++                    if self.b[self.i..].starts_with(lit) {
++                        self.i += lit.len();
++                        return Ok(());
++                    }
++                }
++                Err(JsonError::Syntax)
++            }
++            _ => {
++                // Number: -? (0 | [1-9][0-9]*) (. [0-9]+)? ([eE] [+-]? [0-9]+)?
++                if self.peek() == Some(b'-') {
++                    self.i += 1;
++                }
++                match self.peek() {
++                    Some(b'0') => self.i += 1,
++                    Some(b'1'..=b'9') => {
++                        self.digits();
++                    }
++                    _ => return Err(JsonError::Syntax),
++                }
++                if self.peek() == Some(b'.') {
++                    self.i += 1;
++                    if self.digits() == 0 {
++                        return Err(JsonError::Syntax);
++                    }
++                }
++                if matches!(self.peek(), Some(b'e' | b'E')) {
++                    self.i += 1;
++                    if matches!(self.peek(), Some(b'+' | b'-')) {
++                        self.i += 1;
++                    }
++                    if self.digits() == 0 {
++                        return Err(JsonError::Syntax);
++                    }
++                }
++                Ok(())
++            }
++        }
++    }
++}
++
++#[cfg(test)]
++mod proto_slice_tests {
++    extern crate std;
++    use super::*;
++    use proptest::prelude::*;
++    use std::string::ToString;
++    use std::vec;
++    use std::vec::Vec;
++
++    fn members(bytes: &[u8], slice: bool) -> Result<Vec<(Option<std::string::String>, Vec<u8>)>, JsonError> {
++        let mut v = Vec::new();
++        if slice {
++            for_each_member_slice(bytes, |n: Option<&[u8]>, raw: &[u8]| -> Result<(), JsonError> {
++                v.push((n.map(|n| std::string::String::from_utf8(n.to_vec()).unwrap()), raw.to_vec()));
++                Ok(())
++            })?;
++        } else {
++            for_each_member(bytes, |n: Option<&str>, raw: &[u8]| -> Result<(), JsonError> {
++                v.push((n.map(std::string::String::from), raw.to_vec()));
++                Ok(())
++            })?;
++        }
++        Ok(v)
++    }
++
++    fn header() -> impl Strategy<Value = Vec<u8>> {
++        let key = prop_oneof![Just("resource"), Just("resId"), Just("offset"), Just("limit"), Just("status"),
++            Just("mutualEncoding"), Just("setPartial"), Just("command"), Just("x"), Just("res\\u0049d"), Just("aaaaaaaaaaaaaaaaaaaaaaaaaaa")];
++        let val = prop_oneof![Just("\"X-State\"".to_string()), Just("12".to_string()), Just("-0.5e3".to_string()),
++            Just("true".to_string()), Just("null".to_string()), Just("{\"a\":[1,2,{\"b\":\"c\\\"d\"}]}".to_string()),
++            Just("\"\\ud800x\"".to_string()), Just("\"caf\u{e9}\"".to_string()), Just("[]".to_string())];
++        proptest::collection::vec((key, val, prop_oneof![Just(""), Just(" "), Just("\n\t")]), 0..6).prop_map(|m| {
++            let body: Vec<std::string::String> = m.iter().map(|(k, v, w)| std::format!("{w}\"{k}\"{w}:{w}{v}{w}")).collect();
++            std::format!("{{{}}}", body.join(",")).into_bytes()
++        })
++    }
++
++    #[test]
++    fn prop_slice_walker_equals_streaming_walker() {
++        use crate::header::{Header, HeaderKind};
++        proptest!(ProptestConfig::with_cases(30_000), |(h in header(), cut in 0usize..200, b in 0u8..0x80, mode in 0u8..3)| {
++            let mut m = h.clone();
++            if !m.is_empty() {
++                let i = cut % m.len();
++                match mode { 0 => {}, 1 => m[i] = b, _ => { m.truncate(i); } }
++            }
++            // The same header, or two errors with the same reply status (415 or 400).
++            let status = |e: &crate::header::HeaderError| matches!(e, crate::header::HeaderError::Invalid("mutualEncoding" | "mediaType"));
++            for kind in [HeaderKind::Inquiry, HeaderKind::Reply, HeaderKind::Subscription] {
++                let (a, b) = (Header::parse_with(kind, &m, true), Header::parse_with(kind, &m, false));
++                use crate::header::HeaderError as HE;
++                match (&a, &b) {
++                    // Allowed: the new walker finds the JSON error before the old one gave a
++                    // property error for a value cut at the end (old defect).
++                    (Err(HE::Json(_)), Err(_)) => {}
++                    (Err(x), Err(y)) => prop_assert_eq!(status(x), status(y), "{:?} {:?} {:?}", x, y, std::string::String::from_utf8_lossy(&m)),
++                    _ => prop_assert_eq!(&a, &b, "{:?}", std::string::String::from_utf8_lossy(&m)),
++                }
++            }
++        });
++    }
++
++    #[test]
++    fn slice_walker_does_not_take_a_damaged_name() {
++        use crate::header::{Header, HeaderKind};
++        let h = b"{\"resource\xFF\":\"A\"}";
++        assert!(Header::parse_with(HeaderKind::Inquiry, h, false).is_ok(), "old: taken as resource");
++        assert!(Header::parse_with(HeaderKind::Inquiry, h, true).is_err(), "new: no resource");
++    }
++
++    #[test]
++    fn old_reader_names_with_invalid_bytes() {
++        for h in [&b"{\"res\xFFource\":\"A\"}"[..], b"{\"\xFFresource\":\"A\"}", b"{\"resource\xFF\":\"A\"}"] {
++            std::println!("{:?} -> {:?}", std::string::String::from_utf8_lossy(h), members(h, false));
++        }
++    }
++
++    #[test]
++    fn prop_slice_walker_equals_streaming_walker_on_any_bytes() {
++        proptest!(ProptestConfig::with_cases(30_000), |(m in proptest::collection::vec(0u8..0x80, 0..40))| {
++            prop_assert_eq!(members(&m, true), members(&m, false));
++        });
++    }
++}
+diff --git a/crates/zmidi-ci-pe/src/lib.rs b/crates/zmidi-ci-pe/src/lib.rs
+index 70088ed..c41be1b 100644
+--- a/crates/zmidi-ci-pe/src/lib.rs
++++ b/crates/zmidi-ci-pe/src/lib.rs
+@@ -16,6 +16,7 @@ pub mod json;
+ pub mod link;
+ pub mod property_data;
+ pub mod resource_list;
++pub mod simple;
+ pub mod subscription;
+ pub mod transaction;
+ #[cfg(feature = "zlib")]
+diff --git a/crates/zmidi-ci-pe/src/simple.rs b/crates/zmidi-ci-pe/src/simple.rs
+new file mode 100644
+index 0000000..bbaa174
+--- /dev/null
++++ b/crates/zmidi-ci-pe/src/simple.rs
+@@ -0,0 +1,125 @@
++//! PROTOTYPE (size experiment, not reviewed): a one-chunk Property Exchange Responder.
++//! Get and Set of Resources whose Header and Property Data fit in one Chunk; no transaction
++//! table, no subscriptions, no flow control, ASCII only. A request in more than one Chunk gets
++//! 413 (M2-103 7.4.1 Table 15).
++
++use zmidi_ci::{CiDevice, Event, Muid, PeKind};
++
++/// The Resources of the application.
++pub trait SimpleResources {
++    /// Writes the Property Data of `resource` into `out`; gives its length or a status.
++    fn get(&mut self, resource: &[u8], res_id: Option<&[u8]>, out: &mut [u8]) -> Result<usize, u16>;
++    /// Takes the Property Data of a Set; gives a status on refusal.
++    fn set(&mut self, resource: &[u8], res_id: Option<&[u8]>, data: &[u8]) -> Result<(), u16>;
++}
++
++/// "resource" and "resId" of a header, decoded (escapes included), each at most 36 bytes, with
++/// the JSON rules of the slice walker. A value that is not a string gives an error.
++#[cfg(not(feature = "proto_full_header"))]
++struct Ids {
++    resource: [u8; 36],
++    resource_len: Option<usize>,
++    res_id: [u8; 36],
++    res_id_len: Option<usize>,
++}
++
++#[cfg(not(feature = "proto_full_header"))]
++fn ids(header: &[u8]) -> Result<Ids, ()> {
++    let mut ids = Ids { resource: [0; 36], resource_len: None, res_id: [0; 36], res_id_len: None };
++    crate::json::for_each_member_slice::<crate::json::JsonError>(header, |name, raw| {
++        match name {
++            Some(b"resource") => ids.resource_len = crate::json::Scan::decode_into(raw, &mut ids.resource),
++            Some(b"resId") => ids.res_id_len = crate::json::Scan::decode_into(raw, &mut ids.res_id),
++            _ => {}
++        }
++        Ok(())
++    })
++    .map_err(|_| ())?;
++    Ok(ids)
++}
++
++fn status_header(status: u16, out: &mut [u8; 16]) -> usize {
++    let prefix = b"{\"status\":";
++    out[..prefix.len()].copy_from_slice(prefix);
++    let mut n = prefix.len();
++    let digits = [status / 100, status / 10 % 10, status % 10];
++    for d in digits {
++        out[n] = b'0' + d as u8;
++        n += 1;
++    }
++    out[n] = b'}';
++    n + 1
++}
++
++/// Handles one event; writes each reply message into `out` and gives it to `send`.
++pub fn respond<const P: usize, const PR: usize, const R: usize, H: SimpleResources>(
++    dev: &mut CiDevice<'_, P, PR, R>,
++    ev: &Event<'_>,
++    list: &[u8],
++    host: &mut H,
++    body: &mut [u8],
++    out: &mut [u8],
++    mut send: impl FnMut(&[u8]),
++) {
++    let Event::PeChunk { muid, kind, chunk } = *ev else { return };
++    let reply_kind = match kind {
++        PeKind::GetInquiry => PeKind::GetReply,
++        PeKind::SetInquiry => PeKind::SetReply,
++        _ => return,
++    };
++    let (status, n) = if chunk.total != 1 || chunk.number != 1 {
++        (413, 0)
++    } else {
++        #[cfg(not(feature = "proto_full_header"))]
++        let parsed = ids(chunk.header).ok();
++        #[cfg(not(feature = "proto_full_header"))]
++        let (resource, res_id) = match parsed.as_ref() {
++            Some(p) => (
++                p.resource_len.map(|n| &p.resource[..n]),
++                p.res_id_len.map(|n| &p.res_id[..n]),
++            ),
++            None => (None, None),
++        };
++        #[cfg(feature = "proto_full_header")]
++        let parsed = crate::header::Header::parse(crate::header::HeaderKind::Inquiry, chunk.header).ok();
++        #[cfg(feature = "proto_full_header")]
++        let (resource, res_id) = match parsed.as_ref().and_then(|h| h.resource) {
++            Some(crate::header::HeaderStr::Raw(r)) => (Some(r), parsed.as_ref().and_then(|h| match h.res_id { Some(crate::header::HeaderStr::Raw(x)) => Some(x), _ => None })),
++            _ => (None, None),
++        };
++        match (resource, kind) {
++            (None, _) => (400, 0),
++            (Some(b"ResourceList"), PeKind::GetInquiry) => {
++                let n = list.len().min(body.len());
++                body[..n].copy_from_slice(&list[..n]);
++                (200, n)
++            }
++            (Some(r), PeKind::GetInquiry) => match host.get(r, res_id, body) {
++                Ok(n) => (200, n),
++                Err(s) => (s, 0),
++            },
++            (Some(r), _) => match host.set(r, res_id, chunk.data) {
++                Ok(()) => (200, 0),
++                Err(s) => (s, 0),
++            },
++        }
++    };
++    let mut h = [0u8; 16];
++    let hn = status_header(status, &mut h);
++    let Ok(mut w) = dev.pe_reply(muid, reply_kind, chunk.request_id, &h[..hn], Some(n), None) else {
++        return;
++    };
++    let mut at = 0;
++    loop {
++        let room = w.data_room().min(n - at);
++        match w.write_next(&body[at..at + room], out) {
++            Ok(k) => send(&out[..k]),
++            Err(_) => break,
++        }
++        at += room;
++        if at >= n {
++            break;
++        }
++    }
++    let _: Muid = muid;
++}
+diff --git a/tools/size-probe/Cargo.toml b/tools/size-probe/Cargo.toml
+index a99b654..8143bf5 100644
+--- a/tools/size-probe/Cargo.toml
++++ b/tools/size-probe/Cargo.toml
+@@ -50,6 +50,8 @@ pe = ["ci", "dep:zmidi-ci-pe", "zmidi-ci/property-exchange"]
+ zlib = ["pe", "zmidi-ci-pe/zlib"]
+ # pe with no subscription table (S = 0).
+ pe_nosub = ["pe"]
++pe_simple = ["ci", "dep:zmidi-ci-pe", "zmidi-ci/property-exchange"]
++pe_simple_full = ["pe_simple", "zmidi-ci-pe/proto_full_header"]
+ sysex8 = ["ump_full"]
+ remote = ["ump_full"]
+ inject = ["ump_full"]
+diff --git a/tools/size-probe/src/main.rs b/tools/size-probe/src/main.rs
+index 6ad061d..b47d566 100644
+--- a/tools/size-probe/src/main.rs
++++ b/tools/size-probe/src/main.rs
+@@ -388,7 +388,7 @@ mod ci {
+             categories: Categories {
+                 protocol_negotiation: false,
+                 profile_configuration: false,
+-                property_exchange: cfg!(feature = "pe"),
++                property_exchange: cfg!(any(feature = "pe", feature = "pe_simple")),
+                 process_inquiry: false,
+             },
+             max_sysex_size: 512,
+@@ -422,7 +422,32 @@ mod ci {
+             if let Some(ev) = ev {
+                 pe::on_event(dev, &ev, now);
+             }
+-            #[cfg(not(feature = "pe"))]
++            #[cfg(feature = "pe_simple")]
++            if let Some(ev) = ev {
++                struct App;
++                impl zmidi_ci_pe::simple::SimpleResources for App {
++                    fn get(&mut self, r: &[u8], _id: Option<&[u8]>, out: &mut [u8]) -> Result<usize, u16> {
++                        if r != b"X-State" {
++                            return Err(404);
++                        }
++                        let n = (rand() as usize % 40).min(out.len());
++                        for b in out[..n].iter_mut() {
++                            *b = b'0' + (rand() % 10) as u8;
++                        }
++                        Ok(n)
++                    }
++                    fn set(&mut self, r: &[u8], _id: Option<&[u8]>, data: &[u8]) -> Result<(), u16> {
++                        black_box(data);
++                        if r == b"X-State" { Ok(()) } else { Err(404) }
++                    }
++                }
++                static LIST: &[u8] = br#"[{"resource":"DeviceInfo"},{"resource":"X-State","canSet":"full"}]"#;
++                static mut BODY: [u8; 256] = [0; 256];
++                let body = unsafe { &mut *(&raw mut BODY) };
++                let out = unsafe { &mut *(&raw mut TX) };
++                zmidi_ci_pe::simple::respond(dev, &ev, LIST, &mut App, body, out, send);
++            }
++            #[cfg(not(any(feature = "pe", feature = "pe_simple")))]
+             black_box(ev);
+         }
+         #[cfg(feature = "pe")]

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["maturin>=1.9,<2"]
+build-backend = "maturin"
+
+[project]
+name = "zetaohm-midi"
+version = "0.1.0a1"
+description = "MIDI 2.0 for Python: UMP, MIDI-CI, Network MIDI 2.0, BLE-MIDI, USB-MIDI and MIDI Clip Files (Rust, PyO3)"
+requires-python = ">=3.9"
+license = "MIT"
+classifiers = ["Programming Language :: Rust", "Programming Language :: Python :: 3", "Topic :: Multimedia :: Sound/Audio :: MIDI"]
+
+[dependency-groups]
+dev = ["pytest>=8", "mypy>=1.11", "pyright>=1.1.380", "ruff>=0.6"]
+
+[tool.maturin]
+# The Rust extension crate (DEC-019, specdev python-ffi: a second specdev project).
+manifest-path = "../../crates/zmidi-py/Cargo.toml"
+module-name = "zetaohm_midi._native"
+python-source = "src"
+features = ["pyo3/abi3-py39"]
+
+[tool.uv]
+# uv does not see a change in the Rust crate; reinstall the package on each sync (python-ffi guidance).
+reinstall-package = ["zetaohm-midi"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.9"
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100

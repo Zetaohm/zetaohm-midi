@@ -1,0 +1,6 @@
+/* QEMU mps2-an386 (AN386, Cortex-M4F): 4 MiB ZBT SSRAM at 0x0 for code, 4 MiB at 0x20000000 for data. */
+MEMORY
+{
+  FLASH : ORIGIN = 0x00000000, LENGTH = 4M
+  RAM : ORIGIN = 0x20000000, LENGTH = 4M
+}

@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5ad4b8ed0e13a4991098572d0611982249518d0a1d2222421bfef64aaa77d487 # shrinks to entries = [ProfileEntry { address: ProfileAddress { device_id: FunctionBlock, group: 2 }, profile: Standard { bank: 33, number: 0, version: 1, level: Highest }, enabled: false, channels: 1, max_channels: 1 }], q = FunctionBlock, g = 0, framing = Bare, room = 17
+cc a977fb89ba51692547af796523fde158e38b032a5f93e9dae5aabfd094d497ea # shrinks to entries = [ProfileEntry { address: ProfileAddress { device_id: Group, group: 3 }, profile: Standard { bank: 33, number: 0, version: 1, level: Highest }, enabled: true, channels: 1, max_channels: 1 }, ProfileEntry { address: ProfileAddress { device_id: Group, group: 3 }, profile: Standard { bank: 34, number: 1, version: 1, level: Highest }, enabled: true, channels: 1, max_channels: 1 }], q = FunctionBlock, g = 0, framing = Bare, room = 27

@@ -1,0 +1,13 @@
+[package]
+name = "net-echo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Network MIDI 2.0 (UDP) Host and Client on a std UDP socket, with zmidi-net"
+license = "MIT"
+
+# DEC-003: examples are outside the Cargo workspace.
+[workspace]
+
+[dependencies]
+zmidi-net = { path = "../../crates/zmidi-net" }

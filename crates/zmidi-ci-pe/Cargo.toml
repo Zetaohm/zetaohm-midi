@@ -1,0 +1,28 @@
+[package]
+name = "zmidi-ci-pe"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "MIDI-CI Property Exchange (M2-103-UM) for MIDI 2.0, no_std and no alloc"
+license = "MIT"
+
+[lib]
+name = "zmidi_ci_pe"
+path = "src/lib.rs"
+
+[dependencies]
+zmidi-ci = { path = "../zmidi-ci", version = "0.1.0-alpha.1", default-features = false, features = ["property-exchange"] }
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-002, DEC-007: the core API needs no alloc.
+default = ["initiator"]
+# The Initiator side of the PE engine needs the Initiator role of zmidi-ci (DEC-CI-001); the one-chunk
+# Responder (DEC-PE-005) does not.
+initiator = ["zmidi-ci/initiator"]
+# "zlib+Mcoded7" (DEC-PE-004: own inflater, no dependency).
+zlib = []
+
+[dev-dependencies]
+proptest = "1"
+# Reference compressor and decoder for the zlib tests only (DEC-PE-004).
+miniz_oxide = { version = "0.9", features = ["with-alloc"] }

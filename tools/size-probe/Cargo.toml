@@ -1,0 +1,120 @@
+[package]
+name = "size-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Flash and RAM cost of each FLXS1 MIDI 2.0 feature, FLXS1 release profile"
+
+# Outside the Cargo workspace, like examples/ (DEC-003). No device crate: memory.x is the
+# MK20DX256 (FLXS1) map, and src/bus.rs is a stub usb-device bus, so CI can build the probe.
+
+[workspace]
+
+[dependencies]
+cortex-m = { version = "0.7", features = ["critical-section-single-core"] }
+cortex-m-rt = "0.7"
+usb-device = "0.3"
+usbd-midi = { version = "0.5", default-features = false, optional = true }
+zmidi-ump = { path = "../../crates/zmidi-ump", default-features = false }
+zmidi-io = { path = "../../crates/zmidi-io", default-features = false, optional = true }
+zmidi-ci = { path = "../../crates/zmidi-ci", default-features = false, optional = true }
+zmidi-ci-pe = { path = "../../crates/zmidi-ci-pe", default-features = false, optional = true }
+zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false, optional = true }
+zmidi-usb-device = { path = "../../crates/zmidi-usb-device", default-features = false, optional = true }
+zmidi-usb-embassy = { path = "../../crates/zmidi-usb-embassy", default-features = false, optional = true }
+zmidi-ble = { path = "../../crates/zmidi-ble", default-features = false, optional = true }
+zmidi-net = { path = "../../crates/zmidi-net", default-features = false, optional = true }
+zmidi-file = { path = "../../crates/zmidi-file", default-features = false, optional = true }
+embassy-usb = { version = "0.6.0", default-features = false, optional = true }
+embassy-sync = { version = "0.8.0", default-features = false, optional = true }
+
+[build-dependencies]
+# The fixed USB function of the job usb2_fixed is made here, as a firmware makes it (DEC-USB-002).
+zmidi-usb = { path = "../../crates/zmidi-usb" }
+zmidi-usb-embassy = { path = "../../crates/zmidi-usb-embassy" }
+
+[features]
+# Each job pulls in only the crates it uses (optional dependencies), so the zmidi-ump families of a
+# job are the ones it asks for. `ump_full` = every family (DEC-017).
+ump_full = ["zmidi-ump/full"]
+io = ["dep:zmidi-io"]
+usb1 = ["dep:usbd-midi"]
+# usb2_any and emb2_any: the class code; usb2 and emb2 add Alternate Setting 0 (feature alt0, DEC-014 addendum).
+usb2_any = ["dep:zmidi-usb-device", "dep:zmidi-usb", "ump_full"]
+usb2 = ["usb2_any", "zmidi-usb-device/alt0"]
+# The usb-device core with no class: the class cost is usb1 or usb2 minus this.
+usb_core = []
+# The embassy-usb device with no class (stub driver, src/edriver.rs): an embassy class costs
+# emb2 or emb2_fixed minus this.
+emb_core = ["dep:embassy-usb", "dep:embassy-sync"]
+emb2_any = ["emb_core", "dep:zmidi-usb-embassy", "dep:zmidi-usb", "ump_full"]
+emb2 = ["emb2_any", "zmidi-usb-embassy/alt0"]
+# emb2 with the descriptors made when the probe is built (DEC-USB-002).
+emb2_fixed_any = ["emb2_any"]
+emb2_fixed = ["emb2", "emb2_fixed_any"]
+# emb2_fixed with no Alternate Setting 0 data path and an empty Alternate Setting 0 (feature alt0 off).
+emb2_lean = ["emb2_fixed_any"]
+# usb2 with the descriptors made when the probe is built (zmidi_usb::fixed, DEC-USB-002).
+usb2_fixed_any = ["usb2_any"]
+usb2_fixed = ["usb2", "usb2_fixed_any"]
+# usb2_fixed with no Alternate Setting 0 data path and an empty Alternate Setting 0 (feature alt0 off).
+usb2_lean = ["usb2_fixed_any"]
+rx_cv2 = ["ump_full"]
+# rx_cv2 with only the families it handles: MIDI 2.0 Channel Voice and System (the decode tier).
+rx_cv2_tier = ["zmidi-ump/channel-voice2", "zmidi-ump/system-common"]
+tx_cv2 = ["ump_full"]
+translate = ["ump_full"]
+bytes = ["io", "zmidi-io/midi2-protocol"]
+flex = ["ump_full"]
+stream = ["io", "ump_full"]
+ci = ["dep:zmidi-ci", "ump_full"]
+# ci_init: ci with the Initiator role of zmidi-ci (DEC-CI-001); ci alone is a responder-only Device.
+ci_init = ["ci", "zmidi-ci/initiator"]
+pe = ["ci", "dep:zmidi-ci-pe", "zmidi-ci/property-exchange", "zmidi-ci-pe/initiator"]
+zlib = ["pe", "zmidi-ci-pe/zlib"]
+# pe with no subscription table (S = 0).
+pe_nosub = ["pe"]
+# The one-chunk PE Responder (zmidi_ci_pe::one_chunk) in place of the engine.
+pe_one_chunk = ["ci", "dep:zmidi-ci-pe", "zmidi-ci/property-exchange"]
+# pe_one_chunk with respond_flat (the flat Header Data reader, DEC-PE-006).
+pe_one_chunk_flat = ["pe_one_chunk"]
+# ci_one_chunk with the categories that midi2 C99 CI answers (Profile Inquiry, Set Profile On/Off,
+# Process Inquiry), for the comparison of docs/c-comparison.md; no Profile is added, as in its probe.
+ci_c = ["pe_one_chunk", "zmidi-ci/profiles", "zmidi-ci/process-inquiry"]
+ci_c_flat = ["ci_c", "pe_one_chunk_flat"]
+sysex8 = ["ump_full"]
+remote = ["ump_full"]
+inject = ["ump_full"]
+sz = ["io", "ci", "zmidi-io/midi2-protocol"]
+rx_lean = ["ump_full"]
+down = ["ump_full"]
+up = ["ump_full"]
+bytes1 = ["io"]
+bytes_out = ["io"]
+rx_assign = ["ump_full"]
+down_words = ["ump_full"]
+bytes_core = ["io"]
+bytes_feed = ["io"]
+up_lean = ["ump_full"]
+# MIDI 1.0 to 2.0 Protocol, word API (Midi1ToMidi2Group::translate_words), one Group.
+up_words = ["ump_full"]
+bytes_out_each = ["io"]
+# zmidi-ble: BLE-MIDI packet reader (MIDI 2.0 Protocol output) and writer (ATT MTU 23).
+ble_rx = ["dep:zmidi-ble"]
+# ble_rx with the word form PacketReader::read_words (DEC-BLE-002).
+ble_rx_words = ["dep:zmidi-ble"]
+ble_tx = ["dep:zmidi-ble"]
+# zmidi-net: a Network MIDI 2.0 Client with one session, and a Host with one session (no auth).
+net_client = ["dep:zmidi-net"]
+net_host = ["dep:zmidi-net"]
+# zmidi-file: Standard MIDI File reader (all tracks), MIDI Clip File reader and writer.
+smf_read = ["dep:zmidi-file"]
+clip_read = ["dep:zmidi-file"]
+clip_write = ["dep:zmidi-file"]
+
+[profile.release]
+opt-level = "s"
+debug = 2
+lto = "fat"
+codegen-units = 1
+panic = "abort"

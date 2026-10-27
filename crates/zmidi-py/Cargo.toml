@@ -1,0 +1,29 @@
+[package]
+name = "zmidi-py"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "Python extension of zetaohm-midi (PyO3), built by maturin from bindings/python"
+license = "MIT"
+# DEC-019: a host-only crate (std); not in the workspace default-members, so a plain `cargo build`
+# or `cargo test` at the root does not need a Python interpreter.
+
+[lib]
+# The import name of the extension: zetaohm_midi._native (pyo3 guidance: the module name is the
+# library file name).
+name = "_native"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.30.1", features = ["abi3-py39"] }
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false, features = ["full"] }
+zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features = false, features = ["midi2-protocol"] }
+zmidi-ble = { path = "../zmidi-ble", version = "0.1.0-alpha.1", default-features = false }
+zmidi-file = { path = "../zmidi-file", version = "0.1.0-alpha.1", default-features = false }
+zmidi-ci = { path = "../zmidi-ci", version = "0.1.0-alpha.1", default-features = false, features = ["full"] }
+zmidi-ci-pe = { path = "../zmidi-ci-pe", version = "0.1.0-alpha.1", default-features = false }
+# The feature auth (SHA-256, DEC-013): the Host and the Client of the package have authentication.
+zmidi-net = { path = "../zmidi-net", version = "0.1.0-alpha.1", default-features = false, features = ["auth"] }
+zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1", default-features = false, features = ["alt0"] }
+# Clears the secret, the passwords and the random bytes of NetHost and NetClient (REQ-PY-NET-005).
+zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }

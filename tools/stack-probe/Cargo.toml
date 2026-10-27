@@ -1,0 +1,32 @@
+[package]
+name = "stack-probe"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Stack depth probe of the main entry points on a bare-metal target (OPT-003)"
+
+# Outside the Cargo workspace, like examples/ (DEC-003).
+[workspace]
+
+[lib]
+crate-type = ["staticlib"]
+path = "src/lib.rs"
+
+[dependencies]
+zmidi-ump = { path = "../../crates/zmidi-ump", default-features = false }
+zmidi-io = { path = "../../crates/zmidi-io", default-features = false, features = ["midi2-protocol"] }
+zmidi-ci = { path = "../../crates/zmidi-ci", default-features = false, features = ["property-exchange"] }
+zmidi-ci-pe = { path = "../../crates/zmidi-ci-pe", default-features = false }
+zmidi-net = { path = "../../crates/zmidi-net", default-features = false }
+zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false, features = ["alt0"] }
+
+[features]
+auth = ["zmidi-net/auth"]
+zlib = ["zmidi-ci-pe/zlib"]
+
+# The flxs1 settings of the RAM survey (docs/optimization-backlog.md).
+[profile.release]
+opt-level = "s"
+panic = "abort"
+lto = true
+codegen-units = 1

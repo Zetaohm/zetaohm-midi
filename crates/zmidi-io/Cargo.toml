@@ -1,0 +1,29 @@
+[package]
+name = "zmidi-io"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "MIDI 2.0 I/O and device communication"
+license = "MIT"
+
+[lib]
+name = "zmidi_io"
+path = "src/lib.rs"
+
+[dependencies]
+# The code calls the family parsers directly, not Ump::parse, so it needs no zmidi-ump family
+# feature (DEC-017).
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false }
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-002: the core API needs no alloc. DEC-017: all features on by default.
+default = ["full"]
+full = ["midi2-protocol"]
+# BytesToUmp::new with StreamProtocol::Midi2: MIDI 2.0 Protocol output through the translator
+# (M2-104 D.3). Off: BytesToUmp holds no translator (BytesToUmp::midi1 only).
+midi2-protocol = []
+
+[dev-dependencies]
+proptest = "1"
+# The tests decode UMPs with Ump::parse.
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", features = ["full"] }

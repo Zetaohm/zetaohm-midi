@@ -1,0 +1,47 @@
+[package]
+name = "esp32s3-ble-midi"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "BLE-MIDI echo peripheral for the ESP32-S3 with zmidi-ble through the zmidi-ble-trouble adapter"
+license = "MIT"
+# esp-hal 1.2 and esp-radio 1.0.0-beta.1 need rustc 1.95 (the Espressif `esp` toolchain).
+rust-version = "1.95"
+
+# DEC-003: examples are outside the Cargo workspace.
+[workspace]
+
+[dependencies]
+zmidi-ble = { path = "../../crates/zmidi-ble" }
+zmidi-ble-trouble = { path = "../../crates/zmidi-ble-trouble" }
+# trouble-host 0.7 and esp-radio 1.0.0-beta.1 are both on bt-hci 0.9 (user decision of
+# 2026-10-22). esp-radio is pinned: a later beta can change the API.
+esp-hal = { version = "~1.2.0", features = ["esp32s3", "unstable"] }
+esp-rtos = { version = "0.4.0", features = ["esp32s3", "embassy", "esp-alloc", "esp-radio"] }
+esp-radio = { version = "=1.0.0-beta.1", features = ["esp32s3", "ble", "esp-alloc", "unstable"] }
+esp-alloc = "0.11.0"
+esp-backtrace = { version = "0.20.0", features = ["esp32s3", "panic-handler", "println"] }
+esp-bootloader-esp-idf = { version = "0.6.0", features = ["esp32s3"] }
+esp-println = { version = "0.18.0", features = ["esp32s3"] }
+embassy-executor = "0.10.0"
+embassy-futures = "0.1.2"
+embassy-sync = "0.8.0"
+embassy-time = "0.5.1"
+bt-hci = "0.9.0"
+trouble-host = { version = "0.7.0", default-features = false, features = [
+  "peripheral",
+  "gatt",
+  "default-packet-pool-mtu-255",
+  "default-packet-pool-size-64",
+  "l2cap-rx-queue-size-64",
+] }
+heapless = "0.9"
+
+[profile.release]
+debug = 2
+lto = "fat"
+opt-level = "s"
+codegen-units = 1
+
+[profile.dev]
+opt-level = "s"

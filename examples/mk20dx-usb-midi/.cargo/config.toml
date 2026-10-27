@@ -1,0 +1,12 @@
+[build]
+target = "thumbv7em-none-eabi"
+
+[target.thumbv7em-none-eabi]
+# probe-rs with the Kinetis fixes (firmware/mk20dx/probe-rs, branch kinetis). The Kinetis needs
+# --connect-under-reset to survive the flash erase. Set PROBE_SELECTOR when more than one probe
+# is attached, for example: PROBE_SELECTOR=1366:0105:000600109129 cargo run --release
+runner = "sh ./run.sh"
+rustflags = ["-C", "link-arg=-Tlink.x", "-C", "link-arg=-Tdefmt.x"]
+
+[env]
+DEFMT_LOG = "info"

@@ -1,0 +1,34 @@
+[package]
+name = "esp32s3-net-echo"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Network MIDI 2.0 echo Host with DNS-SD on an ESP32-S3 (Wi-Fi), with zmidi-net"
+license = "MIT"
+
+# DEC-003: examples are outside the Cargo workspace.
+[workspace]
+
+[dependencies]
+zmidi-net = { path = "../../crates/zmidi-net", default-features = false }
+esp-hal = { version = "1.0.0", features = ["esp32s3", "unstable"] }
+esp-rtos = { version = "0.2.0", features = ["esp32s3", "embassy", "esp-alloc", "esp-radio"] }
+esp-radio = { version = "0.17.0", features = ["esp32s3", "esp-alloc", "unstable", "wifi"] }
+esp-alloc = "0.9.0"
+esp-backtrace = { version = "0.18.1", features = ["esp32s3", "panic-handler", "println"] }
+esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32s3"] }
+esp-println = { version = "0.16.1", features = ["esp32s3"] }
+embassy-executor = "0.9.1"
+embassy-time = "0.5.0"
+embassy-futures = "0.1.2"
+embassy-net = { version = "0.7.1", features = ["dhcpv4", "medium-ethernet", "proto-ipv4", "udp", "multicast"] }
+static_cell = "2.1.1"
+
+[profile.release]
+debug = 2
+lto = "fat"
+opt-level = "s"
+codegen-units = 1
+
+[profile.dev]
+opt-level = "s"

@@ -1,0 +1,6 @@
+target/
+.aider*
+.DS_Store
+
+# Python byte code of the scripts
+__pycache__/

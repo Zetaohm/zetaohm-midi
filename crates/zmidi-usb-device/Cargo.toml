@@ -1,0 +1,25 @@
+[package]
+name = "zmidi-usb-device"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "usb-device 0.3 adapter for the zmidi-usb USB-MIDI 2.0 and 1.0 codecs, no_std, no alloc"
+license = "MIT"
+
+[lib]
+name = "zmidi_usb_device"
+path = "src/lib.rs"
+
+[dependencies]
+# DEC-014, DEC-015: the adapter connects zmidi-usb to usb-device and adds no protocol logic.
+zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1", default-features = false }
+# control-buffer-256: the Configuration descriptor with Alternate Settings 0 and 1 is 141 bytes
+# (149 with the Interface Association Descriptor); the default control buffer is 128 bytes.
+usb-device = { version = "0.3.2", default-features = false, features = ["control-buffer-256"] }
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-002: no alloc. DEC-017: all features on by default.
+default = ["alt0"]
+# The USB-MIDI 1.0 data path of Alternate Setting 0 (zmidi-usb `alt0`). Off: Alternate Setting 0 has no Jack and no
+# endpoint (DEC-014 addendum of 2026-10-23).
+alt0 = ["zmidi-usb/alt0"]

@@ -1,0 +1,13 @@
+# Our MIDI-CI Initiator against the midi2 C99 responder on the host (OPT-049, step 10).
+# usage: sh tools/lib-compare/interop/run.sh
+[package]
+name = "ci-interop"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+zmidi-ci = { path = "../../../../crates/zmidi-ci" }
+zmidi-ump = { path = "../../../../crates/zmidi-ump" }
+
+[workspace]

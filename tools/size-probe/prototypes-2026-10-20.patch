@@ -1,0 +1,1011 @@
+diff --git a/crates/zmidi-ci-pe/src/header.rs b/crates/zmidi-ci-pe/src/header.rs
+index 61f6693..dd4cfa8 100644
+--- a/crates/zmidi-ci-pe/src/header.rs
++++ b/crates/zmidi-ci-pe/src/header.rs
+@@ -494,11 +494,12 @@ impl<'a> Header<'a> {
+ 
+     fn set(
+         &mut self,
+-        name: &'static str,
++        id: usize,
+         v: Raw<'a>,
+         off: &mut bool,
+         lim: &mut bool,
+     ) -> Result<(), HeaderError> {
++        let name = KNOWN.get(id).copied().unwrap_or("");
+         let s = |v: Raw<'a>| match v {
+             Raw::Str(s) => Ok(HeaderStr::Raw(s)),
+             _ => Err(HeaderError::WrongType(name)),
+@@ -512,38 +513,38 @@ impl<'a> Header<'a> {
+             _ => Err(HeaderError::WrongType(name)),
+         };
+         let u32_of = |t: &str| crate::json::number_u32(t).map_err(|_| HeaderError::Invalid(name));
+-        match name {
+-            "resource" => {
++        match id {
++            0 => {
+                 let v = s(v)?;
+                 if !(1..=MAX_RESOURCE).contains(&v.char_count()) {
+                     return Err(HeaderError::Invalid(name));
+                 }
+                 self.resource = Some(v);
+             }
+-            "resId" => {
++            1 => {
+                 let v = s(v)?;
+                 if v.char_count() > MAX_RESOURCE {
+                     return Err(HeaderError::Invalid(name));
+                 }
+                 self.res_id = Some(v);
+             }
+-            "mutualEncoding" => {
++            2 => {
+                 let v = s(v)?;
+                 self.mutual_encoding =
+                     Some(EncodingName::parse(&v).ok_or(HeaderError::Invalid(name))?);
+             }
+-            "mediaType" => {
++            3 => {
+                 let v = s(v)?;
+                 if v.char_count() > MAX_MEDIA_TYPE {
+                     return Err(HeaderError::Invalid(name));
+                 }
+                 self.media_type = Some(v);
+             }
+-            "offset" => {
++            4 => {
+                 self.offset = Some(u32_of(n(v)?)?);
+                 *off = true;
+             }
+-            "limit" => {
++            5 => {
+                 let l = u32_of(n(v)?)?;
+                 if l == 0 {
+                     return Err(HeaderError::Invalid(name));
+@@ -551,9 +552,9 @@ impl<'a> Header<'a> {
+                 self.limit = Some(l);
+                 *lim = true;
+             }
+-            "setPartial" => self.set_partial = b(v)?,
+-            "flowControl" => self.flow_control = b(v)?,
+-            "command" => {
++            6 => self.set_partial = b(v)?,
++            7 => self.flow_control = b(v)?,
++            8 => {
+                 let v = s(v)?;
+                 self.command = Some(
+                     Command::ALL
+@@ -562,14 +563,14 @@ impl<'a> Header<'a> {
+                         .ok_or(HeaderError::Invalid(name))?,
+                 );
+             }
+-            "subscribeId" => {
++            9 => {
+                 let v = s(v)?;
+                 if !(1..=MAX_SUBSCRIBE_ID_READ).contains(&v.char_count()) {
+                     return Err(HeaderError::Invalid(name));
+                 }
+                 self.subscribe_id = Some(v);
+             }
+-            "endedBy" => {
++            10 => {
+                 let v = s(v)?;
+                 self.ended_by = Some(match () {
+                     _ if v.eq_str("initiator") => EndedBy::Initiator,
+@@ -577,7 +578,7 @@ impl<'a> Header<'a> {
+                     _ => return Err(HeaderError::Invalid(name)),
+                 });
+             }
+-            "status" => {
++            11 => {
+                 let t = n(v)?;
+                 let code = crate::json::number_u32(t)
+                     .ok()
+@@ -585,13 +586,13 @@ impl<'a> Header<'a> {
+                     .ok_or(HeaderError::Invalid(name))?;
+                 self.status = Some(Status(code as u16));
+             }
+-            "message" | "msg" => {
++            12 | 13 => {
+                 let Raw::Str(raw) = v else {
+                     return Err(HeaderError::WrongType(name));
+                 };
+                 let cut = cut_escaped(raw, MAX_MESSAGE);
+                 let truncated = cut.len() < raw.len();
+-                if name == "message" {
++                if id == 12 {
+                     self.message = Some(HeaderStr::Raw(cut));
+                     self.message_truncated = truncated;
+                 } else {
+@@ -599,8 +600,8 @@ impl<'a> Header<'a> {
+                     self.msg_truncated = truncated;
+                 }
+             }
+-            "cacheTime" => self.cache_time = Some(u32_of(n(v)?)?),
+-            "totalCount" => self.total_count = Some(u32_of(n(v)?)?),
++            14 => self.cache_time = Some(u32_of(n(v)?)?),
++            15 => self.total_count = Some(u32_of(n(v)?)?),
+             _ => {}
+         }
+         Ok(())
+@@ -642,7 +643,7 @@ impl<'a> Header<'a> {
+             HeaderKind::Inquiry => self.put_str(&mut w, "resource", self.resource)?,
+             HeaderKind::Reply => {
+                 w.name("status", MAX_KEY)?;
+-                w.number_u64(self.status.map_or(0, |s| s.0) as u64)?;
++                w.number_u32(self.status.map_or(0, |s| s.0) as u32)?;
+             }
+             HeaderKind::Subscription => {
+                 w.name("command", MAX_KEY)?;
+@@ -666,7 +667,7 @@ impl<'a> Header<'a> {
+         ] {
+             if let Some(v) = v {
+                 w.name(name, MAX_KEY)?;
+-                w.number_u64(v as u64)?;
++                w.number_u32(v as u32)?;
+             }
+         }
+         if self.set_partial {
+@@ -685,7 +686,7 @@ impl<'a> Header<'a> {
+         if kind != HeaderKind::Reply {
+             if let Some(s) = self.status {
+                 w.name("status", MAX_KEY)?;
+-                w.number_u64(s.0 as u64)?;
++                w.number_u32(s.0 as u32)?;
+             }
+         }
+         self.put_str(&mut w, "message", self.message)?;
+@@ -784,8 +785,10 @@ impl<'a> Header<'a> {
+ }
+ 
+ /// The Header Property names that the parser knows.
+-fn known(name: &str) -> Option<&'static str> {
+-    const KNOWN: [&str; 16] = [
++fn known(name: &str) -> Option<usize> {
++    KNOWN.iter().position(|k| *k == name)
++}
++const KNOWN: [&str; 16] = [
+         "resource",
+         "resId",
+         "mutualEncoding",
+@@ -803,8 +806,6 @@ fn known(name: &str) -> Option<&'static str> {
+         "cacheTime",
+         "totalCount",
+     ];
+-    KNOWN.into_iter().find(|k| *k == name)
+-}
+ 
+ #[cfg(test)]
+ mod tests {
+diff --git a/crates/zmidi-ci-pe/src/json.rs b/crates/zmidi-ci-pe/src/json.rs
+index 07bcaf1..77ef159 100644
+--- a/crates/zmidi-ci-pe/src/json.rs
++++ b/crates/zmidi-ci-pe/src/json.rs
+@@ -994,6 +994,23 @@ impl<'b> JsonWriter<'b> {
+         self.put(&tmp[i..])
+     }
+ 
++    /// PROTOTYPE: [`Self::number_u64`] with 32-bit division only.
++    pub fn number_u32(&mut self, v: u32) -> Result<(), JsonError> {
++        self.before_value()?;
++        let mut tmp = [0u8; 10];
++        let mut i = tmp.len();
++        let mut v = v;
++        loop {
++            i -= 1;
++            tmp[i] = b'0' + (v % 10) as u8;
++            v /= 10;
++            if v == 0 {
++                break;
++            }
++        }
++        self.put(&tmp[i..])
++    }
++
+     /// Writes a signed integer in decimal (REQ-PE-JSON-005).
+     pub fn number_i64(&mut self, v: i64) -> Result<(), JsonError> {
+         if v < 0 {
+diff --git a/crates/zmidi-ci/src/device.rs b/crates/zmidi-ci/src/device.rs
+index 7fce2ec..292c7a8 100644
+--- a/crates/zmidi-ci/src/device.rs
++++ b/crates/zmidi-ci/src/device.rs
+@@ -17,6 +17,8 @@
+ //!   D-11 ACK/NAK size, D-12 Endpoint Information reply, D-14 peer Profile lists are the
+ //!   application's.
+ 
++const PROTO_PROFILES: bool = false;
++const PROTO_PI: bool = false;
+ use crate::management::{
+     Ack, Categories, Details, DeviceIdentity, Discovery, DiscoveryReply, EndpointInfoInquiry,
+     EndpointInfoReply, EndpointInfoStatus, InvalidateMuid, Nak, NakStatus,
+@@ -764,9 +766,10 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+         };
+         let c = self.config.categories;
+         let supported = match sub.category() {
+-            Category::ProfileConfiguration => c.profile_configuration,
++            // PROTOTYPE: Profiles and Process Inquiry off when the firmware is compiled.
++            Category::ProfileConfiguration => false && c.profile_configuration,
+             Category::PropertyExchange => c.property_exchange,
+-            Category::ProcessInquiry => c.process_inquiry,
++            Category::ProcessInquiry => false && c.process_inquiry,
+             _ => true,
+         };
+         if !supported {
+@@ -1028,11 +1031,11 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+                     None,
+                 )
+             }
+-            SubId2::ProfileInquiry => {
++            SubId2::ProfileInquiry  if PROTO_PROFILES => {
+                 ProfileInquiry::read(h, body)?;
+                 (None, none, Some((h.device_id, src)))
+             }
+-            SubId2::ProfileInquiryReply => {
++            SubId2::ProfileInquiryReply  if PROTO_PROFILES => {
+                 let reply = ProfileInquiryReply::read(h, body)?;
+                 (
+                     ev(Event::ProfileInquiryReply {
+@@ -1045,7 +1048,7 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+                     None,
+                 )
+             }
+-            SubId2::SetProfileOn | SubId2::SetProfileOff => {
++            SubId2::SetProfileOn | SubId2::SetProfileOff  if PROTO_PROFILES => {
+                 let (profile, channels, on) = if sub == SubId2::SetProfileOn {
+                     let m = SetProfileOn::read(h, body)?;
+                     (m.profile, m.channels, true)
+@@ -1080,7 +1083,7 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+             SubId2::ProfileEnabled
+             | SubId2::ProfileDisabled
+             | SubId2::ProfileAdded
+-            | SubId2::ProfileRemoved => {
++            | SubId2::ProfileRemoved  if PROTO_PROFILES => {
+                 let (kind, profile, channels) = match sub {
+                     SubId2::ProfileEnabled => {
+                         let m = ProfileEnabledReport::read(h, body)?;
+@@ -1114,7 +1117,7 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+                     None,
+                 )
+             }
+-            SubId2::ProfileDetailsInquiry => {
++            SubId2::ProfileDetailsInquiry  if PROTO_PROFILES => {
+                 let q = ProfileDetailsInquiry::read(h, body)?;
+                 let address = self.address(h, group);
+                 let Some(entry) = self.profiles.find(address, q.profile).copied() else {
+@@ -1151,7 +1154,7 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+                     )
+                 }
+             }
+-            SubId2::ProfileDetailsReply => {
++            SubId2::ProfileDetailsReply  if PROTO_PROFILES => {
+                 let reply = ProfileDetailsReply::read(h, body)?;
+                 let open = self.details_pending.iter_mut().find(|d| {
+                     matches!(d, Some((m, p, t)) if *m == src && p.same_profile(reply.profile) && *t == reply.target)
+@@ -1166,7 +1169,7 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+                 };
+                 (ev(e), none, None)
+             }
+-            SubId2::ProfileSpecificData => {
++            SubId2::ProfileSpecificData  if PROTO_PROFILES => {
+                 let data = ProfileSpecificData::read(h, body)?;
+                 (
+                     ev(Event::ProfileSpecificData {
+@@ -1237,7 +1240,7 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+                     None,
+                 )
+             }
+-            SubId2::ProcessInquiryCapabilities => {
++            SubId2::ProcessInquiryCapabilities  if PROTO_PI => {
+                 PiCapabilitiesInquiry::read(h, body)?;
+                 let capabilities = self.config.process_inquiry;
+                 (
+@@ -1249,7 +1252,7 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+                     None,
+                 )
+             }
+-            SubId2::ProcessInquiryCapabilitiesReply => (
++            SubId2::ProcessInquiryCapabilitiesReply  if PROTO_PI => (
+                 ev(Event::PiCapabilities {
+                     muid: src,
+                     capabilities: PiCapabilities::read(h, body)?,
+@@ -1257,7 +1260,7 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+                 none,
+                 None,
+             ),
+-            SubId2::MidiMessageReport => {
++            SubId2::MidiMessageReport  if PROTO_PI => {
+                 let inquiry = MessageReportInquiry::read(h, body)?;
+                 // REQ-CI-MMR-007, -010.
+                 if let DeviceId::Channel(c) = h.device_id {
+@@ -1280,7 +1283,7 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+                     None,
+                 )
+             }
+-            SubId2::MidiMessageReportReply => (
++            SubId2::MidiMessageReportReply  if PROTO_PI => (
+                 ev(Event::MessageReportReply {
+                     muid: src,
+                     reply: MessageReportReply::read(h, body)?,
+@@ -1288,13 +1291,14 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
+                 none,
+                 None,
+             ),
+-            SubId2::MidiMessageReportEnd => {
++            SubId2::MidiMessageReportEnd  if PROTO_PI => {
+                 MessageReportEnd::read(h, body)?;
+                 if self.report_peer == Some(src) {
+                     self.report_peer = None;
+                 }
+                 (ev(Event::MessageReportEnd { muid: src }), none, None)
+             }
++            _ => (None, nak(self, NakStatus::NotSupported, Details::Reserved), None),
+         })
+     }
+ 
+diff --git a/crates/zmidi-io/src/byte_stream.rs b/crates/zmidi-io/src/byte_stream.rs
+index 6a55bfe..b371ec7 100644
+--- a/crates/zmidi-io/src/byte_stream.rs
++++ b/crates/zmidi-io/src/byte_stream.rs
+@@ -882,3 +882,178 @@ mod tests {
+         });
+     }
+ }
++
++// ---- PROTOTYPE (size experiment): word-level reader and writer.
++/// Packets given by one [`BytesToUmpCore::push_words`]: at most two of at most 2 words.
++#[derive(Debug, Clone, Copy, Default)]
++pub struct PushedWords {
++    w: [[u32; 2]; 2],
++    n: [u8; 2],
++    len: u8,
++}
++impl PushedWords {
++    fn add(&mut self, w: [u32; 2], n: u8) {
++        if let Some(i) = (self.len < 2).then_some(self.len as usize) {
++            self.w[i] = w;
++            self.n[i] = n;
++            self.len += 1;
++        }
++    }
++    /// PROTOTYPE: the words of typed UMPs.
++    pub fn from_umps(p: Pushed) -> Self {
++        let mut out = Self::default();
++        for u in p {
++            let mut w = [0u32; 4];
++            if let Ok(n) = u.write(&mut w) {
++                out.add([w[0], w[1]], n.min(2) as u8);
++            }
++        }
++        out
++    }
++    /// Packet `i`.
++    pub fn get(&self, i: usize) -> Option<&[u32]> {
++        (i < self.len as usize).then(|| &self.w[i][..self.n[i] as usize])
++    }
++}
++
++impl BytesToUmpCore {
++    /// [`Self::push_with`] with no translator, words out.
++    pub fn push_words(&mut self, byte: u8) -> PushedWords {
++        let mut out = PushedWords::default();
++        let g = self.group;
++        let one = |mt, s, d0, d1| [word(mt, g, s, d0, d1), 0];
++        match byte {
++            0xF8..=0xFF => {
++                if !undefined(byte) {
++                    out.add(one(0x1, byte, 0, 0), 1);
++                }
++            }
++            0x80..=0xF7 => {
++                if self.in_sysex {
++                    let s = if self.started { 3 } else { 0 };
++                    out.add(self.sysex_words(s), 2);
++                    self.in_sysex = false;
++                }
++                self.status = 0;
++                self.count = 0;
++                match byte {
++                    0x80..=0xEF => {
++                        self.running = byte;
++                        self.status = byte;
++                    }
++                    SOX => {
++                        self.running = 0;
++                        self.in_sysex = true;
++                        self.chunk_len = 0;
++                        self.started = false;
++                    }
++                    0xF6 => {
++                        self.running = 0;
++                        out.add(one(0x1, byte, 0, 0), 1);
++                    }
++                    _ => {
++                        self.running = 0;
++                        if data_len(byte) > 0 {
++                            self.status = byte;
++                        }
++                    }
++                }
++            }
++            _ => {
++                if self.in_sysex {
++                    if self.chunk_len == self.chunk.len() {
++                        let s = if self.started { 2 } else { 1 };
++                        out.add(self.sysex_words(s), 2);
++                        self.started = true;
++                    }
++                    self.chunk[self.chunk_len] = byte;
++                    self.chunk_len += 1;
++                    return out;
++                }
++                if self.status == 0 {
++                    if self.running == 0 {
++                        return out;
++                    }
++                    self.status = self.running;
++                    self.count = 0;
++                }
++                self.data[self.count] = byte;
++                self.count += 1;
++                if self.count == data_len(self.status) {
++                    let (status, d0, d1) = (self.status, self.data[0], self.data[1]);
++                    let d1 = if self.count == 2 { d1 } else { 0 };
++                    self.status = 0;
++                    self.count = 0;
++                    let mt = if status < 0xF0 { 0x2 } else { 0x1 };
++                    out.add(one(mt, status, d0, d1), 1);
++                }
++            }
++        }
++        out
++    }
++
++    /// SysEx7 words of the pending data (status 0 Complete, 1 Start, 2 Continue, 3 End).
++    fn sysex_words(&mut self, status: u32) -> [u32; 2] {
++        let mut b = [0u8; 8];
++        b[0] = 0x30 | self.group.into_bits();
++        b[1] = (status << 4) as u8 | self.chunk_len as u8;
++        b[2..2 + self.chunk_len].copy_from_slice(&self.chunk[..self.chunk_len]);
++        self.chunk_len = 0;
++        [u32::from_be_bytes([b[0], b[1], b[2], b[3]]), u32::from_be_bytes([b[4], b[5], b[6], b[7]])]
++    }
++}
++
++impl UmpToBytes {
++    /// [`Self::write`] from the words, with no `Ump::parse`.
++    pub fn write_words(&mut self, words: &[u32], out: &mut [u8]) -> Result<usize, ByteStreamError> {
++        let Some(&w0) = words.first() else { return Ok(0) };
++        let mut bytes = Bytes::default();
++        let mut last = self.last_status;
++        match w0 >> 28 {
++            0x1 => {
++                let status = (w0 >> 16) as u8;
++                if matches!(status, 0xF1..=0xF3 | 0xF6 | 0xF8 | 0xFA..=0xFC | 0xFE | 0xFF) {
++                    bytes.push(status);
++                    if status < 0xF8 {
++                        last = 0;
++                        for i in 0..data_len(status) {
++                            bytes.push((w0 >> (8 - 8 * i)) as u8 & 0x7F);
++                        }
++                    }
++                }
++            }
++            0x2 if (w0 >> 16) as u8 >= 0x80 && (w0 >> 16) as u8 <= 0xEF => {
++                self.channel(w0, &mut last, &mut bytes)
++            }
++            0x4 => {
++                let mut m = [0u32; 4];
++                let n = zmidi_ump::to_midi1_words(words, &mut m);
++                for &w in &m[..n] {
++                    self.channel(w, &mut last, &mut bytes);
++                }
++            }
++            0x3 if words.len() >= 2 && (w0 >> 20) & 0xF <= 3 && (w0 >> 16) & 0xF <= 6 => {
++                let status = (w0 >> 20) & 0xF;
++                let n = ((w0 >> 16) & 0xF) as usize;
++                if status <= 1 {
++                    bytes.push(SOX);
++                    last = 0;
++                }
++                let b = [(w0 >> 8) as u8, w0 as u8];
++                let c = words[1].to_be_bytes();
++                for &x in b.iter().chain(c.iter()).take(n) {
++                    bytes.push(x & 0x7F);
++                }
++                if status == 0 || status == 3 {
++                    bytes.push(EOX);
++                }
++            }
++            _ => {}
++        }
++        let src = bytes.as_slice();
++        let dst = out.get_mut(..src.len()).ok_or(ByteStreamError::BufferTooSmall)?;
++        dst.copy_from_slice(src);
++        self.last_status = last;
++        Ok(src.len())
++    }
++}
+diff --git a/crates/zmidi-io/src/lib.rs b/crates/zmidi-io/src/lib.rs
+index 502d540..7efeb1b 100644
+--- a/crates/zmidi-io/src/lib.rs
++++ b/crates/zmidi-io/src/lib.rs
+@@ -14,7 +14,7 @@ pub mod jitter_reduction;
+ pub mod router;
+ pub mod send_order;
+ 
+-pub use byte_stream::{
++pub use byte_stream::{PushedWords, 
+     ByteStreamError, BytesToUmp, BytesToUmpCore, Midi1Scheduler, Pushed, UmpToBytes,
+ };
+ pub use endpoint::{
+diff --git a/crates/zmidi-ump/src/lib.rs b/crates/zmidi-ump/src/lib.rs
+index 9cd4b5e..7f2570a 100644
+--- a/crates/zmidi-ump/src/lib.rs
++++ b/crates/zmidi-ump/src/lib.rs
+@@ -51,7 +51,7 @@ pub use system::{
+     ActiveSensing, Continue, MidiTimeCode, Reset, SongPositionPointer, SongSelect, Start, Stop,
+     SystemMessage, SystemStatus, TimingClock, TuneRequest,
+ };
+-pub use translate::{to_midi1, Midi1ToMidi2, Midi1ToMidi2Group, Translated};
++pub use translate::{to_midi1, to_midi1_words, Midi1ToMidi2, Midi1ToMidi2Group, Translated};
+ pub use ump::{Ump, UnknownPacket};
+ pub use ump_stream::{
+     DeviceIdentityNotification, EndOfClip, EndpointDiscovery, EndpointInfoNotification,
+diff --git a/crates/zmidi-ump/src/translate.rs b/crates/zmidi-ump/src/translate.rs
+index 2b4d0b0..737779c 100644
+--- a/crates/zmidi-ump/src/translate.rs
++++ b/crates/zmidi-ump/src/translate.rs
+@@ -1314,3 +1314,59 @@ mod tests {
+         input.iter().filter_map(|u| t.translate(u)).collect()
+     }
+ }
++
++// ---- PROTOTYPE (size experiment): word-level MIDI 2.0 to 1.0, no Ump value.
++/// MIDI 1.0 words of one MIDI 2.0 Channel Voice packet (D.2). Other packets give themselves.
++pub fn to_midi1_words(w: &[u32], out: &mut [u32; 4]) -> usize {
++    let Some(&w0) = w.first() else { return 0 };
++    if w0 >> 28 != 0x4 {
++        out[0] = w0;
++        return 1;
++    }
++    let Some(&w1) = w.get(1) else { return 0 };
++    let head = 0x2000_0000 | (w0 & 0x0F0F_0000);
++    let (b2, b3) = ((w0 >> 8) & 0x7F, w0 & 0x7F);
++    let m1 = |status: u32, d0: u32, d1: u32| head | status << 20 | (d0 & 0x7F) << 8 | (d1 & 0x7F);
++    let mut n = 0;
++    let mut put = |x: u32| {
++        if let Some(s) = out.get_mut(n) {
++            *s = x;
++            n += 1;
++        }
++    };
++    let mut param = |put: &mut dyn FnMut(u32), sel: [u32; 2], v: u32| {
++        put(m1(0xB, sel[0], b2));
++        put(m1(0xB, sel[1], b3));
++        put(m1(0xB, 6, v >> 7));
++        put(m1(0xB, 38, v));
++    };
++    match (w0 >> 20) & 0xF {
++        0x8 => put(m1(0x8, b2, down(w1 >> 16, 16, 7))),
++        0x9 => put(m1(0x9, b2, down(w1 >> 16, 16, 7).max(1))),
++        0xA => put(m1(0xA, b2, down(w1, 32, 7))),
++        0xB => put(m1(0xB, b2, down(w1, 32, 7))),
++        0x2 => {
++            let v = if zero_extension(b3 as u8) {
++                zero_extend_downscale(w1, 32, 14).unwrap_or(0)
++            } else {
++                down(w1, 32, 14)
++            };
++            param(&mut put, [101, 100], v)
++        }
++        0x3 => param(&mut put, [99, 98], down(w1, 32, 14)),
++        0xC => {
++            if w0 & 1 != 0 {
++                put(m1(0xB, 0, w1 >> 8));
++                put(m1(0xB, 32, w1));
++            }
++            put(m1(0xC, w1 >> 24, 0));
++        }
++        0xD => put(m1(0xD, down(w1, 32, 7), 0)),
++        0xE => {
++            let v = down(w1, 32, 14);
++            put(m1(0xE, v, v >> 7))
++        }
++        _ => {}
++    }
++    n
++}
+diff --git a/crates/zmidi-usb-device/Cargo.toml b/crates/zmidi-usb-device/Cargo.toml
+index eb527db..1e1173e 100644
+--- a/crates/zmidi-usb-device/Cargo.toml
++++ b/crates/zmidi-usb-device/Cargo.toml
+@@ -20,3 +20,4 @@ thiserror = { version = "2", default-features = false }
+ [features]
+ # DEC-002: no alloc.
+ default = []
++proto_const = []
+diff --git a/crates/zmidi-usb-device/src/lib.rs b/crates/zmidi-usb-device/src/lib.rs
+index 31dfa44..8acf182 100644
+--- a/crates/zmidi-usb-device/src/lib.rs
++++ b/crates/zmidi-usb-device/src/lib.rs
+@@ -214,8 +214,11 @@ impl<
+         }
+ 
+         // The writer rules first: a configuration that zmidi-usb refuses allocates nothing.
+-        function_len(&cfg)?;
+-        check_settings(&cfg)?;
++        #[cfg(not(feature = "proto_const"))]
++        {
++            function_len(&cfg)?;
++            check_settings(&cfg)?;
++        }
+ 
+         let mut outs: [Option<EndpointOut<'a, Bus>>; EPS] = core::array::from_fn(|_| None);
+         let mut ins: [Option<EndpointIn<'a, Bus>>; EPS] = core::array::from_fn(|_| None);
+@@ -522,6 +525,11 @@ impl<
+     ) -> usb_device::Result<()> {
+         let (class, subclass, protocol) = IAD_FUNCTION;
+         writer.iad(self.ac_if, 2, class, subclass, protocol, None)?;
++        #[cfg(feature = "proto_const")]
++        {
++            return proto::write(writer, self.ac_if, self.ms_if, &self.names, &self.outs, &self.ins);
++        }
++        #[allow(unreachable_code)]
+         let mut sink = Sink {
+             writer,
+             ac_if: self.ac_if,
+@@ -575,6 +583,14 @@ impl<
+         if setup.gtb_alternate_setting().is_none() {
+             return;
+         }
++        #[cfg(feature = "proto_const")]
++        {
++            let ok = setup.index == u16::from(u8::from(self.ms_if)) && setup.gtb_alternate_setting() == Some(1);
++            let n = usize::from(setup.length).min(proto::FIXED_GTB.len());
++            let _ = if ok { xfer.accept_with(&proto::FIXED_GTB[..n]) } else { xfer.reject() };
++            return;
++        }
++        #[allow(unreachable_code)]
+         let mut answer = [0u8; GTB_ANSWER_MAX];
+         // An error of the stall or of the answer has no other receiver: the host sees the stall
+         // or a timeout.
+@@ -608,3 +624,50 @@ impl<
+         true
+     }
+ }
++
++#[cfg(feature = "proto_const")]
++mod proto {
++    use super::*;
++    pub static FIXED: [u8; 132] = [9, 4, 0, 0, 0, 1, 1, 0, 4, 9, 36, 1, 0, 1, 9, 0, 1, 1, 9, 4, 1, 0, 2, 1, 3, 0, 5, 7, 36, 1, 0, 1, 65, 0, 6, 36, 2, 1, 1, 0, 6, 36, 2, 2, 2, 0, 9, 36, 3, 1, 3, 1, 2, 1, 0, 9, 36, 3, 2, 4, 1, 1, 1, 0, 9, 5, 1, 2, 64, 0, 0, 0, 0, 5, 37, 1, 1, 1, 9, 5, 129, 2, 64, 0, 0, 0, 0, 5, 37, 1, 1, 3, 9, 4, 1, 1, 2, 1, 3, 0, 6, 7, 36, 1, 0, 2, 7, 0, 7, 5, 1, 2, 64, 0, 0, 5, 37, 2, 1, 1, 7, 5, 129, 2, 64, 0, 0, 5, 37, 2, 1, 1];
++    pub static FIXED_GTB: [u8; 18] = [5, 38, 1, 18, 0, 13, 38, 2, 1, 0, 0, 1, 0, 17, 0, 0, 0, 0];
++    
++    /// Writes FIXED through `writer`: interfaces and endpoints through its counters.
++    pub fn write<Bus: UsbBus, const EPS: usize>(
++        writer: &mut DescriptorWriter,
++        ac_if: InterfaceNumber,
++        ms_if: InterfaceNumber,
++        names: &[Option<(StringIndex, &str)>],
++        outs: &[Option<EndpointOut<'_, Bus>>; EPS],
++        ins: &[Option<EndpointIn<'_, Bus>>; EPS],
++    ) -> Result<(), UsbError> {
++        let mut d: &[u8] = &FIXED;
++        while let [len, ty, ..] = *d {
++            let (one, rest) = d.split_at(usize::from(len).min(d.len()));
++            d = rest;
++            match ty {
++                4 => {
++                    let number = if one[2] == 0 { ac_if } else { ms_if };
++                    let string = names.iter().flatten().map(|(s, _)| *s).find(|s| u8::from(*s) == one[8]);
++                    writer.interface_alt(number, one[3], one[5], one[6], one[7], string)?;
++                }
++                5 => {
++                    let extra = &one[7..];
++                    let copy = |buf: &mut [u8]| {
++                        let dst = buf.get_mut(..extra.len()).ok_or(UsbError::BufferOverflow)?;
++                        dst.copy_from_slice(extra);
++                        Ok(extra.len())
++                    };
++                    if one[2] & 0x80 != 0 {
++                        let ep = ins.iter().flatten().find(|e| u8::from(e.address()) == one[2]).ok_or(UsbError::InvalidState)?;
++                        writer.endpoint_ex(ep, copy)?;
++                    } else {
++                        let ep = outs.iter().flatten().find(|e| u8::from(e.address()) == one[2]).ok_or(UsbError::InvalidState)?;
++                        writer.endpoint_ex(ep, copy)?;
++                    }
++                }
++                _ => writer.write(ty, &one[2..])?,
++            }
++        }
++        Ok(())
++    }
++}
+diff --git a/crates/zmidi-usb/src/event_packet.rs b/crates/zmidi-usb/src/event_packet.rs
+index 041da19..61b8291 100644
+--- a/crates/zmidi-usb/src/event_packet.rs
++++ b/crates/zmidi-usb/src/event_packet.rs
+@@ -15,7 +15,7 @@
+ //! No alloc (DEC-002). Synchronous and sans-IO with no USB stack (DEC-004, DEC-014). Nothing
+ //! panics on received bytes or on UMP words; the reader is lenient (choice U-24).
+ 
+-use zmidi_io::{BytesToUmpCore, Pushed, UmpToBytes};
++use zmidi_io::{BytesToUmpCore, PushedWords, UmpToBytes};
+ use zmidi_ump::Midi1ToMidi2Group;
+ use zmidi_ump::{Group, StreamProtocol, Ump};
+ 
+@@ -296,7 +296,7 @@ impl<const CABLES: usize, const X: usize> PacketReader<CABLES, X> {
+ 
+     /// Gives one byte to the byte stream reader of `cable` and keeps the System Exclusive
+     /// state of the cable.
+-    fn push(&mut self, cable: usize, byte: u8) -> Option<Pushed> {
++    fn push(&mut self, cable: usize, byte: u8) -> Option<PushedWords> {
+         if let Some(flag) = self.in_sysex.get_mut(cable) {
+             match byte {
+                 0xF0 => *flag = true,
+@@ -308,9 +308,12 @@ impl<const CABLES: usize, const X: usize> PacketReader<CABLES, X> {
+             StreamProtocol::Midi2 => self.translators.get_mut(cable),
+             StreamProtocol::Midi1 => None,
+         };
+-        self.cables
+-            .get_mut(cable)
+-            .map(|s| s.push_with(byte, translator))
++        let core = self.cables.get_mut(cable)?;
++        match translator {
++            None => Some(core.push_words(byte)),
++            // PROTOTYPE: the MIDI 2.0 path keeps the typed translator.
++            Some(t) => Some(PushedWords::from_umps(core.push_with(byte, Some(t)))),
++        }
+     }
+ 
+     /// Reads `bytes`, the data of one USB transfer, as Event Packets in order
+@@ -336,21 +339,47 @@ impl<const CABLES: usize, const X: usize> PacketReader<CABLES, X> {
+     /// Gives the valid bytes of `packet` to the byte stream reader of its cable and gives the
+     /// UMPs in order through `sink`. Ignores CIN 0x0 and 0x1 (REQ-USB-EVT-009) and a cable that
+     /// is not below `CABLES` (REQ-USB-EVT-018).
+-    pub fn read_packet(&mut self, packet: EventPacket, mut sink: impl FnMut(Ump)) {
++    pub fn read_packet(&mut self, packet: EventPacket, mut sink: impl FnMut(Words)) {
+         let current = Current::of(packet, CABLES);
+         for &b in current.bytes() {
+             if let Some(pushed) = self.push(current.cable, b) {
+-                pushed.for_each(&mut sink);
++                for i in 0..2 {
++                    if let Some(w) = pushed.get(i) {
++                        sink(Words::of(w));
++                    }
++                }
+             }
+         }
+     }
+ 
+     /// Reads all of `bytes` as [`Self::read`] does and gives each item to `sink`, in order.
+-    pub fn read_with(&mut self, bytes: &[u8], mut sink: impl FnMut(Result<Ump, EventPacketError>)) {
++    pub fn read_with(&mut self, bytes: &[u8], mut sink: impl FnMut(Result<Words, EventPacketError>)) {
+         self.read(bytes).for_each(&mut sink);
+     }
+ }
+ 
++/// PROTOTYPE: the words of one UMP that the Event Packet reader gives (1 or 2 words).
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct Words {
++    w: [u32; 2],
++    n: u8,
++}
++
++impl Words {
++    fn of(w: &[u32]) -> Self {
++        let mut x = Words { w: [0; 2], n: 0 };
++        for (d, s) in x.w.iter_mut().zip(w) {
++            *d = *s;
++            x.n += 1;
++        }
++        x
++    }
++    /// The words.
++    pub fn as_slice(&self) -> &[u32] {
++        &self.w[..self.n as usize]
++    }
++}
++
+ /// The valid bytes of the packet in progress of a [`PacketRead`].
+ #[derive(Debug, Clone, Copy)]
+ struct Current {
+@@ -400,20 +429,23 @@ pub struct PacketRead<'a, const CABLES: usize, const X: usize = 0> {
+     /// Number of bytes after the last whole packet; set to 0 when reported.
+     tail: usize,
+     current: Current,
+-    pending: Option<Pushed>,
++    pending: Option<(PushedWords, usize)>,
+ }
+ 
+ impl<const CABLES: usize, const X: usize> Iterator for PacketRead<'_, CABLES, X> {
+-    type Item = Result<Ump, EventPacketError>;
++    type Item = Result<Words, EventPacketError>;
+ 
+     fn next(&mut self) -> Option<Self::Item> {
+         loop {
+-            if let Some(ump) = self.pending.as_mut().and_then(Iterator::next) {
+-                return Some(Ok(ump));
++            if let Some((p, i)) = self.pending.as_mut() {
++                if let Some(w) = p.get(*i) {
++                    *i += 1;
++                    return Some(Ok(Words::of(w)));
++                }
+             }
+             if let Some(&b) = self.current.bytes().get(self.current.next) {
+                 self.current.next += 1;
+-                self.pending = self.reader.push(self.current.cable, b);
++                self.pending = self.reader.push(self.current.cable, b).map(|p| (p, 0));
+                 continue;
+             }
+             if let Some(&p) = self.packets.next() {
+@@ -539,7 +571,7 @@ impl<const CABLES: usize> PacketWriter<CABLES> {
+         };
+         let mut encoder = self.bytes.clone();
+         let mut midi = [0u8; 16];
+-        let n = encoder.write(words, &mut midi).unwrap_or(0);
++        let n = encoder.write_words(words, &mut midi).unwrap_or(0);
+         let midi = midi.get(..n).unwrap_or(&[]);
+         if midi.is_empty() {
+             return Ok(0);
+@@ -753,10 +785,8 @@ mod tests {
+     use std::vec::Vec;
+ 
+     /// The words of a UMP.
+-    fn words(u: Ump) -> Vec<u32> {
+-        let mut w = [0u32; 4];
+-        let n = u.write(&mut w).unwrap();
+-        w[..n].to_vec()
++    fn words(u: Words) -> Vec<u32> {
++        u.as_slice().to_vec()
+     }
+ 
+     /// Word lists of the UMPs (errors as an empty list) that `reader` gives for `bytes`.
+@@ -1322,7 +1352,7 @@ mod tests {
+         let mut r = PacketReader::<2>::default();
+         let mut got = Vec::new();
+         r.read_packet(EventPacket::from_bytes(buf), |u| got.push(u));
+-        assert_eq!(got, [ump]);
++        assert_eq!(got.iter().map(|w| Ump::parse(w.as_slice()).unwrap().0).collect::<Vec<_>>(), [ump]);
+     }
+ 
+     #[test]
+@@ -1373,7 +1403,7 @@ mod tests {
+             stream.push(0xF7);
+             let at = clock_at.min(stream.len());
+             stream.insert(at, 0xF8);
+-            let umps: Vec<Vec<u32>> = stream.iter().flat_map(|&b| src.push(b).collect::<Vec<_>>()).map(words).collect();
++            let umps: Vec<Vec<u32>> = stream.iter().flat_map(|&b| src.push(b).collect::<Vec<_>>()).map(|u| { let mut w = [0u32; 4]; let n = u.write(&mut w).unwrap(); w[..n].to_vec() }).collect();
+             let mut w = PacketWriter::<4>::default();
+             let refs: Vec<&[u32]> = umps.iter().map(|u| &u[..]).collect();
+             let packets = write(&mut w, &refs);
+diff --git a/crates/zmidi-usb/src/link.rs b/crates/zmidi-usb/src/link.rs
+index 91c585f..b261771 100644
+--- a/crates/zmidi-usb/src/link.rs
++++ b/crates/zmidi-usb/src/link.rs
+@@ -516,7 +516,7 @@ fn short_ump(words: &[u32]) -> Option<LinkError> {
+ pub enum Received {
+     /// A UMP of the Event Packet reader (Alternate Setting 0): Group n is cable n
+     /// (REQ-USB-EVT-015).
+-    EventPacket(Ump),
++    EventPacket(event_packet::Words),
+     /// A UMP of the UMP reader (a USB MIDI 2.0 setting), with its target (REQ-USB-UMP-014).
+     Ump(ReceivedUmp),
+ }
+@@ -525,7 +525,7 @@ impl Received {
+     /// The UMP decoded by zmidi-ump.
+     pub fn ump(&self) -> Result<Ump, UmpError> {
+         match self {
+-            Received::EventPacket(u) => Ok(*u),
++            Received::EventPacket(u) => Ump::parse(u.as_slice()).map(|(u, _)| u),
+             Received::Ump(r) => r.ump(),
+         }
+     }
+@@ -534,7 +534,12 @@ impl Received {
+     pub fn words(&self) -> ([u32; ump_usb::MAX_UMP_WORDS], usize) {
+         let mut w = [0u32; ump_usb::MAX_UMP_WORDS];
+         let n = match self {
+-            Received::EventPacket(u) => u.write(&mut w).unwrap_or(0),
++            Received::EventPacket(u) => {
++                for (to, from) in w.iter_mut().zip(u.as_slice()) {
++                    *to = *from;
++                }
++                u.as_slice().len()
++            }
+             Received::Ump(r) => {
+                 for (to, from) in w.iter_mut().zip(r.words()) {
+                     *to = *from;
+diff --git a/tools/size-probe/Cargo.toml b/tools/size-probe/Cargo.toml
+index b30158b..12318cb 100644
+--- a/tools/size-probe/Cargo.toml
++++ b/tools/size-probe/Cargo.toml
+@@ -25,6 +25,7 @@ zmidi-usb-device = { path = "../../crates/zmidi-usb-device", optional = true }
+ [features]
+ usb1 = ["dep:usbd-midi"]
+ usb2 = ["dep:zmidi-usb-device"]
++usb2c = ["usb2", "zmidi-usb-device/proto_const"]
+ # The usb-device core with no class: the class cost is usb1 or usb2 minus this.
+ usb_core = []
+ rx_cv2 = []
+@@ -46,6 +47,11 @@ up = []
+ bytes1 = []
+ bytes_out = []
+ rx_assign = []
++bytes1w = []
++bytes_outw = []
++downw = []
++up1 = []
++bytes1c = []
+ 
+ [profile.release]
+ opt-level = "s"
+diff --git a/tools/size-probe/src/main.rs b/tools/size-probe/src/main.rs
+index 8c6cc61..87e4156 100644
+--- a/tools/size-probe/src/main.rs
++++ b/tools/size-probe/src/main.rs
+@@ -66,7 +66,7 @@ fn main() -> ! {
+         remote::run(&w);
+         #[cfg(feature = "inject")]
+         inject::run(&w);
+-        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign"))]
++        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "bytes1w", feature = "bytes_outw", feature = "downw", feature = "up1", feature = "bytes1c"))]
+         lean::run(&w);
+         black_box(&w);
+     }
+@@ -471,7 +471,7 @@ mod ci {
+                 let _ = j.begin_object();
+                 for step in 0..16u32 {
+                     let _ = j.key("p");
+-                    let _ = j.number_u64(u64::from(step ^ rand()));
++                    let _ = j.number_u32(step ^ rand());
+                 }
+                 let _ = j.end_object();
+                 let n = j.len();
+@@ -615,7 +615,7 @@ mod inject {
+ }
+ 
+ // ---------------------------------------------------------------- lean variants
+-#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign"))]
++#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "bytes1w", feature = "bytes_outw", feature = "downw", feature = "up1", feature = "bytes1c"))]
+ mod lean {
+     use super::*;
+     #[allow(unused_imports)]
+@@ -685,6 +685,39 @@ mod lean {
+             black_box(out.write(&w[16..20], &mut buf).ok());
+             black_box(&buf);
+         }
++        #[cfg(feature = "bytes1w")]
++        {
++            static mut IN: zmidi_io::BytesToUmpCore = zmidi_io::BytesToUmpCore::new(zmidi_ump::Group::from_bits(0));
++            let inp = unsafe { &mut *(&raw mut IN) };
++            for &b in input_bytes() { let p = inp.push_words(b); black_box((p.get(0), p.get(1))); }
++        }
++        #[cfg(feature = "bytes1c")]
++        {
++            static mut IN: zmidi_io::BytesToUmpCore = zmidi_io::BytesToUmpCore::new(zmidi_ump::Group::from_bits(0));
++            let inp = unsafe { &mut *(&raw mut IN) };
++            for &b in input_bytes() { black_box(inp.push_with(b, None)); }
++        }
++        #[cfg(feature = "bytes_outw")]
++        {
++            static mut OUT: Option<zmidi_io::UmpToBytes> = None;
++            let out = unsafe { (*(&raw mut OUT)).get_or_insert_with(|| zmidi_io::UmpToBytes::new(true)) };
++            let mut buf = [0u8; 16];
++            black_box(out.write_words(&w[16..20], &mut buf).ok());
++            black_box(&buf);
++        }
++        #[cfg(feature = "downw")]
++        {
++            let mut o = [0u32; 4];
++            let n = zmidi_ump::to_midi1_words(&w[8..], &mut o);
++            black_box(&o[..n]);
++        }
++        #[cfg(feature = "up1")]
++        {
++            static mut UP: zmidi_ump::Midi1ToMidi2Group = zmidi_ump::Midi1ToMidi2Group::new();
++            if let Ok((u, _)) = Ump::parse(&w[8..]) {
++                black_box(unsafe { (*(&raw mut UP)).translate(&u) });
++            }
++        }
+     }
+ }
+ 

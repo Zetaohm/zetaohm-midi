@@ -1,0 +1,25 @@
+[package]
+name = "zmidi-usb"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "USB-MIDI 2.0 and 1.0 (USB Device Class Definition for MIDI Devices) codecs and descriptors, no_std, no alloc and sans-IO"
+license = "MIT"
+
+[lib]
+name = "zmidi_usb"
+path = "src/lib.rs"
+
+[dependencies]
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false, features = ["full"] }
+zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features = false }
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-002, DEC-014: the core API needs no alloc and no USB stack.
+default = ["alt0"]
+# The data path of Alternate Setting 0 (USB-MIDI 1.0 Event Packets) in MidiLink. Off: Alternate Setting 0 has no
+# Jack and no endpoint and the link reads and writes nothing there (DEC-014 addendum of 2026-10-23, DEC-017).
+alt0 = []
+
+[dev-dependencies]
+proptest = "1"

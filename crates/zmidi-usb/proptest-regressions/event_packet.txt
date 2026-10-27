@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 6fa94d6515063ec0c26c1faf226e6c6e2453ce8ea7cb4abce891503cf14a63ab # shrinks to umps = [[823132160, 0], [562036736]], unparsed = false, room = 0

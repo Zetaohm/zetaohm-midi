@@ -1,0 +1,51 @@
+[package]
+name = "zmidi-ump"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "Universal MIDI Packet (UMP) messages for MIDI 2.0 (M2-104-UM), no_std"
+license = "MIT"
+
+[lib]
+name = "zmidi_ump"
+path = "src/lib.rs"
+
+[dependencies]
+bitfield-struct = "0.13"
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-017: all message families are decoded by default. With a family off, `Ump::parse` gives its
+# packets as `Ump::Unknown` (raw words and length) and `MessageType::is_decoded` gives false.
+default = ["full"]
+full = [
+    "utility",
+    "system-common",
+    "channel-voice1",
+    "channel-voice2",
+    "sysex7",
+    "data128",
+    "flex-data",
+    "ump-stream",
+]
+# Message Type 0x0 (7.2).
+utility = []
+# Message Type 0x1 (7.6).
+system-common = []
+# Message Type 0x2 (7.3).
+channel-voice1 = []
+# Message Type 0x4 (7.4).
+channel-voice2 = []
+# Message Type 0x3 (7.7).
+sysex7 = []
+# Message Type 0x5: System Exclusive 8 and Mixed Data Set (7.8, 7.9).
+data128 = []
+# Message Type 0xD (7.5).
+flex-data = []
+# Message Type 0xF (7.1).
+ump-stream = []
+# DEC-002: the core API needs no alloc; `alloc` enables convenience functions only.
+alloc = []
+
+[dev-dependencies]
+# DEC-UMP-003: property tests (tests only; not built for bare-metal targets)
+proptest = "1"
