@@ -62,7 +62,8 @@ static size_t get_reply_chunk(uint8_t *p, uint32_t src, uint32_t dst, uint8_t ri
   size_t at = ci_header(p, 0x7F, 0x35, src, dst), hn = hdr ? strlen(hdr) : 0, dn = strlen(data);
   p[at++] = rid;
   p[at++] = (uint8_t)(hn & 0x7F); p[at++] = (uint8_t)(hn >> 7);
-  memcpy(p + at, hdr, hn); at += hn;
+  if (hn) memcpy(p + at, hdr, hn); /* C99 7.21.1: no null pointer, also for 0 bytes */
+  at += hn;
   p[at++] = (uint8_t)(total & 0x7F); p[at++] = (uint8_t)(total >> 7);
   p[at++] = (uint8_t)(number & 0x7F); p[at++] = (uint8_t)(number >> 7);
   p[at++] = (uint8_t)(dn & 0x7F); p[at++] = (uint8_t)(dn >> 7);
