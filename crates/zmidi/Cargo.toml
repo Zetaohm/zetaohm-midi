@@ -4,6 +4,12 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "Complete MIDI 2.0 implementation"
 license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/zmidi"
+readme = "README.md"
+keywords = ["midi", "midi2", "ump", "midi-ci", "no-std"]
+categories = ["multimedia::audio", "embedded", "no-std", "no-std::no-alloc"]
 
 [dependencies]
 zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1" }

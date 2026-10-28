@@ -4,6 +4,12 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "C ABI of zetaohm-midi for C, C++ and other languages, no_std and no alloc"
 license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/zmidi-ffi"
+readme = "README.md"
+keywords = ["midi", "midi2", "ffi", "c-abi", "no-std"]
+categories = ["multimedia::audio", "development-tools::ffi", "embedded", "no-std", "no-std::no-alloc"]
 
 [lib]
 name = "zmidi"

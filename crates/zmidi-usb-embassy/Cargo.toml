@@ -4,6 +4,12 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "embassy-usb 0.6 adapter for the zmidi-usb USB-MIDI 2.0 and 1.0 codecs, async, no_std, no alloc"
 license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/zmidi-usb-embassy"
+readme = "README.md"
+keywords = ["midi", "midi2", "usb", "embassy", "embedded"]
+categories = ["multimedia::audio", "hardware-support", "embedded", "no-std", "no-std::no-alloc"]
 
 [lib]
 name = "zmidi_usb_embassy"

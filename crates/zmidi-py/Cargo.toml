@@ -4,6 +4,10 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "Python extension of zetaohm-midi (PyO3), built by maturin from bindings/python"
 license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+# The Python package goes to PyPI (bindings/python), not to crates.io.
+publish = false
 # DEC-019: a host-only crate (std); not in the workspace default-members, so a plain `cargo build`
 # or `cargo test` at the root does not need a Python interpreter.
 

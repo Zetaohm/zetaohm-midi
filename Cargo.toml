@@ -34,6 +34,10 @@ default-members = [
 ]
 resolver = "2"
 
+[workspace.package]
+repository = "https://github.com/Zetaohm/zetaohm-midi"
+homepage = "https://github.com/Zetaohm/zetaohm-midi"
+
 # The packaging builds of the C ABI (DEC-019): small code for firmware, one codegen unit and LTO,
 # so the linker of the C program removes what the program does not call.
 [profile.ffi]

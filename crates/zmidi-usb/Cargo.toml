@@ -4,6 +4,12 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "USB-MIDI 2.0 and 1.0 (USB Device Class Definition for MIDI Devices) codecs and descriptors, no_std, no alloc and sans-IO"
 license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/zmidi-usb"
+readme = "README.md"
+keywords = ["midi", "midi2", "usb", "usb-midi", "no-std"]
+categories = ["multimedia::audio", "hardware-support", "embedded", "no-std", "no-std::no-alloc"]
 
 [lib]
 name = "zmidi_usb"

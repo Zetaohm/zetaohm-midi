@@ -4,6 +4,12 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "MIDI-CI Property Exchange (M2-103-UM) for MIDI 2.0, no_std and no alloc"
 license = "MIT"
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/zmidi-ci-pe"
+readme = "README.md"
+keywords = ["midi", "midi2", "midi-ci", "property-exchange", "no-std"]
+categories = ["multimedia::audio", "embedded", "no-std", "no-std::no-alloc"]
 
 [lib]
 name = "zmidi_ci_pe"
