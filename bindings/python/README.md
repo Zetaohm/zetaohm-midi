@@ -13,6 +13,11 @@ typed package over the Rust crates of [zetaohm-midi](../../README.md).
 - MIDI-CI: `CiDevice`, with Profiles, Property Exchange and Process Inquiry.
 - Network MIDI 2.0: `NetHost` and `NetClient`, with authentication.
 - USB-MIDI: `UsbLink`. BLE-MIDI: `BleReader` and `BleWriter`.
+- USB descriptors: `UsbFunction` (with `UsbAlt0`, `UsbSetting`, `UsbEndpoint` and `UsbBlock`) takes
+  the full description of a USB MIDI function and gives its descriptors (USB-MIDI v2.0 Appendix B
+  order), its endpoints, the Group Terminal masks for `UsbLink`, and the Group Terminal Block requests
+  (device side `answer_setup`, host side `gtb_request`, `gtb_total_length`, `gtb_blocks`). A broken
+  rule raises `RejectedError` with the text of the rule.
 - MIDI Clip File: `read_clip` and `ClipWriter`.
 - Sans-IO, as the Rust crates: you own the sockets, the USB device and the BLE connection.
 - Full type stubs (`py.typed`). Python 3.9 or later; one wheel per platform (stable ABI).

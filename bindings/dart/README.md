@@ -12,6 +12,10 @@ native platforms, and the WASM build on the web (dart2js and dart2wasm).
 - MIDI 1.0 byte stream ↔ UMP: `BytesToUmp`, `UmpToBytes`.
 - MIDI-CI: `CiDevice`. Network MIDI 2.0: `NetHost` and `NetClient`, with authentication.
 - USB-MIDI: `UsbLink`. BLE-MIDI: `BleReader` and `BleWriter`.
+- USB descriptors: `UsbFunction` takes the full description of a USB MIDI function in one constructor
+  and gives its descriptors (USB-MIDI v2.0 Appendix B order), its endpoints, the Group Terminal masks
+  for `UsbLink`, and the Group Terminal Block requests (device side `answerSetup`, host side
+  `gtbRequest`, `gtbTotalLength`, `gtbBlocks`).
 - MIDI Clip File: `readClip` and `ClipWriter`.
 - Sans-IO: you own the sockets, the USB device and the BLE connection.
 

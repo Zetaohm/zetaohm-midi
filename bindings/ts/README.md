@@ -12,6 +12,10 @@ in the browser.
 - MIDI 1.0 byte stream ↔ UMP: `BytesToUmp`, `UmpToBytes`. Use them with Web MIDI.
 - MIDI-CI: `CiDevice`. Network MIDI 2.0: `NetHost` and `NetClient`, with authentication.
 - USB-MIDI: `UsbLink` (for WebUSB). BLE-MIDI: `BleReader` and `BleWriter` (for Web Bluetooth).
+- USB descriptors: `UsbFunction` takes the full description of a USB MIDI function in one constructor
+  and gives its descriptors (USB-MIDI v2.0 Appendix B order), its endpoints, the Group Terminal masks
+  for `UsbLink`, and the Group Terminal Block requests (device side `answerSetup`, host side
+  `gtbRequest`, `gtbTotalLength`, `gtbBlocks`).
 - MIDI Clip File: `readClip` and `ClipWriter`.
 - Sans-IO: you own the transport. One small WASM file, no other runtime dependency.
 
