@@ -21,6 +21,8 @@ fn build_staticlib(dir: &str, features: &str) -> PathBuf {
     std::fs::create_dir_all(tmp).expect("create the target directory");
     let lock =
         std::fs::File::create(tmp.join(format!("{dir}.lock"))).expect("create the lock file");
+    // `File::lock` needs Rust 1.89; only this test uses it, the library builds with the rust-version.
+    #[allow(clippy::incompatible_msrv)]
     lock.lock().expect("lock the staticlib build");
     let st = Command::new(env!("CARGO"))
         .args([
