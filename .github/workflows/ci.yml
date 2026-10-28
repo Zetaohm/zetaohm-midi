@@ -28,6 +28,7 @@ jobs:
       # The C ABI: the header is current, the CMake package and the C tests, the bare-metal link.
       - name: C ABI tools
         run: |
+          sudo apt-get update
           sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi
           cargo install --locked cbindgen --version 0.26.0  # the version that writes include/zmidi.h
       - name: C ABI
@@ -61,7 +62,7 @@ jobs:
       - name: size check
         run: python3 scripts/size-check.py
       - name: speed check tools
-        run: sudo apt-get install -y --no-install-recommends qemu-system-arm libglib2.0-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends qemu-system-arm libglib2.0-dev pkg-config
       - name: speed check
         run: python3 scripts/speed-check.py
 
