@@ -40,6 +40,8 @@ pub enum Registration {
 }
 
 impl Drop for Registration {
+    // Only `Child` exists on systems other than macOS, so there the pattern always matches.
+    #[allow(irrefutable_let_patterns)]
     fn drop(&mut self) {
         if let Registration::Child(c) = self {
             let _ = c.kill();
