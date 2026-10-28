@@ -16,8 +16,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
-          # The bare-metal gate of each crate, and the MK20DX example (no FPU).
-          targets: thumbv7em-none-eabihf, thumbv7em-none-eabi
+          # The bare-metal gate of each crate, the MK20DX example (no FPU), and the WASM build of the C
+          # ABI (scripts/ffi-check.sh and the TypeScript package).
+          targets: thumbv7em-none-eabihf, thumbv7em-none-eabi, wasm32-unknown-unknown
           components: clippy, llvm-tools
       - name: compile gates (the library crates)
         run: sh scripts/compile-gates.sh
