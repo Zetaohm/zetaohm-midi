@@ -28,7 +28,7 @@ jobs:
       - name: C ABI tools
         run: |
           sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi
-          cargo install --locked cbindgen
+          cargo install --locked cbindgen --version 0.26.0  # the version that writes include/zmidi.h
       - name: C ABI
         run: sh scripts/ffi-check.sh
       # The Python package (uv and maturin; stubtest, pytest, pyright, ruff).
