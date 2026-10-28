@@ -2,7 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/zmidi.svg)](https://crates.io/crates/zmidi)
 [![docs.rs](https://img.shields.io/docsrs/zmidi)](https://docs.rs/zmidi)
-[![CI](https://github.com/zetaohm/zetaohm-midi/actions/workflows/ci.yml/badge.svg)](https://github.com/zetaohm/zetaohm-midi/actions/workflows/ci.yml)
+[![CI](https://github.com/Zetaohm/zetaohm-midi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Zetaohm/zetaohm-midi/actions/workflows/ci.yml?query=branch%3Amain)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 A complete MIDI 2.0 implementation in Rust for microcontrollers first, and for desktops, servers and
@@ -19,8 +19,9 @@ browsers too.
   [`docs/sizes.md`](docs/sizes.md).
 - **Many languages.** A C ABI (`zmidi.h`) and packages for Python, TypeScript (WASM) and Dart.
 
-> **Status: pre-release.** The crates and packages are not yet published. The 0.x API can change
-> in any release. See [Status](#status) for what is tested on hardware.
+> **Status: alpha.** The Rust crates are on crates.io as `0.1.0-alpha.1`. The Python, TypeScript and
+> Dart packages are not published yet. The 0.x API can change in any release. See [Status](#status)
+> for what is tested on hardware.
 
 ## Contents
 
