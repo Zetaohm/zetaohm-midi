@@ -2,8 +2,9 @@
 name = "zmidi"
 version = "0.1.0-alpha.1"
 edition = "2021"
-description = "Complete MIDI 2.0 implementation"
+description = "MIDI 2.0 and MIDI 1.0: UMP, MIDI-CI, Property Exchange, MIDI Clip File, Network MIDI 2.0, USB-MIDI and BLE-MIDI; no_std, no alloc, sans-IO"
 license = "MIT"
+rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/zmidi"
@@ -11,19 +12,34 @@ readme = "README.md"
 keywords = ["midi", "midi2", "ump", "midi-ci", "no-std"]
 categories = ["multimedia::audio", "embedded", "no-std", "no-std::no-alloc"]
 
+# Default on, opt out (OPT-052 rule 1, DEC-017): `full` turns on each crate with its own default
+# features; with `default-features = false` only zmidi-ump stays, with no message family.
 [dependencies]
-zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1" }
-zmidi-ci = { path = "../zmidi-ci", version = "0.1.0-alpha.1" }
-zmidi-ci-pe = { path = "../zmidi-ci-pe", version = "0.1.0-alpha.1" }
-zmidi-file = { path = "../zmidi-file", version = "0.1.0-alpha.1" }
-zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1" }
-zmidi-net = { path = "../zmidi-net", version = "0.1.0-alpha.1" }
-zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1" }
-zmidi-ble = { path = "../zmidi-ble", version = "0.1.0-alpha.1" }
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false }
+zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-ci = { path = "../zmidi-ci", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-ci-pe = { path = "../zmidi-ci-pe", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-file = { path = "../zmidi-file", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-net = { path = "../zmidi-net", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-ble = { path = "../zmidi-ble", version = "0.1.0-alpha.1", default-features = false, optional = true }
 
 [features]
-default = []
-# "zlib+Mcoded7" Property Data (zmidi-ci-pe, DEC-PE-001).
-zlib = ["zmidi-ci-pe/zlib"]
-# Network MIDI 2.0 authentication (zmidi-net, DEC-013).
-auth = ["zmidi-net/auth"]
+default = ["full"]
+full = ["ump", "io", "ci", "ci-pe", "file", "net", "usb", "ble"]
+# Each part, with the default features of its crate.
+ump = ["zmidi-ump/full"]
+io = ["dep:zmidi-io", "zmidi-io/full"]
+ci = ["dep:zmidi-ci", "zmidi-ci/full"]
+ci-pe = ["dep:zmidi-ci-pe", "zmidi-ci-pe/initiator"]
+file = ["dep:zmidi-file", "zmidi-file/full"]
+net = ["dep:zmidi-net"]
+usb = ["dep:zmidi-usb", "zmidi-usb/alt0"]
+ble = ["dep:zmidi-ble"]
+# "zlib+Mcoded7" Property Data (zmidi-ci-pe, DEC-PE-001); off by default.
+zlib = ["ci-pe", "zmidi-ci-pe/zlib"]
+# Network MIDI 2.0 authentication (zmidi-net, DEC-013); off by default.
+auth = ["net", "zmidi-net/auth"]
+
+[package.metadata.docs.rs]
+all-features = true

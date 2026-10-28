@@ -4,6 +4,7 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "MIDI-CI Property Exchange (M2-103-UM) for MIDI 2.0, no_std and no alloc"
 license = "MIT"
+rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/zmidi-ci-pe"

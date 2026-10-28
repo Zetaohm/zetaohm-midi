@@ -35,6 +35,8 @@ default-members = [
 resolver = "2"
 
 [workspace.package]
+# The oldest Rust that builds every crate (job `msrv` of .github/workflows/ci.yml).
+rust-version = "1.88"
 repository = "https://github.com/Zetaohm/zetaohm-midi"
 homepage = "https://github.com/Zetaohm/zetaohm-midi"
 

@@ -1,4 +1,4 @@
-# midi
+# zmidi
 
 [![crates.io](https://img.shields.io/crates/v/zmidi.svg)](https://crates.io/crates/zmidi)
 [![docs.rs](https://img.shields.io/docsrs/zmidi)](https://docs.rs/zmidi)
@@ -19,7 +19,8 @@ module:
 | `zmidi::usb` | [`zmidi-usb`](../zmidi-usb) | USB-MIDI 2.0 and 1.0 |
 | `zmidi::ble` | [`zmidi-ble`](../zmidi-ble) | BLE-MIDI |
 
-For the smallest firmware, depend on the individual crates and select their features.
+For the smallest firmware, turn off the default features (`default-features = false`) and select
+the parts, or depend on the individual crates and select their features.
 
 ## Example
 
@@ -44,6 +45,9 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
 
 | Feature | Default | Description |
 |---|---|---|
+| `full` | yes | All the parts below that are on by default. |
+| `ump` | yes | All UMP message families (`zmidi-ump/full`). The `ump` module is always present. |
+| `io`, `ci`, `ci-pe`, `file`, `net`, `usb`, `ble` | yes | The module of the same name, with the default features of its crate. |
 | `auth` | no | Network MIDI 2.0 authentication (`zmidi-net/auth`). |
 | `zlib` | no | The `zlib+Mcoded7` Property Exchange encoding (`zmidi-ci-pe/zlib`). |
 

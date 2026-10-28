@@ -2,8 +2,9 @@
 name = "zmidi-ump"
 version = "0.1.0-alpha.1"
 edition = "2021"
-description = "Universal MIDI Packet (UMP) messages for MIDI 2.0 (M2-104-UM), no_std"
+description = "Universal MIDI Packet (UMP) messages for MIDI 2.0 and MIDI 1.0 (M2-104-UM), no_std and no alloc"
 license = "MIT"
+rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/zmidi-ump"

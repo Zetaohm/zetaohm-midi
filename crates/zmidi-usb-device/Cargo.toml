@@ -4,6 +4,7 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "usb-device 0.3 adapter for the zmidi-usb USB-MIDI 2.0 and 1.0 codecs, no_std, no alloc"
 license = "MIT"
+rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/zmidi-usb-device"

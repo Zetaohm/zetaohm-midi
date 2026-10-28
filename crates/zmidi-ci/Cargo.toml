@@ -4,6 +4,7 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "MIDI Capability Inquiry (MIDI-CI, M2-101-UM) for MIDI 2.0, no_std and sans-IO"
 license = "MIT"
+rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/zmidi-ci"

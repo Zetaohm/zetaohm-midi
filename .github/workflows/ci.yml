@@ -109,3 +109,15 @@ jobs:
       - name: ESP32-S3 BLE-MIDI example
         working-directory: examples/esp32s3-ble-midi
         run: cargo build --release && cargo clippy --release -- -D warnings
+
+  # The rust-version of the manifests: every crate builds with it (zmidi-ble-trouble needs 1.89).
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88
+      - name: rust 1.88
+        run: cargo check --workspace --exclude zmidi-py --exclude zmidi-ble-trouble --all-features
+      - uses: dtolnay/rust-toolchain@1.89
+      - name: rust 1.89
+        run: cargo +1.89 check -p zmidi-ble-trouble --all-features

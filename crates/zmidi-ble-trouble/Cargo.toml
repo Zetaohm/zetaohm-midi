@@ -4,6 +4,7 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "trouble-host 0.7 adapter for the zmidi-ble BLE-MIDI codec: GATT service and connection loop, async, no_std, no alloc"
 license = "MIT"
+rust-version = "1.89"  # trouble-host 0.7
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/zmidi-ble-trouble"

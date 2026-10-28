@@ -4,6 +4,7 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "Network MIDI 2.0 (UDP, M2-124-UM) for MIDI 2.0, no_std, no alloc and sans-IO"
 license = "MIT"
+rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/zmidi-net"

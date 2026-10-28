@@ -2,8 +2,9 @@
 name = "zmidi-io"
 version = "0.1.0-alpha.1"
 edition = "2021"
-description = "MIDI 2.0 I/O and device communication"
+description = "MIDI 1.0 byte streams to and from UMP, UMP Endpoint, Jitter Reduction and Group routing for MIDI 2.0, no_std and no alloc"
 license = "MIT"
+rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/zmidi-io"

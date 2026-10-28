@@ -4,6 +4,7 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "embassy-usb 0.6 adapter for the zmidi-usb USB-MIDI 2.0 and 1.0 codecs, async, no_std, no alloc"
 license = "MIT"
+rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 documentation = "https://docs.rs/zmidi-usb-embassy"

@@ -4,6 +4,7 @@ version = "0.1.0-alpha.1"
 edition = "2021"
 description = "Python extension of zetaohm-midi (PyO3), built by maturin from bindings/python"
 license = "MIT"
+rust-version.workspace = true
 repository.workspace = true
 homepage.workspace = true
 # The Python package goes to PyPI (bindings/python), not to crates.io.
