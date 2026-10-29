@@ -415,6 +415,13 @@ mod tests {
             r.receive(&[NOTE_ON], true, 32_100),
             Disposition::RenderAt(38_400)
         );
+        // A message with no JR Timestamp before the last render time waits for it; after it, it
+        // renders now.
+        assert_eq!(
+            r.receive(&[NOTE_ON], false, 32_200),
+            Disposition::RenderAt(38_400)
+        );
+        assert_eq!(r.receive(&[NOTE_ON], false, 38_400), Disposition::RenderNow);
     }
 
     #[test]

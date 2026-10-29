@@ -348,6 +348,36 @@ mod tests {
         let mut t = SendOrder::new(1).unwrap();
         t.set_receiver_streams(0);
         assert_eq!(t.check(&sx8(0, 0)), Err(SendOrderError::TooManyStreams));
+        // An End closes only its own stream: with a receiver count of 1, stream 1 after the End
+        // of stream 0 is allowed, and stream 2 while stream 1 is open is not.
+        let mut u = SendOrder::new(4).unwrap();
+        u.set_receiver_streams(1);
+        u.check(&sx8(1, 0)).unwrap();
+        u.check(&sx8(3, 0)).unwrap();
+        u.check(&sx8(1, 1)).unwrap();
+        assert_eq!(u.check(&sx8(1, 2)), Err(SendOrderError::TooManyStreams));
+        // Stream IDs of 128 and more (7.8: up to 255).
+        let mut v = SendOrder::new(256).unwrap();
+        v.set_receiver_streams(2);
+        v.check(&sx8(1, 130)).unwrap();
+        v.check(&sx8(1, 2)).unwrap();
+        assert_eq!(v.check(&sx8(1, 200)), Err(SendOrderError::TooManyStreams));
+        v.check(&sx8(2, 130)).unwrap();
+        v.check(&sx8(3, 130)).unwrap();
+        v.check(&sx8(1, 200)).unwrap();
+    }
+
+    #[test]
+    fn only_system_real_time_passes_an_open_sysex7_and_utility_is_not_sysex8() {
+        // 7.7.1: only System Real Time (Message Type 0x1, F8H to FFH) may come between the UMPs
+        // of a SysEx7 message on its Group.
+        let mut s = SendOrder::new(1).unwrap();
+        s.check(&sx7(1, 1)).unwrap();
+        assert_eq!(s.check(&[0x11F2_0102]), Err(SendOrderError::SysEx7Open));
+        assert_eq!(s.check(&[0x21F8_0000]), Err(SendOrderError::SysEx7Open));
+        s.check(&[CLOCK_G1]).unwrap();
+        // A Utility message is not a SysEx8 packet, whatever its bits 15..8.
+        s.check(&[0x0020_0500]).unwrap();
     }
 
     #[test]

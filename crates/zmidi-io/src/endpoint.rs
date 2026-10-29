@@ -1044,6 +1044,17 @@ mod tests {
             [[0xF001_0101, 0x8200_0100, 0, 0], [0xF006_0100, 0, 0, 0]]
         );
         assert_eq!(ep.stream_configuration().protocol, StreamProtocol::Midi1);
+        // A capability that is removed turns off the JR use in effect (REQ-SCFG-010 exception).
+        let mut d = description(true);
+        d.txjr = true;
+        let mut jr = Endpoint::try_new(d, blocks()).unwrap();
+        jr.receive(&[0xF005_0203, 0, 0, 0]).count();
+        assert!(jr.sends_jr_timestamps() && jr.expects_jr_timestamps());
+        assert_eq!(
+            collect(jr.set_capabilities(true, true, false, false).unwrap()),
+            [[0xF001_0101, 0x8200_0300, 0, 0], [0xF006_0200, 0, 0, 0]]
+        );
+        assert!(!jr.sends_jr_timestamps() && !jr.expects_jr_timestamps());
         assert_eq!(
             ep.set_capabilities(false, false, true, true)
                 .map(|r| r.count()),

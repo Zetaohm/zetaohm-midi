@@ -797,6 +797,23 @@ mod tests {
     }
 
     #[test]
+    fn reader_and_writer_use_the_group_and_whole_umps() {
+        // The Group of the reader is in each UMP: a Note On and a SysEx7 on Group 5.
+        let mut r = BytesToUmp::midi1(Group::new(5).unwrap());
+        let out: Vec<_> = [0x90, 0x3C, 0x27, 0xF0, 0x01, 0xF7]
+            .iter()
+            .flat_map(|&b| r.push(b).collect::<Vec<_>>())
+            .map(words)
+            .collect();
+        assert_eq!(out, [[0x2590_3C27u32].to_vec(), [0x3501_0100, 0].to_vec()]);
+        // The writer needs the whole UMP: one word of a 64-bit UMP gives no byte.
+        let mut w = UmpToBytes::new(false);
+        let mut n = 0;
+        w.write_each(&[0x4090_3C00], |_| n += 1);
+        assert_eq!(n, 0);
+    }
+
+    #[test]
     fn reader_data_counts_and_last_status() {
         // REQ-BS-004: 2 data bytes for AnH and EnH, 1 for DnH and F1H.
         assert_eq!(read(&[0xA0, 0x05, 0x06]), [[0x20A0_0506u32].to_vec()]);
