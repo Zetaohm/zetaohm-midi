@@ -159,7 +159,9 @@ static void profiles_and_process(void) {
   CHECK(zmidi_ci_profile_event(&a, &pe) == ZMIDI_STATUS_OK);
   CHECK(pe.device_id == 0x00 && pe.enabled_count == 0 && pe.disabled_count == 1);
   CHECK(zmidi_ci_profile_ids(&a, true, NULL, 0, &count) == ZMIDI_STATUS_OK && count == 0);
+  memset(ids, 0xEE, sizeof ids);
   CHECK(zmidi_ci_profile_ids(&a, false, ids, 4, &count) == ZMIDI_STATUS_BUFFER_TOO_SMALL && count == 1);
+  CHECK(ids[0] == 0xEE && ids[4] == 0xEE); /* REQ-FFI-CI-018: nothing copied */
   CHECK(zmidi_ci_profile_ids(&a, false, ids, sizeof ids, &count) == ZMIDI_STATUS_OK && count == 1);
   CHECK(memcmp(ids, prof, 5) == 0);
 
@@ -196,6 +198,12 @@ static void profiles_and_process(void) {
   CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_PROFILE_DETAILS_REPLY);
   CHECK(zmidi_ci_profile_event(&a, &pe) == ZMIDI_STATUS_OK);
   CHECK(pe.target == 0 && !pe.notification && pe.data_len == 4);
+  /* REQ-FFI-CI-014: the automatic Reply to Profile Details Inquiry (Table 23), byte for byte. */
+  k = ci_header(want, 0x00, 0x29, mb, ma);
+  memcpy(want + k, prof, 5); k += 5;
+  want[k++] = 0x00; want[k++] = 0x04; want[k++] = 0x00;
+  want[k++] = 0x01; want[k++] = 0x00; want[k++] = 0x01; want[k++] = 0x00;
+  CHECK(rn == 3 + k && memcmp(replies + 3, want, k) == 0);
   CHECK(pe.data[0] == 1 && pe.data[1] == 0 && pe.data[2] == 1 && pe.data[3] == 0);
 
   /* Inquiry Target 0x40 (Profile Specific): the program of B answers (Table 23). */
@@ -312,6 +320,17 @@ static void profiles_and_process(void) {
     CHECK(one_record(msgs + first, n - first, 15, want, k));
   }
   CHECK(zmidi_ci_remove_profile(&b, 0x00, 15, prof, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  /* REQ-FFI-CI-010: Disabled Report, then Removed Report, both on Group 15. */
+  {
+    size_t first = 3 + ((size_t)msgs[1] | ((size_t)msgs[2] << 8));
+    k = ci_header(want, 0x00, 0x25, mb, BROADCAST);
+    memcpy(want + k, prof, 5); k += 5;
+    want[k++] = 0x01; want[k++] = 0x00;
+    CHECK(msgs[0] == 15 && first == 3 + k && memcmp(msgs + 3, want, k) == 0);
+    k = ci_header(want, 0x00, 0x27, mb, BROADCAST);
+    memcpy(want + k, prof, 5); k += 5;
+    CHECK(one_record(msgs + first, n - first, 15, want, k));
+  }
   entry.group = 16;
   CHECK(zmidi_ci_add_profile(&b, &entry, msgs, sizeof msgs, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
   entry.group = 0; entry.channels = 0x4000;
@@ -329,6 +348,131 @@ static void profiles_and_process(void) {
   CHECK(zmidi_ci_add_profile(&b, NULL, msgs, sizeof msgs, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_ci_profile_event(&a, NULL) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_ci_process_event(NULL, &pi) == ZMIDI_STATUS_INVALID_ARGUMENT);
+}
+
+
+/* M2-101 Table 6: a Reply to Discovery from `src` to `dst` with Message Version `version` (0x01: no
+ * Initiator's Output Path ID and Function Block). Gives the byte count. */
+static size_t discovery_reply(uint8_t *p, uint32_t src, uint32_t dst, uint8_t version) {
+  size_t at = ci_header(p, 0x7F, 0x71, src, dst);
+  static const uint8_t body[16] = {0x00, 0x21, 0x7F, 1, 0, 2, 0, 0, 0, 1, 0, 0x1C, 0x00, 0x04, 0, 0};
+  p[4] = version;
+  memcpy(p + at, body, sizeof body);
+  at += sizeof body;
+  if (version >= 2) { p[at++] = 0; p[at++] = 0x7F; }
+  return at;
+}
+
+/* The test-audit cases of REQ-FFI-CI-002 to REQ-FFI-CI-020 (each named at its case). */
+static ZmidiCi x, y;
+static void audit_cases(void) {
+  ZmidiCiConfig c = config();
+  ZmidiCiProfileEvent pe;
+  ZmidiCiProfile entry;
+  ZmidiCiReport bad = {0x80, 0, 0, 0}, req = {0x7F, 0x01, 0x02, 0x01};
+  uint8_t want[64], ids[10];
+  size_t n = 0, rn = 0, k = 0, count = 0, i;
+  uint32_t mx, my;
+  static const uint8_t prof[5] = {0x7E, 0x00, 0x01, 0x01, 0x01};
+  static const uint8_t detail[2] = {0x01, 0x02};
+  c.profiles = true;
+  c.process_inquiry = true;
+  CHECK(zmidi_ci_init(&x, &c, 21) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_ci_init(&y, &c, 22) == ZMIDI_STATUS_OK);
+  mx = zmidi_ci_muid(&x);
+  my = zmidi_ci_muid(&y);
+
+  /* REQ-FFI-CI-003: the timer of a Discovery ends it at poll (M2-101 3.6: 3 s). */
+  CHECK(zmidi_ci_discovery(&x, 0, 0, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_ci_poll(&x, 0, &ev) == ZMIDI_STATUS_OK && ev.kind == ZMIDI_CI_EVENT_KIND_NONE);
+  CHECK(zmidi_ci_poll(&x, 10000000, &ev) == ZMIDI_STATUS_OK && ev.kind == ZMIDI_CI_EVENT_KIND_DISCOVERY_ENDED);
+
+  /* REQ-FFI-CI-008: a reply buffer too small is refused before the message is read: no event and
+   * no record; then the same Discovery gets its reply. */
+  ev.kind = ZMIDI_CI_EVENT_KIND_ACK;
+  rn = 99;
+  CHECK(zmidi_ci_receive(&y, 4, msgs + 3, n - 3, 1000, replies, ZMIDI_CI_REPLY_BUFFER - 1, &rn, &ev) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
+  CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_ACK && rn == 99);
+  /* REQ-FFI-CI-002: the Discovery arrives on Group 4: the automatic reply goes on Group 4. */
+  CHECK(zmidi_ci_receive(&y, 4, msgs + 3, n - 3, 1000, replies, sizeof replies, &rn, &ev) == ZMIDI_STATUS_OK);
+  CHECK(rn > 3 && replies[0] == 4 && replies[3 + 3] == 0x71);
+  deliver(&x, replies, rn, msgs, &n);
+  CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_DISCOVERED && ev.muid == my);
+  /* REQ-FFI-CI-018: a Discovered event has no Profile IDs. */
+  CHECK(zmidi_ci_profile_ids(&x, true, ids, sizeof ids, &count) == ZMIDI_STATUS_NO_PENDING);
+
+  /* REQ-FFI-CI-016: 8 Profiles fill the table; the 9th is refused. Buffers one byte too small. */
+  memset(&entry, 0, sizeof entry);
+  entry.device_id = 0x00;
+  entry.max_channels = 1;
+  for (i = 0; i < 9; i++) {
+    memcpy(entry.profile, prof, 5);
+    entry.profile[2] = (uint8_t)(0x10 + i);
+    CHECK(zmidi_ci_add_profile(&y, &entry, msgs, sizeof msgs, &n) == (i < 8 ? ZMIDI_STATUS_OK : ZMIDI_STATUS_REJECTED));
+  }
+  entry.profile[2] = 0x10;
+  CHECK(zmidi_ci_remove_profile(&y, 0x00, 0, entry.profile, msgs, ZMIDI_CI_REPORT_BUFFER - 1, &n) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
+  CHECK(zmidi_ci_set_profile_state(&y, 0x00, 0, entry.profile, true, 1, msgs, ZMIDI_CI_REPLY_MAX - 1, &n) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
+  /* The refused calls changed nothing: the Profile is still there and disabled. */
+  CHECK(zmidi_ci_set_profile_state(&y, 0x00, 0, entry.profile, true, 1, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_ci_remove_profile(&y, 0x00, 0, entry.profile, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  /* REQ-FFI-CI-010: removing an enabled Profile gives the Disabled Report, then the Removed Report. */
+  CHECK(n > 6 && msgs[3 + 3] == 0x25);
+  {
+    size_t first = 3 + ((size_t)msgs[1] | ((size_t)msgs[2] << 8));
+    CHECK(n > first + 6 && msgs[first + 3 + 3] == 0x27);
+  }
+  for (i = 1; i < 8; i++) {
+    entry.profile[2] = (uint8_t)(0x10 + i);
+    CHECK(zmidi_ci_remove_profile(&y, 0x00, 0, entry.profile, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  }
+
+  /* REQ-FFI-CI-017, -011: the Group of the record. */
+  CHECK(zmidi_ci_profile_inquiry(&x, my, 3, 0x7F, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK && msgs[0] == 3);
+  CHECK(zmidi_ci_profile_specific_data(&x, my, 5, 0x00, prof, detail, 2, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK && msgs[0] == 5);
+  /* REQ-FFI-CI-011, -012, -014: a Profile Details Reply on Group 5 that x did not ask for (a
+   * notification), byte for byte (Table 23). */
+  CHECK(zmidi_ci_profile_details_reply(&y, mx, 5, 0x00, prof, 0x40, detail, 2, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  k = ci_header(want, 0x00, 0x29, my, mx);
+  memcpy(want + k, prof, 5); k += 5;
+  want[k++] = 0x40; want[k++] = 0x02; want[k++] = 0x00; want[k++] = 0x01; want[k++] = 0x02;
+  CHECK(one_record(msgs, n, 5, want, k));
+  deliver(&x, msgs, n, replies, &rn);
+  CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_PROFILE_DETAILS_REPLY);
+  CHECK(zmidi_ci_profile_event(&x, &pe) == ZMIDI_STATUS_OK && pe.group == 5 && pe.notification);
+  /* REQ-FFI-CI-014: the Profile Details Inquiry with Inquiry Target 0x40 (Table 22). */
+  CHECK(zmidi_ci_profile_details_inquiry(&x, my, 0, 0x00, prof, 0x40, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  k = ci_header(want, 0x00, 0x28, mx, my);
+  memcpy(want + k, prof, 5); k += 5;
+  want[k++] = 0x40;
+  CHECK(one_record(msgs, n, 0, want, k));
+
+  /* REQ-FFI-CI-013: report bytes over 0x7F in the Reply; the NAK of an abort for an error has
+   * Status Code 0x40 (Table 15, M2-101 9.8.1). */
+  CHECK(zmidi_ci_message_report_reply(&y, mx, 0, 0x7F, &req, &bad, msgs, sizeof msgs, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_ci_abort_report(&y, mx, 0, 0x7F, true, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  k = ci_header(want, 0x7F, 0x7F, my, mx);
+  want[k++] = 0x42; want[k++] = 0x40; want[k++] = 0x00;
+  for (i = 0; i < 7; i++) want[k++] = 0;
+  CHECK(one_record(msgs, n, 0, want, k));
+  CHECK(zmidi_ci_abort_report(&y, mx, 0, 0x7F, false, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  want[13 + 1] = 0x20;
+  CHECK(one_record(msgs, n, 0, want, k));
+
+  /* REQ-FFI-CI-020: a peer of Message Version 1 has no Process Inquiry: rejected. */
+  n = discovery_reply(msgs, 0x00123456u, mx, 0x01);
+  CHECK(zmidi_ci_receive(&x, 0, msgs, n, 2000, replies, sizeof replies, &rn, &ev) == ZMIDI_STATUS_OK);
+  CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_DISCOVERED && ev.muid == 0x00123456u);
+  CHECK(zmidi_ci_pi_capabilities_inquiry(&x, 0x00123456u, msgs, sizeof msgs, &n) == ZMIDI_STATUS_REJECTED);
+
+  /* REQ-FFI-CI-006: 4 peers (y and the Version 1 peer, then two more); the 5th is not kept. */
+  for (i = 0; i < 3; i++) {
+    n = discovery_reply(msgs, 0x00200000u + (uint32_t)i, mx, 0x02);
+    CHECK(zmidi_ci_receive(&x, 0, msgs, n, 2000, replies, sizeof replies, &rn, &ev) == ZMIDI_STATUS_OK);
+    if (i < 2) CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_DISCOVERED);
+  }
+  CHECK(zmidi_ci_endpoint_info_inquiry(&x, 0x00200001u, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_ci_endpoint_info_inquiry(&x, 0x00200002u, msgs, sizeof msgs, &n) == ZMIDI_STATUS_REJECTED);
 }
 
 int main(void) {
@@ -486,6 +630,7 @@ int main(void) {
   CHECK(zmidi_ci_poll(&b, 5000000, &ev) == ZMIDI_STATUS_OK);
 
   profiles_and_process();
+  audit_cases();
 
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return EXIT_FAILURE; }
   printf("ci ok: state %u B, slot %u B\n", (unsigned)zmidi_ci_size(), (unsigned)sizeof(ZmidiCi));

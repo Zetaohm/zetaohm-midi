@@ -235,7 +235,7 @@ static void init_checks(const ZmidiPeResource *table, size_t count) {
 
 int main(void) {
   ZmidiCiConfig c = config();
-  ZmidiPeResource table[7];
+  ZmidiPeResource table[8];
   ZmidiPeHeader h;
   ZmidiPeSubscription sub;
   ZmidiPeEvent pev;
@@ -263,10 +263,12 @@ int main(void) {
   table[6] = resource("X-Fc");
   table[6].can_set = 1;
   table[6].fc_on_set = true;
+  table[7] = resource("X-Page");
+  table[7].can_paginate = true;
 
   CHECK(zmidi_ci_init(&a, &c, 1) == ZMIDI_STATUS_OK);
   CHECK(zmidi_ci_init(&b, &c, 2) == ZMIDI_STATUS_OK);
-  init_checks(table, 7);
+  init_checks(table, 8);
   CHECK(zmidi_pe_init(&pa, NULL, 0) == ZMIDI_STATUS_OK);
   ma = zmidi_ci_muid(&a);
   mb = zmidi_ci_muid(&b);
@@ -285,6 +287,11 @@ int main(void) {
   deliver(&b, &pb, msgs, n, replies, &rn);
   deliver(&a, &pa, replies, rn, msgs, &n);
   CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_PE_CAPABILITIES && event_n == 0);
+  /* REQ-FFI-PE-005: before the ResourceList of B, the request says that it is missing. */
+  h = header("DeviceInfo");
+  CHECK(zmidi_pe_request(&pa, &a, mb, 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_OK && missing);
+  CHECK(zmidi_pe_abort(&pa, &a, mb, id, 0) == ZMIDI_STATUS_OK);
+  n = pending(&pa, &a, msgs, sizeof msgs);
 
   /* REQ-FFI-PE-005: the ResourceList of B first (M2-103 9). */
   CHECK(zmidi_pe_request_resource_list(&pa, &a, mb, now, msgs, sizeof msgs, &n, &id) == ZMIDI_STATUS_OK);
@@ -373,6 +380,74 @@ int main(void) {
   CHECK(n > 3);
   deliver(&a, &pa, msgs, n, replies, &rn);
   CHECK(event_n == 1 && events[0].status == 404 && events[0].end == ZMIDI_PE_CHUNK_END_COMPLETE);
+
+  /* REQ-FFI-PE-004: a reply with "mediaType", "totalCount" and "cacheTime" in its header. */
+  h = header("DeviceInfo");
+  CHECK(zmidi_pe_request(&pa, &a, mb, 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_OK);
+  deliver(&b, &pb, msgs, send_all(&pa, &a, mb, id, 0, NULL, 0, msgs, sizeof msgs, &chunks), replies, &rn);
+  CHECK(zmidi_pe_reply(&pb, &b, ma, id, 200, ZMIDI_PE_ENCODING_ASCII, (const uint8_t *)"application/octet-stream", 3, 60, 2, now) == ZMIDI_STATUS_OK);
+  deliver(&a, &pa, msgs, send_all(&pb, &b, ma, id, 1, (const uint8_t *)"ab", 2, msgs, sizeof msgs, &chunks), replies, &rn);
+  CHECK(event_n == 1 && events[0].status == 200);
+  CHECK(has(events[0].header, events[0].header_len, "\"mediaType\":\"application/octet-stream\""));
+  CHECK(has(events[0].header, events[0].header_len, "\"totalCount\":3"));
+  CHECK(has(events[0].header, events[0].header_len, "\"cacheTime\":60"));
+
+  /* REQ-FFI-PE-008: a reply for a Resource with "canPaginate" needs "totalCount". */
+  h = header("X-Page");
+  CHECK(zmidi_pe_request(&pa, &a, mb, 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_OK);
+  deliver(&b, &pb, msgs, send_all(&pa, &a, mb, id, 0, NULL, 0, msgs, sizeof msgs, &chunks), replies, &rn);
+  CHECK(event_n == 1 && events[0].resource_index == 7);
+  CHECK(zmidi_pe_reply(&pb, &b, ma, id, 200, ZMIDI_PE_ENCODING_ASCII, NULL, -1, -1, 2, now) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_pe_last_error(&pb, NULL) == ZMIDI_PE_ERROR_NO_TOTAL_COUNT);
+  CHECK(zmidi_pe_reply(&pb, &b, ma, id, 200, ZMIDI_PE_ENCODING_ASCII, NULL, 1, -1, 2, now) == ZMIDI_STATUS_OK);
+  deliver(&a, &pa, msgs, send_all(&pb, &b, ma, id, 1, (const uint8_t *)"[]", 2, msgs, sizeof msgs, &chunks), replies, &rn);
+  CHECK(event_n == 1 && events[0].status == 200);
+
+  /* REQ-PE-STAT-008: a reply whose middle Chunk is lost: the gap closes the transaction. */
+  h = header("DeviceInfo");
+  CHECK(zmidi_pe_request(&pa, &a, mb, 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_OK);
+  deliver(&b, &pb, msgs, send_all(&pa, &a, mb, id, 0, NULL, 0, msgs, sizeof msgs, &chunks), replies, &rn);
+  CHECK(zmidi_pe_reply(&pb, &b, ma, id, 200, ZMIDI_PE_ENCODING_ASCII, NULL, -1, -1, 1200, now) == ZMIDI_STATUS_OK);
+  n = send_all(&pb, &b, ma, id, 1, body, 1200, msgs, sizeof msgs, &chunks);
+  CHECK(chunks == 3);
+  {
+    size_t r1 = first_record(msgs), r2 = first_record(msgs + r1);
+    deliver(&a, &pa, msgs, r1, replies, &rn);
+    deliver(&a, &pa, msgs + r1 + r2, n - r1 - r2, replies, &rn);
+    CHECK(event_n == 1 && events[0].kind == ZMIDI_PE_EVENT_KIND_CLOSED);
+  }
+  n = pending(&pa, &a, msgs, sizeof msgs);
+  /* REQ-FFI-PE-010: a last Chunk with Number of This Chunk 0 (M2-101 Table 29): the end is
+   * "incomplete". */
+  h = header("DeviceInfo");
+  CHECK(zmidi_pe_request(&pa, &a, mb, 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_OK);
+  deliver(&b, &pb, msgs, send_all(&pa, &a, mb, id, 0, NULL, 0, msgs, sizeof msgs, &chunks), replies, &rn);
+  CHECK(zmidi_pe_reply(&pb, &b, ma, id, 200, ZMIDI_PE_ENCODING_ASCII, NULL, -1, -1, 2, now) == ZMIDI_STATUS_OK);
+  n = send_all(&pb, &b, ma, id, 1, (const uint8_t *)"{}", 2, msgs, sizeof msgs, &chunks);
+  {
+    size_t hl = (size_t)msgs[3 + 14] | ((size_t)msgs[3 + 15] << 7), at = 3 + 16 + hl + 2;
+    msgs[at] = 0;
+    msgs[at + 1] = 0;
+  }
+  deliver(&a, &pa, msgs, n, replies, &rn);
+  CHECK(event_n == 1 && events[0].kind == ZMIDI_PE_EVENT_KIND_MESSAGE && events[0].end == ZMIDI_PE_CHUNK_END_INCOMPLETE);
+  n = pending(&pa, &a, msgs, sizeof msgs);
+
+  /* REQ-FFI-PE-001: 4 open transactions; the 5th request is refused. */
+  {
+    uint8_t ids[4];
+    ZmidiStatus fifth;
+    for (i = 0; i < 4; i++) {
+      h = header("DeviceInfo");
+      CHECK(zmidi_pe_request(&pa, &a, mb, 0, &h, NULL, now, &ids[i], &missing) == ZMIDI_STATUS_OK);
+    }
+    h = header("DeviceInfo");
+    fifth = zmidi_pe_request(&pa, &a, mb, 0, &h, NULL, now, &id, &missing);
+    /* The peer B allows 4 simultaneous requests (its PE Capabilities): the peer is busy. */
+    CHECK(fifth == ZMIDI_STATUS_REJECTED && zmidi_pe_last_error(&pa, NULL) == ZMIDI_PE_ERROR_PEER_BUSY);
+    for (i = 0; i < 4; i++) CHECK(zmidi_pe_abort(&pa, &a, mb, ids[i], 0) == ZMIDI_STATUS_OK);
+    n = pending(&pa, &a, msgs, sizeof msgs);
+  }
 
   /* REQ-FFI-CI-021: a request of the engine between zmidi_ci_receive and zmidi_pe_receive of the
    * last Chunk of a reply gets another Request ID; the engine then closes only the old request. */
@@ -468,6 +543,34 @@ int main(void) {
   n = pending(&pa, &a, msgs, sizeof msgs);
   deliver(&b, &pb, msgs, n, replies, &rn);
   CHECK(event_n == 1 && events[0].status == 200 && events[0].role == ZMIDI_PE_ROLE_INITIATOR);
+  /* REQ-FFI-PE-004: a "partial" update. */
+  CHECK(zmidi_pe_update(&pb, &b, (size_t)index, ZMIDI_PE_COMMAND_PARTIAL, 0, 2, now, &id2) == ZMIDI_STATUS_OK);
+  deliver(&a, &pa, msgs, send_all(&pb, &b, ma, id2, 0, (const uint8_t *)"{}", 2, msgs, sizeof msgs, &chunks), replies, &rn);
+  CHECK(event_n == 1 && events[0].command == ZMIDI_PE_COMMAND_PARTIAL);
+  deliver(&b, &pb, msgs, pending(&pa, &a, msgs, sizeof msgs), replies, &rn);
+  /* REQ-FFI-PE-003, -004: a "notify": the write of A gives the 200 reply and the Get of X-Sub. */
+  CHECK(zmidi_pe_update(&pb, &b, (size_t)index, ZMIDI_PE_COMMAND_NOTIFY, 0, 0, now, &id2) == ZMIDI_STATUS_OK);
+  deliver(&a, &pa, msgs, send_all(&pb, &b, ma, id2, 0, NULL, 0, msgs, sizeof msgs, &chunks), replies, &rn);
+  CHECK(event_n == 1 && events[0].command == ZMIDI_PE_COMMAND_NOTIFY);
+  n = pending(&pa, &a, msgs, sizeof msgs);
+  {
+    size_t at = 0, gets = 0;
+    while (at < n) {
+      size_t len = first_record(msgs + at);
+      if (msgs[at + 3 + 3] == 0x34 && has(msgs + at, len, "\"resource\":\"X-Sub\"")) gets++;
+      at += len;
+    }
+    CHECK(gets == 1);
+  }
+  deliver(&b, &pb, msgs, n, replies, &rn);
+  for (i = 0; i < event_n; i++) {
+    if (events[i].txn == ZMIDI_PE_TXN_KIND_GET) {
+      CHECK(zmidi_pe_reply(&pb, &b, ma, events[i].request_id, 200, 0, NULL, -1, -1, 2, now) == ZMIDI_STATUS_OK);
+      deliver(&a, &pa, msgs, send_all(&pb, &b, ma, events[i].request_id, 1, (const uint8_t *)"{}", 2, msgs, sizeof msgs, &chunks), replies, &rn);
+      CHECK(event_n == 1 && events[0].status == 200);
+      break;
+    }
+  }
   /* REQ-FFI-PE-005: refresh queues a Get of X-Sub. */
   CHECK(zmidi_pe_refresh(&pa, 99) == ZMIDI_STATUS_REJECTED);
   CHECK(zmidi_pe_refresh(&pa, (size_t)events[0].subscription >= 4 ? 0 : 0) == ZMIDI_STATUS_OK);
@@ -703,6 +806,47 @@ int main(void) {
   CHECK(pev.kind == ZMIDI_PE_EVENT_KIND_RESEND && pev.chunk == 1 && pev.request_id == id);
   CHECK(zmidi_pe_abort(&pa, &a, mb, id, 0) == ZMIDI_STATUS_OK);
   n = pending(&pa, &a, msgs, sizeof msgs);
+  deliver(&b, &pb, msgs, n, replies, &rn);
+
+  /* REQ-FFI-PE-002, -006: Flow Control with the ACK of B: A gets Ready for the next Chunk; then B
+   * asks again for a corrupt Chunk, and A gets Resend. */
+  h = header("X-Fc");
+  h.length = 700;
+  CHECK(zmidi_pe_request(&pa, &a, mb, 1, &h, &table[6], now, &id, &missing) == ZMIDI_STATUS_OK);
+  {
+    size_t room = 0;
+    CHECK(zmidi_pe_data_room(&pa, &a, mb, id, 0, &room) == ZMIDI_STATUS_OK && room < 700);
+    CHECK(zmidi_pe_send(&pa, &a, mb, id, 0, body, room, false, now, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+    deliver(&b, &pb, msgs, n, replies, &rn);
+    CHECK(event_n == 1 && events[0].end == ZMIDI_PE_CHUNK_END_MORE);
+    n = pending(&pb, &b, msgs, sizeof msgs);
+    CHECK(n > 3 && msgs[3 + 3] == 0x7D); /* MIDI-CI ACK of the Chunk */
+    deliver(&a, &pa, msgs, n, replies, &rn);
+    CHECK(event_n == 1 && events[0].kind == ZMIDI_PE_EVENT_KIND_READY && events[0].request_id == id);
+    CHECK(zmidi_pe_send(&pa, &a, mb, id, 0, body + room, 700 - room, true, now, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+    deliver(&b, &pb, msgs, n, replies, &rn);
+    CHECK(event_n == 1 && events[0].end == ZMIDI_PE_CHUNK_END_COMPLETE);
+    CHECK(zmidi_pe_abort(&pb, &b, ma, id, 1) == ZMIDI_STATUS_OK);
+    deliver(&a, &pa, msgs, pending(&pb, &b, msgs, sizeof msgs), replies, &rn);
+    /* A new Set: B finds the first Chunk corrupt and asks for it again. */
+    h = header("X-Fc");
+    h.length = 700;
+    CHECK(zmidi_pe_request(&pa, &a, mb, 1, &h, &table[6], now, &id, &missing) == ZMIDI_STATUS_OK);
+    CHECK(zmidi_pe_data_room(&pa, &a, mb, id, 0, &room) == ZMIDI_STATUS_OK);
+    CHECK(zmidi_pe_send(&pa, &a, mb, id, 0, body, room, false, now, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+    deliver(&b, &pb, msgs, n, replies, &rn);
+    CHECK(zmidi_pe_corrupt(&pb, ma, id, 1) == ZMIDI_STATUS_OK);
+    n = pending(&pb, &b, msgs, sizeof msgs);
+    CHECK(n > 3);
+    deliver(&a, &pa, msgs, n, replies, &rn);
+    {
+      size_t k, resend = 0;
+      for (k = 0; k < event_n; k++) resend += events[k].kind == ZMIDI_PE_EVENT_KIND_RESEND && events[k].chunk == 1;
+      CHECK(resend == 1);
+    }
+  }
+  CHECK(zmidi_pe_abort(&pa, &a, mb, id, 0) == ZMIDI_STATUS_OK);
+  deliver(&b, &pb, msgs, pending(&pa, &a, msgs, sizeof msgs), replies, &rn);
 
   /* A reply of unknown length has 0 in Number of Chunks in Message until its last Chunk (M2-101
    * Table 33); the same ZmidiCi event is not given to the engine twice. */
@@ -721,6 +865,53 @@ int main(void) {
     deliver(&a, &pa, msgs + first, n - first, replies, &rn);
     CHECK(event_n == 2 && events[1].end == ZMIDI_PE_CHUNK_END_COMPLETE && got_n == 1200);
     CHECK(pending(&pa, &a, msgs, sizeof msgs) == 0);
+  }
+
+  /* REQ-FFI-PE-001: the queue holds 16 control messages: 16 waits (an ACK each) fit, the 17th is
+   * refused. */
+  h = header("DeviceInfo");
+  CHECK(zmidi_pe_request(&pa, &a, mb, 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_OK);
+  deliver(&b, &pb, msgs, send_all(&pa, &a, mb, id, 0, NULL, 0, msgs, sizeof msgs, &chunks), replies, &rn);
+  {
+    int k, ok = 0;
+    ZmidiStatus last = ZMIDI_STATUS_OK;
+    for (k = 0; k < 17; k++) {
+      last = zmidi_pe_wait(&pb, ma, id, 1, 500);
+      ok += last == ZMIDI_STATUS_OK;
+    }
+    CHECK(ok == 16 && last == ZMIDI_STATUS_REJECTED && zmidi_pe_last_error(&pb, NULL) == ZMIDI_PE_ERROR_QUEUE_FULL);
+  }
+  n = pending(&pb, &b, msgs, sizeof msgs);
+  CHECK(zmidi_pe_abort(&pb, &b, ma, id, 1) == ZMIDI_STATUS_OK);
+  deliver(&a, &pa, msgs, pending(&pb, &b, msgs, sizeof msgs), replies, &rn);
+
+  /* REQ-FFI-PE-001: the engine has 4 transaction slots. With 2 open requests to B and 2 to a third
+   * device C (each allows 4), the next request of A is refused with no free slot. */
+  {
+    static ZmidiCi c3;
+    static ZmidiPe p3;
+    uint8_t ids[4];
+    uint32_t mc;
+    /* Seed 5: seeds 2 and 3 give the same MUIDs (the generator starts from seed | 1). */
+    CHECK(zmidi_ci_init(&c3, &c, 5) == ZMIDI_STATUS_OK && zmidi_pe_init(&p3, NULL, 0) == ZMIDI_STATUS_OK);
+    mc = zmidi_ci_muid(&c3);
+    CHECK(mc != mb && mc != ma);
+    CHECK(zmidi_ci_discovery(&a, 0, 0, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+    deliver(&c3, &p3, msgs, n, replies, &rn);
+    deliver(&a, &pa, replies, rn, msgs, &n);
+    CHECK(zmidi_ci_pe_capabilities_inquiry(&a, mc, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+    deliver(&c3, &p3, msgs, n, replies, &rn);
+    deliver(&a, &pa, replies, rn, msgs, &n);
+    CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_PE_CAPABILITIES);
+    for (i = 0; i < 4; i++) {
+      h = header("DeviceInfo");
+      CHECK(zmidi_pe_request(&pa, &a, i < 2 ? mb : mc, 0, &h, NULL, now, &ids[i], &missing) == ZMIDI_STATUS_OK);
+    }
+    h = header("DeviceInfo");
+    CHECK(zmidi_pe_request(&pa, &a, mc, 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_REJECTED);
+    CHECK(zmidi_pe_last_error(&pa, NULL) == ZMIDI_PE_ERROR_FULL);
+    for (i = 0; i < 4; i++) CHECK(zmidi_pe_abort(&pa, &a, i < 2 ? mb : mc, ids[i], 0) == ZMIDI_STATUS_OK);
+    n = pending(&pa, &a, msgs, sizeof msgs);
   }
 
   /* Invalidate MUID (M2-101 5.11): of the peer A at B, then of B itself (a new MUID). The

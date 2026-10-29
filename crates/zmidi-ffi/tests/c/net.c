@@ -8,10 +8,15 @@
 #ifndef ZMIDI_NET
 #define ZMIDI_NET
 #endif
-#ifndef ZMIDI_NET_AUTH
+/* ZMIDI_TEST_NO_AUTH: the build of the feature net without net-auth (REQ-FFI-NET-006). */
+#if !defined(ZMIDI_NET_AUTH) && !defined(ZMIDI_TEST_NO_AUTH)
 #define ZMIDI_NET_AUTH
 #endif
 #include "zmidi.h"
+
+#if defined(ZMIDI_TEST_NO_AUTH) && defined(ZMIDI_NET_AUTH)
+#error "ZMIDI_NET must not select ZMIDI_NET_AUTH"
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,7 +42,9 @@ static size_t host_word_count;
 static uint32_t ping_id_seen;
 
 /* The credentials of each side; NULL: the receive calls with no credentials. */
+#ifdef ZMIDI_NET_AUTH
 static ZmidiNetCredentials *host_creds, *client_creds;
+#endif
 /* True when a payload of the Client (or of the Host) held these bytes. */
 static const uint8_t *client_expect, *host_expect;
 static size_t client_expect_len, host_expect_len;
@@ -83,21 +90,27 @@ static bool contains(const uint8_t *p, size_t len, const uint8_t *x, size_t n) {
 
 static void host_rx(size_t len, ZmidiNetBuffers *b) {
   buffers(b);
+#ifdef ZMIDI_NET_AUTH
   if (host_creds) {
     CHECK(zmidi_net_host_receive_auth(&host, now, &client_addr, payload, len, host_creds, b) == ZMIDI_STATUS_OK);
-  } else {
-    CHECK(zmidi_net_host_receive(&host, now, &client_addr, payload, len, b) == ZMIDI_STATUS_OK);
+    note(true, b);
+    return;
   }
+#endif
+  CHECK(zmidi_net_host_receive(&host, now, &client_addr, payload, len, b) == ZMIDI_STATUS_OK);
   note(true, b);
 }
 
 static void client_rx(size_t len, ZmidiNetBuffers *b) {
   buffers(b);
+#ifdef ZMIDI_NET_AUTH
   if (client_creds) {
     CHECK(zmidi_net_client_receive_auth(&client, now, &host_addr, payload, len, client_creds, b) == ZMIDI_STATUS_OK);
-  } else {
-    CHECK(zmidi_net_client_receive(&client, now, &host_addr, payload, len, b) == ZMIDI_STATUS_OK);
+    note(false, b);
+    return;
   }
+#endif
+  CHECK(zmidi_net_client_receive(&client, now, &host_addr, payload, len, b) == ZMIDI_STATUS_OK);
   note(false, b);
 }
 
@@ -171,6 +184,8 @@ static void test_plain(void) {
   CHECK(zmidi_net_host_init(&host, (const uint8_t *)"zmidi Host", (const uint8_t *)"host-1") == ZMIDI_STATUS_OK);
   CHECK(zmidi_net_client_init(&client, (const uint8_t *)"zmidi Client", (const uint8_t *)"client-1") == ZMIDI_STATUS_OK);
   CHECK(zmidi_net_host_init(&host, (const uint8_t *)"", (const uint8_t *)"x") == ZMIDI_STATUS_INVALID_ARGUMENT);
+  /* REQ-FFI-NET-001: a Product Instance Id that zmidi-net refuses (more than 42 bytes). */
+  CHECK(zmidi_net_host_init(&host, (const uint8_t *)"zmidi Host", (const uint8_t *)"0123456789012345678901234567890123456789012") == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_net_host_init(&host, (const uint8_t *)"zmidi Host", (const uint8_t *)"host-1") == ZMIDI_STATUS_OK);
 
   /* Invitation and Invitation Reply: both sides Established, with no authentication method. */
@@ -190,6 +205,32 @@ static void test_plain(void) {
   CHECK(zmidi_net_client_ping(&client, now, &host_addr, &id) == ZMIDI_STATUS_OK);
   pump();
   CHECK(client_seen[ZMIDI_NET_EVENT_KIND_PING_REPLY] == 1 && ping_id_seen == id);
+  /* REQ-FFI-NET-004: a Ping of the Host. */
+  CHECK(zmidi_net_host_ping(&host, now, &client_addr, &id) == ZMIDI_STATUS_OK);
+  pump();
+  CHECK(host_seen[ZMIDI_NET_EVENT_KIND_PING_REPLY] == 1 && host_code[ZMIDI_NET_EVENT_KIND_PING_REPLY] == id);
+
+  /* REQ-FFI-NET-003: a full event array: the whole payload is read, the event that does not fit
+   * is lost, and the buffer-too-small status comes. */
+  CHECK(zmidi_net_host_dropped_events(&host) == 0 && zmidi_net_client_dropped_events(&client) == 0);
+  CHECK(zmidi_net_client_send_ump(&client, &host_addr, note_on, 2) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_net_client_send_ump(&client, &host_addr, note_on, 2) == ZMIDI_STATUS_OK);
+  {
+    ZmidiNetAddr to;
+    size_t len = 0, data = 0, i;
+    CHECK(zmidi_net_client_write_pending(&client, now, payload, sizeof payload, &to, &len) == ZMIDI_STATUS_OK && len > 0);
+    buffers(&b);
+    b.events_capacity = 0;
+    CHECK(zmidi_net_host_receive(&host, now, &client_addr, payload, len, &b) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
+    CHECK(b.events_len == 0);
+    CHECK(zmidi_net_host_dropped_events(&host) == 0);
+    /* The payload was read: the same payload again is a duplicate and gives no data. */
+    buffers(&b);
+    CHECK(zmidi_net_host_receive(&host, now, &client_addr, payload, len, &b) == ZMIDI_STATUS_OK);
+    for (i = 0; i < b.events_len; i++) data += events[i].kind == ZMIDI_NET_EVENT_KIND_DATA;
+    CHECK(data == 0);
+  }
+  pump();
 
   /* A Bye (0x01 User terminated) from the Client: Closed on both sides. */
   buffers(&b);
@@ -198,6 +239,16 @@ static void test_plain(void) {
   pump();
   CHECK(host_seen[ZMIDI_NET_EVENT_KIND_CLOSED] == 1);
   CHECK(client_seen[ZMIDI_NET_EVENT_KIND_CLOSED] == 1);
+
+  /* REQ-FFI-NET-004: a new session, ended by a Bye of the Host (0x04 Timeout). */
+  CHECK(zmidi_net_client_connect(&client, now, &host_addr) == ZMIDI_STATUS_OK);
+  pump();
+  CHECK(host_seen[ZMIDI_NET_EVENT_KIND_ESTABLISHED] == 2 && client_seen[ZMIDI_NET_EVENT_KIND_ESTABLISHED] == 2);
+  buffers(&b);
+  CHECK(zmidi_net_host_bye(&host, now, &client_addr, 0x04, &b) == ZMIDI_STATUS_OK);
+  note(true, &b);
+  pump();
+  CHECK(host_seen[ZMIDI_NET_EVENT_KIND_CLOSED] == 2 && client_seen[ZMIDI_NET_EVENT_KIND_CLOSED] == 2);
 
   /* Requests to an unknown peer, bad addresses, small buffers. */
   {
@@ -217,6 +268,36 @@ static void test_plain(void) {
  * reply that the receive call writes as a record [family][16 address bytes][port BE][length BE]
  * [payload]. A multicast address is refused (M2-124 5.1: peer to peer). Two new UMP Data Commands in one packet
  * give two Data events with their word offsets. */
+/* REQ-FFI-NET-001: the Host holds 4 sessions; a 5th Client address gets Bye 0x40. */
+static void test_four_sessions(void) {
+  ZmidiNetBuffers b;
+  ZmidiNetAddr to;
+  uint8_t inv[ZMIDI_NET_MAX_PAYLOAD];
+  size_t inv_len = 0, len = 0, k;
+  int accepted = 0, full = 0;
+  CHECK(zmidi_net_host_init(&host, (const uint8_t *)"zmidi Host", (const uint8_t *)"host-1") == ZMIDI_STATUS_OK);
+  CHECK(zmidi_net_client_init(&client, (const uint8_t *)"zmidi Client", (const uint8_t *)"client-1") == ZMIDI_STATUS_OK);
+  CHECK(zmidi_net_client_connect(&client, now, &host_addr) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_net_client_write_pending(&client, now, inv, sizeof inv, &to, &inv_len) == ZMIDI_STATUS_OK && inv_len > 4);
+  for (k = 0; k < 5; k++) {
+    ZmidiNetAddr from = v4(192, 168, 1, (uint8_t)(30 + k), 50000);
+    buffers(&b);
+    CHECK(zmidi_net_host_receive(&host, now, &from, inv, inv_len, &b) == ZMIDI_STATUS_OK);
+    {
+      /* The Bye of a full table is a reply of the call, in the reply buffer. */
+      static const uint8_t bye40[] = {'M', 'I', 'D', 'I', 0xF0, 0x00, 0x40, 0x00};
+      if (contains(out, b.out_len, bye40, sizeof bye40)) full++;
+    }
+    for (;;) {
+      CHECK(zmidi_net_host_write_pending(&host, now, payload, sizeof payload, &to, &len) == ZMIDI_STATUS_OK);
+      if (len == 0) break;
+      if (payload[4] == 0x10) accepted++;
+      if (payload[4] == 0xF0 && payload[6] == 0x40) full++;
+    }
+  }
+  CHECK(accepted == 4 && full == 1);
+}
+
 static void test_replies_and_ipv6(void) {
   static const uint32_t note_on[2] = {0x40903C00u, 0xC0000000u};
   /* "MIDI", UMP Data (0xFF, 1 word, Sequence Number 0), a MIDI 1.0 Channel Voice Note On. */
@@ -268,6 +349,7 @@ static void test_replies_and_ipv6(void) {
 }
 
 /* The random bytes that give a CryptoNonce: CryptoNonce byte = 32 + (random byte mod 95). */
+#ifdef ZMIDI_NET_AUTH
 static void random_for(const char *nonce, uint8_t *random) {
   size_t i;
   for (i = 0; i < 16; i++) random[i] = (uint8_t)(nonce[i] - 32);
@@ -535,12 +617,16 @@ static void test_null_with_length(void) {
   CHECK(zmidi_net_host_receive_auth(&host, now, &client_addr, payload, 0, &c, &b) == ZMIDI_STATUS_INVALID_ARGUMENT);
 }
 
+#endif
+
 int main(void) {
   host_addr = v4(192, 168, 1, 10, 5673);
   client_addr = v4(192, 168, 1, 20, 50000);
 
   test_plain();
+  test_four_sessions();
   test_replies_and_ipv6();
+#ifdef ZMIDI_NET_AUTH
   step_deadlines = true;
   test_shared_secret();
   test_user();
@@ -550,6 +636,7 @@ int main(void) {
   test_both_methods();
   test_credentials_codes();
   test_null_with_length();
+#endif
 
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return EXIT_FAILURE; }
   printf("net ok: host %u B, client %u B\n", (unsigned)zmidi_net_host_size(), (unsigned)zmidi_net_client_size());

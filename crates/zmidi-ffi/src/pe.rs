@@ -422,11 +422,11 @@ pub enum ZmidiPeError {
     InvalidRef = 17,
 }
 
-/// Gives the status of a refusal and keeps its reason in `s`.
-fn refuse(s: &mut PeState, e: TransactionError) -> ZmidiStatus {
+/// The reason and the status of a refusal (REQ-FFI-PE-008).
+fn refusal(e: &TransactionError) -> (ZmidiPeError, ZmidiStatus) {
     use TransactionError as T;
     use ZmidiPeError as E;
-    let (error, status) = match e {
+    match e {
         T::Device(DeviceError::NotSupported) => (E::Device, ZmidiStatus::NotSupported),
         T::Device(DeviceError::Write(WriteError::Overflow)) => {
             (E::Device, ZmidiStatus::BufferTooSmall)
@@ -440,10 +440,7 @@ fn refuse(s: &mut PeState, e: TransactionError) -> ZmidiStatus {
         T::PeerBusy => (E::PeerBusy, ZmidiStatus::Rejected),
         T::Late => (E::Late, ZmidiStatus::Rejected),
         T::State => (E::State, ZmidiStatus::Rejected),
-        T::Refused(st) => {
-            s.refused = st.0;
-            (E::Refused, ZmidiStatus::Rejected)
-        }
+        T::Refused(_) => (E::Refused, ZmidiStatus::Rejected),
         T::NoMediaType => (E::NoMediaType, ZmidiStatus::InvalidArgument),
         T::NoTotalCount => (E::NoTotalCount, ZmidiStatus::InvalidArgument),
         T::HeaderTooLarge => (E::HeaderTooLarge, ZmidiStatus::InvalidArgument),
@@ -451,7 +448,15 @@ fn refuse(s: &mut PeState, e: TransactionError) -> ZmidiStatus {
         T::QueueFull => (E::QueueFull, ZmidiStatus::Rejected),
         T::InvalidWait => (E::InvalidWait, ZmidiStatus::InvalidArgument),
         T::InvalidRef => (E::InvalidRef, ZmidiStatus::InvalidArgument),
-    };
+    }
+}
+
+/// Gives the status of a refusal and keeps its reason in `s`.
+fn refuse(s: &mut PeState, e: TransactionError) -> ZmidiStatus {
+    if let TransactionError::Refused(st) = e {
+        s.refused = st.0;
+    }
+    let (error, status) = refusal(&e);
     s.error = error;
     status
 }
@@ -1117,8 +1122,8 @@ pub unsafe extern "C" fn zmidi_pe_reply_status(
 /// Starts a "partial", "full" or "notify" ([`ZmidiPeCommand`]) Subscription message for the
 /// subscription `index` in which this Device is the responder, with `data_len` bytes of encoded
 /// Property Data (`SIZE_MAX` when not known), and writes its Request ID (REQ-FFI-PE-004).
-/// [`zmidi_pe_send`] writes the Chunks. The message needs a Request ID of this Device, so a build
-/// without `ci-initiator` gives not-supported.
+/// [`zmidi_pe_send`] writes the Chunks. A responder-only build (no `ci-initiator`) sends it too
+/// (M2-101 8.11, DEC-CI-001).
 ///
 /// # Safety
 /// `pe` and `ci` were set up by their init functions; `request_id` is writable.
@@ -1717,4 +1722,46 @@ pub unsafe extern "C" fn zmidi_pe_last_error(pe: *const ZmidiPe, status: *mut u1
         unsafe { status.write(s.refused) };
     }
     s.error
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn refusals_map_to_reasons_and_statuses() {
+        // REQ-FFI-PE-008: each refusal of the engine, also those that the C calls can not reach
+        // ("$ref", "mediaType"), gives its reason and status.
+        use TransactionError as T;
+        use ZmidiPeError as E;
+        use ZmidiStatus as S;
+        let cases = [
+            (
+                T::Device(DeviceError::NotSupported),
+                E::Device,
+                S::NotSupported,
+            ),
+            (
+                T::Device(DeviceError::Write(WriteError::Overflow)),
+                E::Device,
+                S::BufferTooSmall,
+            ),
+            (T::UnknownTransaction, E::UnknownTransaction, S::Rejected),
+            (T::Full, E::Full, S::Rejected),
+            (T::PeerBusy, E::PeerBusy, S::Rejected),
+            (T::Late, E::Late, S::Rejected),
+            (T::State, E::State, S::Rejected),
+            (T::Refused(Status(405)), E::Refused, S::Rejected),
+            (T::NoMediaType, E::NoMediaType, S::InvalidArgument),
+            (T::NoTotalCount, E::NoTotalCount, S::InvalidArgument),
+            (T::HeaderTooLarge, E::HeaderTooLarge, S::InvalidArgument),
+            (T::Size, E::Size, S::BufferTooSmall),
+            (T::QueueFull, E::QueueFull, S::Rejected),
+            (T::InvalidWait, E::InvalidWait, S::InvalidArgument),
+            (T::InvalidRef, E::InvalidRef, S::InvalidArgument),
+        ];
+        for (e, error, status) in cases {
+            assert_eq!(refusal(&e), (error, status), "{e:?}");
+        }
+    }
 }

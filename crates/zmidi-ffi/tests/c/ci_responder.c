@@ -2,9 +2,13 @@
  * ci-device and ci-property-exchange only, and the program selects the same blocks of the header.
  * The messages to the device are M2-101 Tables 6, 8 and 17 and the Get Property Data of M2-101 8.8
  * (SysEx7 payload: no F0 and F7). DEC-CI-001: a reply for an Initiator gives no event and no reply. */
-#define ZMIDI_CI_DEVICE
 #define ZMIDI_CI_PROPERTY_EXCHANGE
 #include "zmidi.h"
+
+/* REQ-FFI-CI-009: ZMIDI_CI_PROPERTY_EXCHANGE selects ZMIDI_CI_DEVICE. */
+#ifndef ZMIDI_CI_DEVICE
+#error "ZMIDI_CI_PROPERTY_EXCHANGE must select ZMIDI_CI_DEVICE"
+#endif
 
 #if defined(ZMIDI_CI_INITIATOR) || defined(ZMIDI_CI_PROFILES) || defined(ZMIDI_CI_PROCESS_INQUIRY)
 #error "the responder-only selection must not turn on other ci blocks"

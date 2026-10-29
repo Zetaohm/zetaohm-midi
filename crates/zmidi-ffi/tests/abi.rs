@@ -302,6 +302,20 @@ mod ci {
                 if st == ZmidiStatus::Ok {
                     prop_assert!(n <= capacity);
                 }
+                // REQ-FFI-CI-016, -017: a Group above 15 is an invalid argument for each call.
+                if group > 15 {
+                    prop_assert_eq!(st, ZmidiStatus::InvalidArgument);
+                }
+            }
+            // The status rules of add_profile with a valid Group: channel counts over 14 bits are
+            // invalid; otherwise a buffer below ZMIDI_CI_REPORT_BUFFER is too small.
+            if group <= 15 && (device_id <= 0x0F || device_id == 0x7E || device_id == 0x7F) {
+                let st = all[0];
+                if channels > 0x3FFF {
+                    prop_assert_eq!(st, ZmidiStatus::InvalidArgument);
+                } else if capacity < ZMIDI_CI_REPORT_BUFFER && profile.iter().all(|b| *b <= 0x7F) {
+                    prop_assert_eq!(st, ZmidiStatus::BufferTooSmall);
+                }
             }
             let _ = unsafe { zmidi_ci_report_open(&mut dev, peer) };
         });

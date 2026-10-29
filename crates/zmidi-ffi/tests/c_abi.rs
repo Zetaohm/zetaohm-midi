@@ -69,10 +69,22 @@ fn run_c(name: &str) {
     run_c_with(name, staticlib());
 }
 
+/// Builds the staticlib of the feature net without net-auth (REQ-FFI-NET-006) once.
+fn net_staticlib() -> &'static Path {
+    static LIB: OnceLock<PathBuf> = OnceLock::new();
+    LIB.get_or_init(|| build_staticlib("c-abi-net", "std,net"))
+}
+
 /// Compiles `tests/c/<name>.c` as C99 with sanitizers, links `lib` and runs it.
 fn run_c_with(name: &str, lib: &Path) {
-    let exe = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("c-{name}"));
+    run_c_defs(name, name, lib, &[]);
+}
+
+/// As [`run_c_with`], with the preprocessor definitions `defs`; `exe_name` names the program.
+fn run_c_defs(name: &str, exe_name: &str, lib: &Path, defs: &[&str]) {
+    let exe = Path::new(env!("CARGO_TARGET_TMPDIR")).join(format!("c-{exe_name}"));
     let st = Command::new(cc())
+        .args(defs.iter().map(|d| format!("-D{d}")))
         .args(["-std=c99", "-Wall", "-Wextra", "-Werror", "-pedantic"])
         .args([
             "-fsanitize=address,undefined",
@@ -144,6 +156,137 @@ fn c_ci_responder() {
 #[test]
 fn c_net() {
     run_c("net");
+}
+
+/// REQ-FFI-NET-006: the net part without net-auth: its storage sizes and header blocks.
+#[test]
+fn c_net_without_auth() {
+    run_c_defs(
+        "net",
+        "net-no-auth",
+        net_staticlib(),
+        &["ZMIDI_TEST_NO_AUTH"],
+    );
+}
+
+/// Compiles `source` as C99 (`-Wall -Wextra -Werror -pedantic -fsyntax-only`) with the header and
+/// `defs`, and gives true when it compiles.
+fn c99_compiles(file: &str, source: &str, defs: &[&str]) -> bool {
+    let path = Path::new(env!("CARGO_TARGET_TMPDIR")).join(file);
+    std::fs::write(&path, source).expect("write the C file");
+    Command::new(cc())
+        .args([
+            "-std=c99",
+            "-Wall",
+            "-Wextra",
+            "-Werror",
+            "-pedantic",
+            "-fsyntax-only",
+        ])
+        .args(defs.iter().map(|d| format!("-D{d}")))
+        .arg("-I")
+        .arg(root().join("include"))
+        .arg(&path)
+        .status()
+        .expect("run the C compiler")
+        .success()
+}
+
+/// REQ-FFI-ABI-003: the header compiles as C99 with all blocks, and with single blocks (net without
+/// net-auth, a responder-only ci, each other part).
+#[test]
+fn header_compiles_as_c99_for_each_selection() {
+    let src = "#include \"zmidi.h\"\nint zmidi_test_unused;\n";
+    let all = [
+        "ZMIDI_IO",
+        "ZMIDI_UMP",
+        "ZMIDI_BLE",
+        "ZMIDI_FILE",
+        "ZMIDI_CI",
+        "ZMIDI_NET",
+        "ZMIDI_NET_AUTH",
+        "ZMIDI_USB",
+    ];
+    assert!(c99_compiles("h-all.c", src, &all));
+    for one in [
+        "ZMIDI_IO",
+        "ZMIDI_UMP",
+        "ZMIDI_BLE",
+        "ZMIDI_FILE",
+        "ZMIDI_NET",
+        "ZMIDI_USB",
+        "ZMIDI_CI_DEVICE",
+        "ZMIDI_CI_INITIATOR",
+        "ZMIDI_CI_PROFILES",
+        "ZMIDI_CI_PROPERTY_EXCHANGE",
+        "ZMIDI_CI_PROCESS_INQUIRY",
+    ] {
+        assert!(c99_compiles(&format!("h-{one}.c"), src, &[one]), "{one}");
+    }
+}
+
+/// REQ-FFI-PE-005: without ci-initiator the Initiator calls of the engine are not declared; with
+/// it they are.
+#[test]
+fn responder_selection_hides_initiator_calls() {
+    let src = "#include \"zmidi.h\"\nvoid f(void);\nvoid f(void) { (void)zmidi_pe_request; (void)zmidi_pe_request_resource_list; }\n";
+    assert!(!c99_compiles(
+        "h-pe-responder.c",
+        src,
+        &["ZMIDI_CI_PROPERTY_EXCHANGE"]
+    ));
+    assert!(c99_compiles(
+        "h-pe-initiator.c",
+        src,
+        &["ZMIDI_CI_PROPERTY_EXCHANGE", "ZMIDI_CI_INITIATOR"]
+    ));
+}
+
+/// REQ-FFI-ABI-003: each C name of the header starts with zmidi_ or ZMIDI_ (types: Zmidi).
+#[test]
+fn header_names_have_the_zmidi_prefix() {
+    let h =
+        std::fs::read_to_string(root().join("include").join("zmidi.h")).expect("read the header");
+    let mut checked = 0;
+    for line in h.lines() {
+        let t = line.trim_start();
+        let word = |s: &str| -> String {
+            s.chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect()
+        };
+        let name = if let Some(r) = t.strip_prefix("#define ") {
+            word(r)
+        } else if let Some(r) = t.strip_prefix("typedef struct ") {
+            word(r)
+        } else if let Some(r) = t.strip_prefix("typedef enum ") {
+            word(r)
+        } else if let Some(r) = t.strip_prefix("} ") {
+            word(r)
+        } else if !line.starts_with(' ')
+            && t.contains('(')
+            && !t.starts_with('#')
+            && !t.starts_with('*')
+            && !t.starts_with("/*")
+        {
+            // A function declaration: the name before "(".
+            let head = &t[..t.find('(').unwrap_or(0)];
+            word(head.rsplit([' ', '*']).next().unwrap_or(""))
+        } else if line.starts_with("  ZMIDI_") || line.starts_with("  Zmidi") {
+            word(t)
+        } else {
+            continue;
+        };
+        if name.is_empty() {
+            continue;
+        }
+        assert!(
+            name.starts_with("zmidi_") || name.starts_with("ZMIDI_") || name.starts_with("Zmidi"),
+            "{name}: {line}"
+        );
+        checked += 1;
+    }
+    assert!(checked > 300, "{checked}");
 }
 
 /// REQ-FFI-USB-005: the usb part through the header (USB-MIDI 1.0 and USB MIDI 2.0).

@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc a01a0bb099bad1b782ed4b7b3ec6dc8e72476602c2e5e2faa842b5e0935981ae # shrinks to data = [], setting = 0, mask = 0, umps = [], cap = 0
+cc 43c6880edc9a8ae9834c34787fa2e750f22233f4b8b04eec6b514ee541af67aa # shrinks to device_id = 128, group = 0, profile = [0, 0, 0, 0, 0], channels = 0, bits = [0, 0, 0, 0], peer = 0, enabled = false, capacity = 0

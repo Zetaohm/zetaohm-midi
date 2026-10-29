@@ -3874,8 +3874,8 @@ enum ZmidiStatus zmidi_pe_reply_status(struct ZmidiPe *pe,
  * Starts a "partial", "full" or "notify" ([`ZmidiPeCommand`]) Subscription message for the
  * subscription `index` in which this Device is the responder, with `data_len` bytes of encoded
  * Property Data (`SIZE_MAX` when not known), and writes its Request ID (REQ-FFI-PE-004).
- * [`zmidi_pe_send`] writes the Chunks. The message needs a Request ID of this Device, so a build
- * without `ci-initiator` gives not-supported.
+ * [`zmidi_pe_send`] writes the Chunks. A responder-only build (no `ci-initiator`) sends it too
+ * (M2-101 8.11, DEC-CI-001).
  *
  * # Safety
  * `pe` and `ci` were set up by their init functions; `request_id` is writable.
