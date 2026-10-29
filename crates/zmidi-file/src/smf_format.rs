@@ -686,6 +686,20 @@ mod tests {
         ] {
             assert_eq!(SmpteFormat::from_i8(f.to_i8()), Some(f));
         }
+        // The high byte of each SMPTE format: -24, -25, -29, -30 in two's complement (p. 4).
+        for (f, high) in [
+            (SmpteFormat::Fps24, 0xE8),
+            (SmpteFormat::Fps25, 0xE7),
+            (SmpteFormat::Fps29, 0xE3),
+            (SmpteFormat::Fps30, 0xE2),
+        ] {
+            let d = Division::Smpte {
+                format: f,
+                ticks_per_frame: 4,
+            };
+            assert_eq!(d.to_word(), Some(high << 8 | 4), "{f:?}");
+            assert_eq!(Division::from_word(high << 8 | 4), Ok(d), "{f:?}");
+        }
     }
 
     #[test]
@@ -798,10 +812,66 @@ mod tests {
             assert!(is_known_meta_kind(e.kind()));
             assert_eq!(MetaEvent::decode(e.kind(), &buf[..n]), Some(e), "{e:?}");
         }
-        // Set Tempo 500,000 = 07 A1 20 (p. 12).
-        let mut buf = [0u8; 3];
-        MetaEvent::SetTempo(500_000).write_data(&mut buf).unwrap();
-        assert_eq!(buf, [0x07, 0xA1, 0x20]);
+        // The type and data bytes of each meta-event (p. 8 to 10); Set Tempo 500,000 = 07 A1 20
+        // (p. 12).
+        let text = |kind| MetaEvent::Text { kind, text: b"ab" };
+        let bytes: [(MetaEvent<'_>, u8, &[u8]); 15] = [
+            (MetaEvent::SequenceNumber(0x1234), 0x00, &[0x12, 0x34]),
+            (text(TextKind::Text), 0x01, b"ab"),
+            (text(TextKind::Copyright), 0x02, b"ab"),
+            (text(TextKind::TrackName), 0x03, b"ab"),
+            (text(TextKind::InstrumentName), 0x04, b"ab"),
+            (text(TextKind::Lyric), 0x05, b"ab"),
+            (text(TextKind::Marker), 0x06, b"ab"),
+            (text(TextKind::CuePoint), 0x07, b"ab"),
+            (MetaEvent::ChannelPrefix(15), 0x20, &[0x0F]),
+            (MetaEvent::SetTempo(500_000), 0x51, &[0x07, 0xA1, 0x20]),
+            (
+                MetaEvent::SmpteOffset(SmpteOffset {
+                    hour: 0x61,
+                    minute: 2,
+                    second: 3,
+                    frame: 4,
+                    fraction: 99,
+                }),
+                0x54,
+                &[0x61, 2, 3, 4, 99],
+            ),
+            (
+                MetaEvent::TimeSignature(TimeSignature::DEFAULT),
+                0x58,
+                &[4, 2, 24, 8],
+            ),
+            (
+                MetaEvent::KeySignature(KeySignature {
+                    sharps_flats: -7,
+                    minor: true,
+                }),
+                0x59,
+                &[0xF9, 0x01],
+            ),
+            (
+                MetaEvent::SequencerSpecific {
+                    manufacturer: ManufacturerId::Three([0, 0x21, 0x09]),
+                    data: &[1, 2],
+                },
+                0x7F,
+                &[0x00, 0x21, 0x09, 1, 2],
+            ),
+            (
+                MetaEvent::SequencerSpecific {
+                    manufacturer: ManufacturerId::One(0x43),
+                    data: &[],
+                },
+                0x7F,
+                &[0x43],
+            ),
+        ];
+        for (e, kind, data) in bytes {
+            let mut buf = [0u8; 16];
+            let n = e.write_data(&mut buf).unwrap();
+            assert_eq!((e.kind(), &buf[..n]), (kind, data), "{e:?}");
+        }
         let mut short = [0u8; 2];
         assert_eq!(MetaEvent::SetTempo(1).write_data(&mut short), None);
         let s = MetaEvent::SmpteOffset(SmpteOffset {

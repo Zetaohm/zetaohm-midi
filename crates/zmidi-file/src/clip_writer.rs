@@ -541,9 +541,53 @@ mod tests {
         assert_eq!(ws[6..8], [0x3032_0000, 0]);
         // CFG-002, CFG-005, CFG-006: DC 0, DCTPQ, Set Tempo and Set Time Signature share it.
         assert_eq!(ws[8..10], [DCS0, 0x0030_0060]);
-        assert_eq!(ws[10] >> 16, 0xD010);
-        assert_eq!(ws[14], 0xD010_0001);
+        assert_eq!(ws[10..14], [0xD010_0000, 50_000_000, 0, 0]);
+        assert_eq!(ws[14..18], [0xD010_0001, 0x0402_0800, 0, 0]);
         assert_eq!(ws.len(), 18);
+    }
+
+    #[test]
+    fn writer_profile_destinations() {
+        let id = [0x7E, 0x00, 0x01, 0x02, 0x03];
+        let mut buf = [0u8; 256];
+        // CFG-008: a Channel destination with its Number of Channels (0x81: LSB first, 01 01), and
+        // a Function Block destination with 0.
+        let profiles = [
+            ProfileOn {
+                profile_id: id,
+                destination: ProfileDestination::Channel(3),
+                channels: 0x81,
+            },
+            ProfileOn {
+                profile_id: id,
+                destination: ProfileDestination::FunctionBlock,
+                channels: 9,
+            },
+        ];
+        let cfg = ClipConfig {
+            profiles: &profiles,
+            ..config(96)
+        };
+        let w = ClipWriter::new(&mut buf, &cfg).unwrap();
+        let n = w.len();
+        let ws = words(&buf[..n]);
+        assert_eq!(ws[0..2], [0x3016_7E03, 0x0D22_027F]);
+        assert_eq!(ws[6..8], [0x3032_0101, 0]);
+        assert_eq!(ws[8..10], [0x3016_7E7F, 0x0D22_027F]);
+        assert_eq!(ws[14..16], [0x3032_0000, 0]);
+        let bad = [ProfileOn {
+            profile_id: id,
+            destination: ProfileDestination::Channel(16),
+            channels: 1,
+        }];
+        let cfg = ClipConfig {
+            profiles: &bad,
+            ..config(96)
+        };
+        assert_eq!(
+            ClipWriter::new(&mut buf, &cfg).err(),
+            Some(ClipWriteError::InvalidConfig)
+        );
     }
 
     #[test]
@@ -554,6 +598,13 @@ mod tests {
         let mut t = [0u32; 4];
         tempo().to_words(&mut t).unwrap();
         assert_eq!(w.config_event(&t), Err(ClipWriteError::InvalidConfig));
+        four_four().to_words(&mut t).unwrap();
+        assert_eq!(w.config_event(&t), Err(ClipWriteError::InvalidConfig));
+        // FILE-006: no Property Exchange message in the Clip Configuration Header either.
+        assert_eq!(
+            w.config_event(&[0x3006_7E7F, 0x0D34_0201]),
+            Err(ClipWriteError::PropertyExchange)
+        );
         let n = w.len();
         assert_eq!(words(&buf[..n])[2..], [DCS0, NOTE_ON[0], NOTE_ON[1]]);
     }
@@ -608,6 +659,20 @@ mod tests {
                 NOTE_ON[1]
             ]
         );
+        // DC-004 at the limits: 0xFFFFF ticks is one Delta Clockstamp, 0x100000 needs a NOOP.
+        for (gap, tail) in [
+            (0xF_FFFF, &[0x004F_FFFF][..]),
+            (0x10_0000, &[0x004F_FFFF, 0, 0x0040_0001][..]),
+        ] {
+            let mut buf = [0u8; 256];
+            let mut w = ClipWriter::new(&mut buf, &config(96)).unwrap();
+            w.start(0, None, None).unwrap();
+            w.event(gap, &NOTE_ON).unwrap();
+            let n = w.len();
+            let mut expected = tail.to_vec();
+            expected.extend_from_slice(&NOTE_ON);
+            assert_eq!(words(&buf[..n])[7..], expected, "gap {gap:#X}");
+        }
     }
 
     #[test]
@@ -644,6 +709,13 @@ mod tests {
             w.event(0, &[0x3016_7E7F, 0x0D34_0201]),
             Err(ClipWriteError::PropertyExchange)
         );
+        // A Complete packet at both ends of the range 0x30 to 0x3F.
+        for sub2 in [0x30, 0x3F] {
+            assert_eq!(
+                w.event(0, &[0x3006_7E7F, 0x0D00_0201 | sub2 << 16]),
+                Err(ClipWriteError::PropertyExchange)
+            );
+        }
         // Other MIDI-CI (Set Profile On, 0x22) is accepted.
         w.event(0, &[0x3016_7E7F, 0x0D22_0201]).unwrap();
         w.event(0, &[0x3033_7F7F, 0x7F00_0000]).unwrap();
@@ -708,6 +780,12 @@ mod tests {
         w.event(10, &cont).unwrap();
         w.event(10, &end).unwrap();
         w.event(11, &NOTE_ON).unwrap();
+        // Ruby (Status 0x03) has the same rule.
+        let ruby = |form: u32| [0xD000_0203 | form << 22, 0x4142_4344, 0, 0];
+        w.event(20, &ruby(1)).unwrap();
+        assert_eq!(w.event(21, &ruby(3)), Err(ClipWriteError::FlexTiming));
+        w.event(20, &ruby(3)).unwrap();
+        w.event(21, &NOTE_ON).unwrap();
     }
 
     #[test]
@@ -740,6 +818,20 @@ mod tests {
         w.start(0, Some(tempo()), Some(four_four())).unwrap();
         w.event(480, &NOTE_ON).unwrap();
         let n = w.finish(960).unwrap();
+        // SEQ-001, SEQ-002: Start of Clip, then Set Tempo and Set Time Signature with no Delta
+        // Clockstamp of their own.
+        let mut t = [0u32; 4];
+        let mut seq = std::vec![DCS0];
+        seq.extend_from_slice(&START);
+        tempo().to_words(&mut t).unwrap();
+        seq.extend_from_slice(&t);
+        four_four().to_words(&mut t).unwrap();
+        seq.extend_from_slice(&t);
+        seq.push(0x0040_01E0);
+        seq.extend_from_slice(&NOTE_ON);
+        seq.push(0x0040_01E0);
+        seq.extend_from_slice(&END);
+        assert_eq!(words(&buf[..n])[6..], seq);
         let events: Vec<_> = ClipReader::new(&buf[..n])
             .unwrap()
             .map(Result::unwrap)

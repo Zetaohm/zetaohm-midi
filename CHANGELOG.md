@@ -7,6 +7,11 @@ change the API. All crates and packages have the same version.
 
 ## [Unreleased]
 
+### Changed
+
+- `zmidi-file`: `SmfWriter::escape` refuses a channel status byte (0x80 to 0xEF) with `BadValue`. Channel
+  messages are MIDI events in a Standard MIDI File (RP-001).
+
 ### Fixed
 
 - `zmidi-ci`, `zmidi-ci-pe`: a responder-only build (feature `initiator` off) can send Subscription updates

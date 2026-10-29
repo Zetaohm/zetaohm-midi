@@ -754,6 +754,44 @@ mod tests {
     }
 
     #[test]
+    fn reader_meta_order_lengths_and_raw_values() {
+        // REQ-SMF-META-001: Set Tempo before Time Signature at one time (the reverse of the
+        // example), both read.
+        let (f, n) = track_bytes(&[
+            0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, 0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18,
+            0x08, 0x00, 0xFF, 0x2F, 0x00,
+        ]);
+        let (e, err) = events(&f[..n]);
+        assert_eq!(e[0].unwrap().meta(), Some(MetaEvent::SetTempo(500_000)));
+        assert_eq!(
+            e[1].unwrap().meta(),
+            Some(MetaEvent::TimeSignature(TimeSignature::DEFAULT))
+        );
+        assert_eq!(err, None);
+        // REQ-SMF-META-002: a known meta-event longer than defined is skipped by its length.
+        let (f, n) = track_bytes(&[
+            0x00, 0xFF, 0x51, 0x05, 0x07, 0xA1, 0x20, 0xAA, 0xBB, 0x00, 0x90, 0x3C, 0x40, 0x00,
+            0xFF, 0x2F, 0x00,
+        ]);
+        let (e, err) = events(&f[..n]);
+        assert_eq!(e[0].unwrap().meta(), Some(MetaEvent::SetTempo(500_000)));
+        assert_eq!(e[1], ch(0x90, 0x3C, 0x40));
+        assert_eq!(err, None);
+        // REQ-SMF-META-008: a known type with a value out of range keeps its raw type and data.
+        let (f, n) = track_bytes(&[0x00, 0xFF, 0x20, 0x01, 0x10, 0x00, 0xFF, 0x2F, 0x00]);
+        let (e, err) = events(&f[..n]);
+        assert_eq!(
+            e[0],
+            Some(Event::Meta {
+                kind: 0x20,
+                data: &[0x10]
+            })
+        );
+        assert_eq!(e[0].unwrap().meta(), None);
+        assert_eq!(err, None);
+    }
+
+    #[test]
     fn prop_smf_reader_never_panics() {
         proptest!(|(tail in proptest::collection::vec(any::<u8>(), 0..200), cut in 0usize..300)| {
             let mut f = [0u8; 300];

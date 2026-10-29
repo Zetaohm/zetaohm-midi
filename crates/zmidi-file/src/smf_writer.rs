@@ -271,11 +271,15 @@ impl<'a> SmfWriter<'a> {
         self.sysex_event(delta, 0xF7, data, data.last() != Some(&0xF7))
     }
 
-    /// Writes an F7 escape event with any bytes to transmit (p. 6). `SysExOpen` while a message
-    /// in packets is open.
+    /// Writes an F7 escape event with bytes to transmit (p. 6), for example System Real-Time or
+    /// System Common messages. `SysExOpen` while a message in packets is open; `BadValue` for a
+    /// channel status byte (0x80 to 0xEF): channel messages are MIDI events (REQ-SMF-TRK-003).
     pub fn escape(&mut self, delta: u32, bytes: &[u8]) -> Result<(), SmfWriteError> {
         if self.sysex_open {
             return Err(SmfWriteError::SysExOpen);
+        }
+        if bytes.iter().any(|b| (0x80..=0xEF).contains(b)) {
+            return Err(SmfWriteError::BadValue);
         }
         self.sysex_event(delta, 0xF7, bytes, false)
     }
@@ -458,6 +462,23 @@ mod tests {
     }
 
     #[test]
+    fn writer_writes_the_first_status_of_each_track() {
+        // Track 2 starts with the status that ended track 1: the status byte is written again.
+        let mut buf = [0u8; 96];
+        let mut w = SmfWriter::new(&mut buf, FileFormat::MultiTrack, TPQ96).unwrap();
+        for _ in 0..2 {
+            w.begin_track().unwrap();
+            w.channel(0, cm(0x90, 60, 100)).unwrap();
+            w.channel(0, cm(0x90, 60, 0)).unwrap();
+            w.end_track(0).unwrap();
+        }
+        let n = w.finish().unwrap();
+        let track = [0, 0x90, 60, 100, 0, 60, 0, 0, 0xFF, 0x2F, 0];
+        assert_eq!(&buf[22..33], &track);
+        assert_eq!(&buf[41..n], &track);
+    }
+
+    #[test]
     fn writer_running_status_off() {
         let mut buf = [0u8; 64];
         let mut w = SmfWriter::new(&mut buf, FileFormat::Single, TPQ96).unwrap();
@@ -534,7 +555,10 @@ mod tests {
             w.end_track(0).unwrap();
         }
         assert_eq!(w.finish(), Ok(14 + 2 * 19));
-        assert_eq!(SmfReader::new(&buf[..52]).unwrap().tracks().count(), 2);
+        let r = SmfReader::new(&buf[..52]).unwrap();
+        assert_eq!(r.format(), FileFormat::MultiSequence);
+        assert_eq!(r.track_count(), 2);
+        assert_eq!(r.tracks().count(), 2);
     }
 
     #[test]
@@ -612,6 +636,15 @@ mod tests {
         );
         // Page 7: F0 03 43 12 00 / 81 48 / F7 06 43 12 00 43 12 00 / 64 / F7 04 43 12 00 F7.
         w.sysex_start(0, &[0x43, 0x12, 0x00]).unwrap();
+        // REQ-SMF-SYX-003: a meta-event is allowed between the packets.
+        w.meta(
+            0,
+            &MetaEvent::Text {
+                kind: TextKind::Marker,
+                text: b"",
+            },
+        )
+        .unwrap();
         assert_eq!(w.channel(0, cm(0x90, 1, 1)), Err(SmfWriteError::SysExOpen));
         assert_eq!(w.sysex(0, &[0xF7]), Err(SmfWriteError::SysExOpen));
         assert_eq!(w.escape(0, &[0xF8]), Err(SmfWriteError::SysExOpen));
@@ -620,11 +653,18 @@ mod tests {
             .unwrap();
         w.sysex_continue(100, &[0x43, 0x12, 0x00, 0xF7]).unwrap();
         w.escape(0, &[0xF8]).unwrap();
+        // A channel message is a MIDI event, never an escape (REQ-SMF-TRK-003).
+        assert_eq!(
+            w.escape(0, &[0x90, 0x3C, 0x40]),
+            Err(SmfWriteError::BadValue)
+        );
+        assert_eq!(w.escape(0, &[0xF8, 0xEF]), Err(SmfWriteError::BadValue));
         w.end_track(0).unwrap();
         let n = w.finish().unwrap();
         #[rustfmt::skip]
         assert_eq!(&buf[22..n], &[
             0x00, 0xF0, 0x03, 0x43, 0x12, 0x00,
+            0x00, 0xFF, 0x06, 0x00,
             0x81, 0x48, 0xF7, 0x06, 0x43, 0x12, 0x00, 0x43, 0x12, 0x00,
             0x64, 0xF7, 0x04, 0x43, 0x12, 0x00, 0xF7,
             0x00, 0xF7, 0x01, 0xF8,
@@ -670,6 +710,20 @@ mod tests {
         );
         w.meta_raw(0, 0x51, &[7, 0xA1, 0x20]).unwrap();
         w.meta(0, &MetaEvent::ChannelPrefix(15)).unwrap();
+        // REQ-SMF-META-008: values out of range are refused.
+        let key = |sharps_flats| {
+            MetaEvent::KeySignature(crate::smf_format::KeySignature {
+                sharps_flats,
+                minor: false,
+            })
+        };
+        assert_eq!(w.meta(0, &key(8)), Err(SmfWriteError::BadValue));
+        assert_eq!(w.meta(0, &key(-8)), Err(SmfWriteError::BadValue));
+        let sig = MetaEvent::TimeSignature(TimeSignature {
+            denominator_power: 32,
+            ..TimeSignature::DEFAULT
+        });
+        assert_eq!(w.meta(0, &sig), Err(SmfWriteError::BadValue));
         w.end_track(0).unwrap();
         let n = w.finish().unwrap();
         #[rustfmt::skip]
@@ -726,6 +780,8 @@ mod tests {
             w.meta(1, &MetaEvent::SequenceNumber(1)),
             Err(SmfWriteError::Misplaced)
         );
+        // SMPTE Offset after a nonzero delta-time.
+        assert_eq!(w.meta(1, &offset), Err(SmfWriteError::Misplaced));
         w.end_track(0).unwrap();
         w.begin_track().unwrap();
         w.channel(0, cm(0x90, 1, 1)).unwrap();
@@ -735,6 +791,8 @@ mod tests {
             Err(SmfWriteError::Misplaced)
         );
         assert_eq!(w.meta_raw(0, 0x00, &[0, 2]), Err(SmfWriteError::Misplaced));
+        // SMPTE Offset after a channel message.
+        assert_eq!(w.meta(0, &offset), Err(SmfWriteError::Misplaced));
         w.channel(10, cm(0x90, 1, 0)).unwrap();
         assert_eq!(w.meta(0, &name), Err(SmfWriteError::Misplaced));
         w.end_track(0).unwrap();
@@ -744,6 +802,9 @@ mod tests {
             w.meta(0, &MetaEvent::SequenceNumber(3)),
             Err(SmfWriteError::Misplaced)
         );
+        // SMPTE Offset after a sysex event (in format 1 it is a tempo map event of track 1 too,
+        // but the place is checked first).
+        assert_eq!(w.meta(0, &offset), Err(SmfWriteError::Misplaced));
         w.meta(
             0,
             &MetaEvent::Text {

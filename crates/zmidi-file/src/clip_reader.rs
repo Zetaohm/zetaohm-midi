@@ -183,6 +183,15 @@ mod tests {
     const NOTE_ON: [u32; 2] = [0x4090_3C00, 0xFFFF_0000];
     /// Set Tempo, Group 0 (Figure 70), 500 000 µs per quarter note.
     const TEMPO: [u32; 4] = [0xD010_0000, 50_000_000, 0, 0];
+    /// Set Time Signature, Group 0, 4/4 (2^2), 8 32nd notes per quarter note.
+    const TIME_SIG: [u32; 4] = [0xD010_0001, 0x0402_0800, 0, 0];
+
+    fn is_time_signature(e: &ClipEvent) -> bool {
+        matches!(
+            e.ump,
+            Ump::FlexData(zmidi_ump::FlexDataMessage::SetTimeSignature(_))
+        )
+    }
 
     fn clip(seq: &[u32]) -> Vec<u8> {
         let mut w = [DCS0, DCTPQ_96, DCS0].to_vec();
@@ -263,22 +272,60 @@ mod tests {
             (ev[0].section, ev[0].ticks),
             (ClipSection::Configuration, 0)
         );
+        // CFG-006: Set Time Signature after Set Tempo, in both forms: it shares the Delta
+        // Clockstamp, or it has its own Delta Clockstamp 0.
+        for own in [false, true] {
+            let mut w = [DCS0, DCTPQ_96].to_vec();
+            w.extend_from_slice(&TEMPO);
+            if own {
+                w.push(DCS0);
+            }
+            w.extend_from_slice(&TIME_SIG);
+            w.push(DCS0);
+            w.extend_from_slice(&START);
+            w.push(DCS0);
+            w.extend_from_slice(&END);
+            let ev: Vec<_> = events(&file(&w)).into_iter().map(Result::unwrap).collect();
+            assert_eq!(ev.len(), 4, "own {own}");
+            assert_eq!(ev[1].section, ClipSection::Configuration);
+            assert_eq!(ev[1].ticks, 0);
+            assert!(is_time_signature(&ev[1]), "own {own}");
+        }
+    }
+
+    #[test]
+    fn reader_uses_the_most_recent_dctpq() {
+        // DC-001: a second DCTPQ in the Clip Sequence Data replaces 96 with 480.
+        let mut seq = [0x0040_0060u32, 0x0030_01E0, 0x0040_0010].to_vec();
+        seq.extend_from_slice(&NOTE_ON);
+        let bytes = clip(&seq);
+        let mut r = ClipReader::new(&bytes).unwrap();
+        r.next().unwrap().unwrap();
+        assert_eq!(r.ticks_per_quarter_note(), Some(96));
+        let note = r.next().unwrap().unwrap();
+        assert_eq!(note.ticks, 96 + 16);
+        assert_eq!(r.ticks_per_quarter_note(), Some(480));
     }
 
     #[test]
     fn reader_accepts_any_message_in_sequence() {
-        // FILE-007: several Set Tempo messages and a NOOP in the Clip Sequence Data.
+        // FILE-007: several Set Tempo and Set Time Signature messages and a NOOP in the Clip
+        // Sequence Data.
         let mut seq = [0x0040_0060u32].to_vec();
         seq.extend_from_slice(&TEMPO);
         seq.push(0x0000_0000);
+        seq.extend_from_slice(&TIME_SIG);
         seq.push(0x0040_0060);
         seq.extend_from_slice(&TEMPO);
+        seq.extend_from_slice(&TIME_SIG);
         let ev: Vec<_> = events(&clip(&seq))
             .into_iter()
             .map(Result::unwrap)
             .collect();
         let ticks: Vec<_> = ev.iter().map(|e| e.ticks).collect();
-        assert_eq!(ticks, [0, 96, 96, 192, 192]);
+        assert_eq!(ticks, [0, 96, 96, 96, 192, 192, 192]);
+        let sigs: Vec<_> = ev.iter().map(is_time_signature).collect();
+        assert_eq!(sigs, [false, false, false, true, false, true, false]);
     }
 
     #[test]
