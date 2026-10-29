@@ -47,7 +47,9 @@ BUDGETS = {
     "ump_translate_midi2_to_midi1_words": 5696,
     "ump_sysex7_reassemble_1020": 40896,
     "io_bytes_to_ump_midi1_note": 24704,
-    "io_bytes_to_ump_midi1_note_feed": 7424,
+    # 2026-10-29 (rustc 1.99.1): 7,233 -> 7,682 with no change in zmidi-io; the fat-LTO code of the
+    # probe changed with the zmidi-ci Device change of the Subscription fix.
+    "io_bytes_to_ump_midi1_note_feed": 8512,
     "io_bytes_to_ump_midi2_note": 28608,
     "io_bytes_to_ump_midi2_note_feed": 11712,
     "io_ump_to_bytes_note_running": 2624,
