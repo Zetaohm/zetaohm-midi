@@ -632,11 +632,13 @@ mod tests {
             0xF0, 0x7E, 0x7F, 0x0D, 0x70, 0x02, 0xF7, // MIDI-CI header start
             0x80, 0x3C, 0x00, // Note Off
         ]);
-        assert_eq!(out.first().unwrap(), &[0x2090_3C27u32].to_vec());
-        assert_eq!(out.last().unwrap(), &[0x2080_3C00u32].to_vec());
-        assert!(
-            out[1..out.len() - 1].iter().all(|w| w[0] >> 28 == 0x3),
-            "SysEx7 between them"
+        assert_eq!(
+            out,
+            [
+                [0x2090_3C27u32].to_vec(),
+                [0x3005_7E7F, 0x0D70_0200].to_vec(),
+                [0x2080_3C00].to_vec()
+            ]
         );
     }
 
@@ -783,6 +785,41 @@ mod tests {
             read(&[0x90, 0x3C, 0x27, 0xF9, 0x40, 0x2B]),
             [[0x2090_3C27u32].to_vec(), [0x2090_402B].to_vec()]
         );
+        // F5H clears it as F4H does; FDH keeps it as F9H does, and gives no message.
+        assert_eq!(
+            read(&[0x90, 0x3C, 0x27, 0xF5, 0x40, 0x2B]),
+            [[0x2090_3C27u32].to_vec()]
+        );
+        assert_eq!(
+            read(&[0x90, 0x3C, 0x27, 0xFD, 0x40, 0x2B]),
+            [[0x2090_3C27u32].to_vec(), [0x2090_402B].to_vec()]
+        );
+    }
+
+    #[test]
+    fn reader_data_counts_and_last_status() {
+        // REQ-BS-004: 2 data bytes for AnH and EnH, 1 for DnH and F1H.
+        assert_eq!(read(&[0xA0, 0x05, 0x06]), [[0x20A0_0506u32].to_vec()]);
+        assert_eq!(read(&[0xE0, 0x05, 0x06]), [[0x20E0_0506u32].to_vec()]);
+        assert_eq!(
+            read(&[0xD0, 0x05, 0x06]),
+            [[0x20D0_0500u32].to_vec(), [0x20D0_0600].to_vec()]
+        );
+        assert_eq!(read(&[0xF1, 0x05]), [[0x10F1_0500u32].to_vec()]);
+        // REQ-BS-008: running status is the last status received, also on another channel.
+        assert_eq!(
+            read(&[0x90, 0x3C, 0x27, 0x91, 0x40, 0x2B, 0x43, 0x25]),
+            [
+                [0x2090_3C27u32].to_vec(),
+                [0x2091_402B].to_vec(),
+                [0x2091_4325].to_vec()
+            ]
+        );
+        // REQ-BS-015: a System Exclusive status clears running status.
+        assert_eq!(
+            read(&[0x90, 0x3C, 0x27, 0xF0, 0x01, 0xF7, 0x40, 0x2B]),
+            [[0x2090_3C27u32].to_vec(), [0x3001_0100, 0].to_vec()]
+        );
     }
 
     #[test]
@@ -800,7 +837,10 @@ mod tests {
     fn reader_ignores_data_without_status() {
         // At start, after EOX, and after System Common (which clears running status).
         assert!(read(&[0x3C, 0x27]).is_empty());
-        assert_eq!(read(&[0xF0, 0xF7, 0x3C, 0x27]).len(), 1);
+        assert_eq!(
+            read(&[0xF0, 0xF7, 0x3C, 0x27]),
+            [[0x3000_0000u32, 0].to_vec()]
+        );
         assert_eq!(
             read(&[0x90, 0x3C, 0x27, 0xF3, 0x05, 0x3C, 0x27]),
             [[0x2090_3C27u32].to_vec(), [0x10F3_0500].to_vec()]
@@ -813,8 +853,9 @@ mod tests {
         // 6.2, D.3.1: Note On with velocity 0 becomes a MIDI 2.0 Note Off.
         let mut r = BytesToUmp::new(g0(), StreamProtocol::Midi2);
         let out: Vec<_> = [0x90, 0x3C, 0x00].iter().flat_map(|&b| r.push(b)).collect();
+        // D.3.3: Velocity 0x8000, Attribute Type 0 and Attribute 0.
         assert_eq!(out.len(), 1);
-        assert_eq!(words(out[0])[0] >> 16, 0x4080);
+        assert_eq!(words(out[0]), [0x4080_3C00, 0x8000_0000]);
     }
 
     #[test]
@@ -845,6 +886,24 @@ mod tests {
         assert!(write_all(&mut w, &[&[0x0020_0010]]).is_empty());
         assert!(write_all(&mut w, &[&[0x5001_0000, 0, 0, 0]]).is_empty());
         assert!(write_all(&mut w, &[&[0xF000_0101, 0x1F, 0, 0]]).is_empty());
+        // Mixed Data Set Header and Payload (Message Type 0x5, Status 0x8 and 0x9).
+        assert!(write_all(&mut w, &[&[0x5080_0000, 0, 0, 0]]).is_empty());
+        assert!(write_all(&mut w, &[&[0x5090_0000, 0, 0, 0]]).is_empty());
+        // REQ-BS-004 on the writer side: the data bytes of AnH, DnH, EnH and F1H.
+        assert_eq!(write_all(&mut w, &[&[0x20A0_0506]]), [0xA0, 0x05, 0x06]);
+        assert_eq!(write_all(&mut w, &[&[0x20D0_0500]]), [0xD0, 0x05]);
+        assert_eq!(write_all(&mut w, &[&[0x20E0_0506]]), [0xE0, 0x05, 0x06]);
+        assert_eq!(write_all(&mut w, &[&[0x10F1_0500]]), [0xF1, 0x05]);
+    }
+
+    /// REQ-BS-016: with the feature off, the reader is the core reader alone.
+    #[cfg(not(feature = "midi2-protocol"))]
+    #[test]
+    fn reader_has_no_translator_state_without_the_feature() {
+        assert_eq!(
+            core::mem::size_of::<BytesToUmp>(),
+            core::mem::size_of::<BytesToUmpCore>()
+        );
     }
 
     #[test]

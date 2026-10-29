@@ -335,12 +335,24 @@ mod tests {
             r.receive(&[NOTE_ON], true, 51_000),
             Disposition::RenderAt(at)
         );
+        // A later JR Timestamp replaces it: the most recent one applies.
+        r.receive(&[timestamp(1300)], true, 52_000);
+        assert_eq!(
+            r.receive(&[NOTE_ON], true, 52_000),
+            Disposition::RenderAt(1300 * 32 + 18_000 + 500)
+        );
     }
 
     #[test]
     fn receiver_renders_now_without_timestamp() {
         let mut r = JrReceiver::<4>::new(0);
         r.receive(&[clock(10)], true, 1_000);
+        assert_eq!(r.receive(&[NOTE_ON], true, 1_000), Disposition::RenderNow);
+        // REQ-JR-012: with no JR Clock received, a message renders now, with or without a JR
+        // Timestamp before it.
+        let mut r = JrReceiver::<4>::new(0);
+        assert_eq!(r.receive(&[NOTE_ON], true, 1_000), Disposition::RenderNow);
+        r.receive(&[timestamp(500)], true, 1_000);
         assert_eq!(r.receive(&[NOTE_ON], true, 1_000), Disposition::RenderNow);
     }
 
@@ -434,13 +446,18 @@ mod tests {
         proptest!(|(period in 1u32..=250_000, steps in proptest::collection::vec(1u64..300_000, 1..64))| {
             let mut s = JrSender::new(period).unwrap();
             let mut now = 0u64;
-            let mut last = None;
+            let mut last: Option<u64> = None;
             for step in steps {
-                if s.poll_clock(now).is_some() {
+                let sent = s.poll_clock(now).is_some();
+                match last {
+                    // The first poll sends a JR Clock.
+                    None => prop_assert!(sent),
+                    // A JR Clock exactly when the period has elapsed, never before.
+                    Some(l) => prop_assert_eq!(sent, now - l >= u64::from(period)),
+                }
+                if sent {
                     last = Some(now);
                 }
-                // A JR Clock is never more than one period plus one poll step late.
-                prop_assert!(now - last.unwrap() < u64::from(period) + 300_000);
                 now += step;
             }
         });

@@ -254,14 +254,9 @@ mod tests {
         match ci_address(&fbs, g(1), 0x7F) {
             CiAddress::FunctionBlocks { group, blocks } => {
                 assert_eq!(group, g(1), "the reply goes on the Group of the message");
+                // Blocks 0 and 2 have Group 1 as a member; block 1 is not active.
                 let n: std::vec::Vec<_> = blocks.map(|b| b.number).collect();
-                assert_eq!(
-                    n,
-                    blocks_for_group(&fbs, g(1))
-                        .map(|b| b.number)
-                        .collect::<std::vec::Vec<_>>()
-                );
-                assert!(!n.is_empty());
+                assert_eq!(n, [0, 2]);
             }
             other => panic!("{other:?}"),
         }

@@ -293,6 +293,14 @@ mod tests {
         );
         s.check(&[0xD1D0_0201, 0, 0, 0]).unwrap();
         s.check(&[FLEX_CONTINUE, 0, 0, 0]).unwrap();
+        // The same for Ruby (Status 0x03).
+        s.check(&[0xD150_0203, 0, 0, 0]).unwrap();
+        assert_eq!(
+            s.check(&[FLEX_CONTINUE, 0, 0, 0]),
+            Err(SendOrderError::FlexDataOpen)
+        );
+        s.check(&[0xD1D0_0203, 0, 0, 0]).unwrap();
+        s.check(&[FLEX_CONTINUE, 0, 0, 0]).unwrap();
     }
 
     #[test]

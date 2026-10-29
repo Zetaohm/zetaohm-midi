@@ -894,6 +894,49 @@ mod tests {
             Err(EndpointError::ProtocolNotSupported)
         );
         assert!(!ep.is_waiting());
+        // REQ-SCFG-004, -007, -009, -010: with JR on in both directions, a request for MIDI 1.0
+        // with no JR changes nothing before the Notification, and no JR Timestamp is sent or
+        // expected while the endpoint waits.
+        let mut d = description(true);
+        d.txjr = true;
+        let mut ep = Endpoint::try_new(d, blocks()).unwrap();
+        ep.receive(&[0xF005_0203, 0, 0, 0]).count();
+        assert_eq!(ep.stream_configuration(), wanted);
+        assert!(ep.sends_jr_timestamps() && ep.expects_jr_timestamps());
+        let midi1 = StreamConfiguration {
+            protocol: StreamProtocol::Midi1,
+            send_jr: false,
+            receive_jr: false,
+        };
+        ep.request_configuration(midi1).unwrap();
+        assert!(ep.is_waiting());
+        assert_eq!(ep.stream_configuration(), wanted);
+        assert!(!ep.sends_jr_timestamps());
+        assert!(!ep.expects_jr_timestamps());
+        ep.receive(&[0xF006_0100, 0, 0, 0]).count();
+        assert!(!ep.is_waiting());
+        assert_eq!(ep.stream_configuration(), midi1);
+    }
+
+    /// REQ-JR-013: after an unexpected JR Timestamp, the application asks the sender to stop
+    /// them with a Stream Configuration Request with no JR.
+    #[test]
+    fn unexpected_jr_timestamp_then_request_without_jr() {
+        let mut r = crate::JrReceiver::<4>::new(0);
+        r.receive(&[0x0010_03E8], false, 32_000);
+        assert_eq!(
+            r.receive(&[0x0020_044C], false, 32_000),
+            crate::Disposition::UnexpectedJrTimestamp
+        );
+        let mut ep = endpoint(true);
+        let request = ep
+            .request_configuration(StreamConfiguration {
+                protocol: StreamProtocol::Midi2,
+                send_jr: false,
+                receive_jr: false,
+            })
+            .unwrap();
+        assert_eq!(words(&request), [0xF005_0200, 0, 0, 0]);
     }
 
     /// 3.2, 3.3.1, 7.1.6.2: the Protocol in effect limits the Channel Voice Message Type.
@@ -941,9 +984,7 @@ mod tests {
         // REQ-CI-IO-MUID-001: the Info Notification of an unchanged block, also when static.
         let ep = endpoint(true);
         let replies = collect(ep.function_block_notification(1).unwrap());
-        assert_eq!(replies.len(), 1);
-        assert_eq!(replies[0][0] >> 16, 0xF011);
-        assert_eq!((replies[0][0] >> 8) & 0x7F, 1, "Function Block 1");
+        assert_eq!(replies, [FB1_INFO]);
         assert_eq!(
             ep.function_block_notification(2).map(|r| r.count()),
             Err(EndpointError::FunctionBlockNumbering)
