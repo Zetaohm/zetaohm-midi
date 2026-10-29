@@ -378,6 +378,9 @@ mod tests {
         s.check(&[CLOCK_G1]).unwrap();
         // A Utility message is not a SysEx8 packet, whatever its bits 15..8.
         s.check(&[0x0020_0500]).unwrap();
+        // Mixed Data Set packets (Status 0x8, 0x9) are not SysEx8 packets either (7.8, 7.9).
+        s.check(&[0x5080_0500, 0, 0, 0]).unwrap();
+        s.check(&[0x5090_0500, 0, 0, 0]).unwrap();
     }
 
     #[test]
