@@ -1533,6 +1533,21 @@ mod tests {
 
     type Stream = TestStream<64, 512, 4>;
 
+    fn same_type<A: 'static, B: 'static>() -> bool {
+        core::any::TypeId::of::<A>() == core::any::TypeId::of::<B>()
+    }
+
+    #[test]
+    fn default_buffer_sizes() {
+        // REQ-NET-DATA-009 (W = 64), REQ-NET-RTX-003 (C = 256 words), REQ-NET-RTX-008 (Q = 4).
+        assert!(same_type::<ReceiveWindow, ReceiveWindow<64>>());
+        assert!(same_type::<Receiver, Receiver<64>>());
+        assert!(same_type::<SendHistory, SendHistory<256>>());
+        assert!(same_type::<RetransmitQueue, RetransmitQueue<4>>());
+        assert!(same_type::<Sender, Sender<256, 4>>());
+        assert!(same_type::<DataStream, DataStream<64, 256, 4>>());
+    }
+
     /// A stream and its configuration, with the methods of the stream before OPT-009 (the
     /// stream takes its configuration with each call; the test gives the same one each time).
     #[derive(Debug, Clone)]

@@ -2245,6 +2245,56 @@ mod tests {
         let (log, out) = h.rx(0, from, &p, &mut cr);
         assert_eq!(out, [(from, midi(&[0x21, 0x01, 0, 0, 0, 0, 0, 9]))]);
         assert!(log.is_empty(), "{log:?}");
+        // REQ-NET-PKT-011: the reader goes on with the next Command Packet.
+        let p = midi(&[
+            0x20, 0x02, 0, 0, 0, 0, 0, 9, 0xEE, 0xEE, 0xEE, 0xEE, 0x20, 0x01, 0, 0, 0, 0, 0, 10,
+        ]);
+        let (_, out) = h.rx(0, from, &p, &mut cr);
+        assert_eq!(
+            out,
+            [(
+                from,
+                midi(&[0x21, 0x01, 0, 0, 0, 0, 0, 9, 0x21, 0x01, 0, 0, 0, 0, 0, 10])
+            )]
+        );
+    }
+
+    #[test]
+    fn payload_length_rules() {
+        // REQ-NET-PKT-004: the reader takes a payload longer than 1400 bytes (1432 here).
+        let mut h: Host = Host::new(host_cfg()).unwrap();
+        let from = addr("10.0.0.2:6000");
+        let mut cr = Creds::default();
+        let mut body = std::vec![0x20u8, 0xFF, 0, 0, 0, 0, 0, 1];
+        body.extend([0u8; 254 * 4]);
+        body.extend([0x20u8, 100, 0, 0, 0, 0, 0, 2]);
+        body.extend([0u8; 99 * 4]);
+        let p = midi(&body);
+        assert_eq!(p.len(), 1432);
+        let (_, out) = h.rx(0, from, &p, &mut cr);
+        assert_eq!(
+            out,
+            [(
+                from,
+                midi(&[0x21, 0x01, 0, 0, 0, 0, 0, 1, 0x21, 0x01, 0, 0, 0, 0, 0, 2])
+            )]
+        );
+        // A Command Packet that does not fit in the rest of the payload goes in a new payload:
+        // with a maximum of 12 bytes, each Ping Reply has its own payload.
+        let mut h: Host = Host::new(HostConfig {
+            max_payload: MaxPayload::new(12).unwrap(),
+            ..host_cfg()
+        })
+        .unwrap();
+        let p = midi(&[0x20, 0x01, 0, 0, 0, 0, 0, 1, 0x20, 0x01, 0, 0, 0, 0, 0, 2]);
+        let (_, out) = h.rx(0, from, &p, &mut cr);
+        assert_eq!(
+            out,
+            [
+                (from, midi(&[0x21, 0x01, 0, 0, 0, 0, 0, 1])),
+                (from, midi(&[0x21, 0x01, 0, 0, 0, 0, 0, 2]))
+            ]
+        );
     }
 
     #[test]
@@ -2897,6 +2947,109 @@ mod tests {
             n_payloads += 1;
         }
         assert_eq!(n_payloads, 3);
+    }
+
+    #[test]
+    fn ping_gets_a_reply_when_the_session_table_is_full() {
+        // REQ-NET-PING-005: a Host with one place and one session answers a Ping from a new
+        // address.
+        let mut h: Host<1> = Host::new(host_cfg()).unwrap();
+        let mut cr = Creds::default();
+        let (a, b) = (addr("10.0.0.2:6000"), addr("10.0.0.3:6000"));
+        h.rx(0, a, &A11, &mut cr);
+        h.tx(0);
+        assert_eq!(h.active_sessions(), 1);
+        let (_, out) = h.rx(1, b, &midi(&[0x20, 0x01, 0, 0, 0, 0, 0, 5]), &mut cr);
+        assert_eq!(out, [(b, midi(&[0x21, 0x01, 0, 0, 0, 0, 0, 5]))]);
+        assert_eq!(h.active_sessions(), 1);
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn failures_of_all_clients_use_one_counter() {
+        // REQ-NET-AUTH-026 (N-45): n counts the failed authentications of the Host, from every
+        // Client address.
+        let mut w = World::new(HostConfig {
+            policy: HostPolicy::new(PolicyKind::SharedSecret),
+            ..host_cfg()
+        });
+        w.hcreds = Creds {
+            random: Some([7; NONCE_RANDOM_LEN]),
+            secret: Some(b"s3cret".to_vec()),
+        };
+        let shared = ClientConfig {
+            capabilities: Capabilities {
+                auth: true,
+                user_auth: false,
+            },
+            ..client_cfg()
+        };
+        let i = w.add("10.0.0.2:6000", shared);
+        let j = w.add("10.0.0.3:6000", shared);
+        w.nodes[i].creds.secret = Some(b"wrong".to_vec());
+        w.nodes[j].creds.secret = Some(b"bad".to_vec());
+        w.connect(i);
+        w.connect(j);
+        w.run(50);
+        let failed = |a: SocketAddr| {
+            w.hlog
+                .iter()
+                .filter(|(x, e)| {
+                    *x == a && matches!(e, Ev::Other(s) if s.starts_with("AuthFailed"))
+                })
+                .count() as u32
+        };
+        let (fi, fj) = (failed(w.nodes[i].addr), failed(w.nodes[j].addr));
+        assert!(fi >= 1 && fj >= 1, "{fi} {fj}");
+        assert_eq!(w.host.core.delay.failures(), fi + fj);
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn user_auth_required_holds_the_identity() {
+        // REQ-NET-DISC-013, REQ-NET-TOPO-005: Invitation Reply: User Authentication Required
+        // holds the identity of the TXT record.
+        let mut w = World::new(HostConfig {
+            policy: HostPolicy::new(PolicyKind::UserList),
+            ..host_cfg()
+        });
+        w.hcreds = Creds {
+            random: Some([7; NONCE_RANDOM_LEN]),
+            secret: None,
+        };
+        let i = w.add(
+            "10.0.0.2:6000",
+            ClientConfig {
+                capabilities: Capabilities {
+                    auth: false,
+                    user_auth: true,
+                },
+                ..client_cfg()
+            },
+        );
+        w.connect(i);
+        w.run(5);
+        let rec = w.host.host_records("Studio", 5673, "studio.local").unwrap();
+        let mut buf = [0u8; 600];
+        let set = rec.write(&mut buf).unwrap();
+        let mut seen = 0;
+        for (s, _, b) in &w.trace {
+            for cmd in commands(b) {
+                if *s == w.haddr && cmd.header.code == 0x13 {
+                    let r = crate::auth::UserAuthRequired::read(&cmd).unwrap();
+                    assert_eq!(
+                        r.name.as_bytes(),
+                        txt_value(set.txt.rdata, "UMPEndpointName")
+                    );
+                    assert_eq!(
+                        r.product_instance_id.as_bytes(),
+                        txt_value(set.txt.rdata, "ProductInstanceId")
+                    );
+                    seen += 1;
+                }
+            }
+        }
+        assert!(seen >= 1, "{seen}");
     }
 
     #[cfg(feature = "auth")]

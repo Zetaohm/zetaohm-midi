@@ -2092,6 +2092,20 @@ mod tests {
     use std::string::String;
     use std::vec::Vec;
 
+    #[test]
+    fn default_open_pings_is_8() {
+        // REQ-NET-PING-007: P = 8 by default, in the table and in the Session.
+        let same = |a: core::any::TypeId, b: core::any::TypeId| a == b;
+        assert!(same(
+            core::any::TypeId::of::<OpenPings>(),
+            core::any::TypeId::of::<OpenPings<8>>()
+        ));
+        assert!(same(
+            core::any::TypeId::of::<Session>(),
+            core::any::TypeId::of::<Session<64, 256, 4, 8>>()
+        ));
+    }
+
     /// OPT-047: the ring gives the same entries, in the same order, as a `Vec` with the old
     /// operations (push at the end, removal at the front, removal in the middle).
     #[test]
@@ -2606,8 +2620,8 @@ mod tests {
         // One Accepted for each received Invitation (REQ-NET-DATA-014).
         let invitations = all_codes(&c.written).iter().filter(|c| **c == 0x01).count();
         let accepted = all_codes(&h.written).iter().filter(|c| **c == 0x10).count();
-        assert!(accepted <= invitations);
-        assert!(accepted >= 1);
+        // The first two Invitations are lost: each of the others gets one Accepted.
+        assert_eq!(accepted, invitations - 2);
     }
 
     #[test]
@@ -3065,6 +3079,23 @@ mod tests {
         c.receive(10, &p);
         assert_eq!(c.state(), PendingBye);
         assert_eq!(headers(&c.tick(10)[0])[0].csd1, 0x05);
+        // A Retransmit Error too.
+        let mut c = Peer::client(quiet());
+        c.s().connect(0).unwrap();
+        c.tick(0);
+        let p = payload(|w| {
+            RetransmitError {
+                reason: RetransmitErrorReason::NOT_IN_BUFFER,
+                seq: SeqNum(0),
+            }
+            .write(w)
+            .unwrap()
+        });
+        c.receive(10, &p);
+        assert_eq!(c.state(), PendingBye);
+        let out = c.tick(10);
+        assert_eq!(all_codes(&out), [0xF0]);
+        assert_eq!(headers(&out[0])[0].csd1, 0x05);
     }
 
     #[test]
@@ -3183,6 +3214,96 @@ mod tests {
         let out = h.tick(1);
         assert_eq!(all_codes(&out), [0x8F]);
         assert_eq!(headers(&out[0])[0].csd1, 0x02);
+    }
+
+    #[test]
+    fn ping_and_nak_do_not_restart_the_handshake_timeout() {
+        // REQ-NET-SES-002: Ping, Ping Reply and NAK start or stop no timeout.
+        let mut c = Peer::client(quiet());
+        let mut h = Peer::host(quiet());
+        h.policy = HostPolicy::new(PolicyKind::AskCaller);
+        c.s().connect(0).unwrap();
+        round(0, &mut c, &mut h);
+        assert_eq!(h.state(), PendingInvitation);
+        let deadline = h.s().next_deadline();
+        assert!(deadline.is_some());
+        h.receive(30_000, &ping_pkt(7));
+        assert_eq!(all_codes(&h.tick(30_000)), [0x21]);
+        assert_eq!(h.s().next_deadline(), deadline);
+        h.receive(30_001, &nak_pkt(NakReason::OTHER, 0x20, ""));
+        assert_eq!(h.s().next_deadline(), deadline);
+        assert_eq!(h.state(), PendingInvitation);
+    }
+
+    #[test]
+    fn host_invitation_in_established_keeps_sequence_numbers_and_buffers() {
+        // REQ-NET-INV-018: an Invitation in Established Session changes no Sequence Number
+        // and no send history.
+        let (mut c, mut h) = established(quiet());
+        h.s().send_ump(&[NOTE]).unwrap();
+        send(0, &mut h, &mut c);
+        assert_eq!(c.data, [(0, false, vec![NOTE])]);
+        let next = h.s().stream().sender().next_seq();
+        let inv = payload(|w| {
+            Invitation::write(
+                w,
+                &c.id.name,
+                &c.id.product_instance_id,
+                Capabilities::default(),
+            )
+            .unwrap()
+        });
+        h.receive(10, &inv);
+        assert_eq!(all_codes(&h.tick(10)), [0x10]);
+        assert_eq!(h.s().stream().sender().next_seq(), next);
+        // The send history still holds Sequence Number 0.
+        let rr = payload(|w| {
+            RetransmitRequest {
+                seq: SeqNum(0),
+                count: 1,
+            }
+            .write(w)
+            .unwrap()
+        });
+        h.receive(20, &rr);
+        let out = h.tick(20);
+        assert_eq!(all_codes(&out), [0xFF]);
+        assert_eq!(headers(&out[0])[0].csd(), 0);
+    }
+
+    #[test]
+    fn session_reset_empties_fec_retransmit_buffer_and_open_requests() {
+        // REQ-NET-RST-009 with FEC on, a sent Command in the history and an open request.
+        let mut cfg = quiet();
+        cfg.stream.fec_repeats = 2;
+        let (mut c, mut h) = established(cfg);
+        c.s().send_ump(&[NOTE]).unwrap();
+        send(0, &mut c, &mut h);
+        // Sequence Number 5 opens a Retransmit Request for 1 to 4 at the Host.
+        h.receive(10, &data_pkt(5, &[NOTE2]));
+        assert!(h.s().next_deadline().is_some());
+        c.s().reset(100).unwrap();
+        send(100, &mut c, &mut h);
+        send(100, &mut h, &mut c);
+        assert_eq!(c.state(), EstablishedSession);
+        // No open Retransmit Request at the Host.
+        assert_eq!(h.s().next_deadline(), None);
+        // The retransmit buffer of the Client is empty: a request for 0 gets an error.
+        let rr = payload(|w| {
+            RetransmitRequest {
+                seq: SeqNum(0),
+                count: 1,
+            }
+            .write(w)
+            .unwrap()
+        });
+        c.receive(200, &rr);
+        assert_eq!(all_codes(&c.tick(200)), [0x81]);
+        // The FEC buffer is empty: the first UMP Data has only its own Command.
+        c.s().send_ump(&[NOTE3]).unwrap();
+        let out = c.tick(300);
+        assert_eq!(all_codes(&out), [0xFF]);
+        assert_eq!(headers(&out[0])[0].csd(), 0);
     }
 
     #[test]

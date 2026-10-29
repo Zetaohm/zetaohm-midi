@@ -2895,6 +2895,14 @@ mod tests {
             let (mut h, mut c) = user_pair();
             let oh = invite(0, &mut h, &mut c);
             assert_eq!(oh.reply, Some(Reply::UserAuthRequired { state: 0 }));
+            // REQ-NET-AUTH-016: State 0x00 on the wire, with the nonce.
+            let wire = h.wire(&oh);
+            let (hdr, Command::Auth(raw)) = parse(&wire) else {
+                panic!()
+            };
+            assert_eq!((hdr.code, hdr.csd2), (0x13, 0x00));
+            let ur = crate::auth::UserAuthRequired::read(&raw).unwrap();
+            assert_eq!(ur.nonce.as_bytes(), &NONCE_610);
             let oc = send(10, &h, &oh, &mut c);
             assert_eq!(oc.reply, Some(Reply::InvitationWithUserAuth));
             assert!(matches!(
@@ -3028,6 +3036,14 @@ mod tests {
             let oh = send(2, &c, &oc, &mut h);
             assert_eq!(oh.reply, Some(Reply::UserAuthRequired { state: 1 }));
             assert_eq!(h.state, AuthenticationRequired);
+            // State 0x01 on the wire and the same nonce.
+            let wire = h.wire(&oh);
+            let (hdr, Command::Auth(raw)) = parse(&wire) else {
+                panic!()
+            };
+            assert_eq!(hdr.csd2, 0x01);
+            let ur = crate::auth::UserAuthRequired::read(&raw).unwrap();
+            assert_eq!(ur.nonce.as_bytes(), &NONCE_610);
             let oc = send(3, &h, &oh, &mut c);
             let oh = send(4, &c, &oc, &mut h);
             assert_eq!(oh.reply, Some(Reply::Bye(ByeReason::AUTHENTICATION_FAILED)));
@@ -3048,6 +3064,14 @@ mod tests {
             let oc = send(1, &h, &oh, &mut c);
             let oh = send(2, &c, &oc, &mut h);
             assert_eq!(oh.reply, Some(Reply::UserAuthRequired { state: 2 }));
+            // State 0x02 on the wire and the same nonce.
+            let wire = h.wire(&oh);
+            let (hdr, Command::Auth(raw)) = parse(&wire) else {
+                panic!()
+            };
+            assert_eq!(hdr.csd2, 0x02);
+            let ur = crate::auth::UserAuthRequired::read(&raw).unwrap();
+            assert_eq!(ur.nonce.as_bytes(), &NONCE_610);
             assert!(events(&oh).contains(&HandshakeEvent::AuthFailed {
                 method: Method::User,
                 failures: 1,
@@ -3403,6 +3427,22 @@ mod tests {
                 Some(Reply::Nak(NakReason::COMMAND_MALFORMED, parse(&short).0))
             );
             assert_eq!(h.hs.failures(), 0);
+            // REQ-NET-AUTH-008: an empty Username (pl 8, or a first byte 0x00) gets NAK 0x03 and
+            // changes nothing.
+            let (mut h, mut c) = user_pair();
+            invite(0, &mut h, &mut c);
+            let mut zero_name = Vec::from(DIGEST_610);
+            zero_name.extend_from_slice(&[0, b'R', b'o', b's']);
+            for p in [pkt(0x03, 0, 0, &DIGEST_610), pkt(0x03, 0, 0, &zero_name)] {
+                let o = h.receive(1, &p);
+                assert_eq!(
+                    o.reply,
+                    Some(Reply::Nak(NakReason::COMMAND_MALFORMED, parse(&p).0))
+                );
+                assert_eq!(o.next, None);
+                assert_eq!(h.state, AuthenticationRequired);
+                assert_eq!(h.hs.failures(), 0);
+            }
             let mut c = Side::client(SHARED);
             c.start(0);
             let short = pkt(0x12, 1, 0, &[0x41; 8]);

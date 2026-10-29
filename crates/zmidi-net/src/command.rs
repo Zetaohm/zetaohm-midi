@@ -856,14 +856,32 @@ mod tests {
         for b in 0..=255u8 {
             assert_eq!(CommandCode::from_bits(b).into_bits(), b);
         }
-        assert_eq!(CommandCode::from_bits(0x8F), CommandCode::Nak);
         assert_eq!(CommandCode::from_bits(0x30), CommandCode::Unknown(0x30));
-        assert_eq!(CommandCode::Invitation.direction(), Direction::ClientToHost);
-        assert_eq!(
-            CommandCode::InvitationUserAuthRequired.direction(),
-            Direction::HostToClient
-        );
-        assert_eq!(CommandCode::Ping.direction(), Direction::Both);
+        // Table 8: each code, its name and its direction.
+        use CommandCode::*;
+        use Direction::{Both, ClientToHost as C2H, HostToClient as H2C};
+        for (b, code, dir) in [
+            (0xFF, UmpData, Both),
+            (0x01, Invitation, C2H),
+            (0x02, InvitationWithAuth, C2H),
+            (0x03, InvitationWithUserAuth, C2H),
+            (0x10, InvitationAccepted, H2C),
+            (0x11, InvitationPending, H2C),
+            (0x12, InvitationAuthRequired, H2C),
+            (0x13, InvitationUserAuthRequired, H2C),
+            (0x20, Ping, Both),
+            (0x21, PingReply, Both),
+            (0x80, RetransmitRequest, Both),
+            (0x81, RetransmitError, Both),
+            (0x82, SessionReset, Both),
+            (0x83, SessionResetReply, Both),
+            (0x8F, Nak, Both),
+            (0xF0, Bye, Both),
+            (0xF1, ByeReply, Both),
+        ] {
+            assert_eq!(CommandCode::from_bits(b), code, "{b:#04X}");
+            assert_eq!(code.direction(), dir, "{b:#04X}");
+        }
         assert!(Role::Client.may_send(Direction::ClientToHost));
         assert!(!Role::Host.may_send(Direction::ClientToHost));
     }
@@ -932,7 +950,10 @@ mod tests {
         let name = EndpointName::new("Host").unwrap();
         let id = ProductInstanceId::new("H1").unwrap();
         let p = write(|w| InvitationReply::write(w, false, &name, &id));
-        assert_eq!(&p[4..8], [0x10, 0x02, 0x01, 0x00]);
+        assert_eq!(
+            p,
+            raw(&[0x10, 0x02, 0x01, 0x00, b'H', b'o', b's', b't', b'H', b'1', 0, 0])
+        );
         let p2 = write(|w| InvitationReply::write(w, true, &name, &id));
         assert_eq!(&p2[4..8], [0x11, 0x02, 0x01, 0x00]);
         let Command::InvitationReply(r) = one(&p2) else {
@@ -949,6 +970,12 @@ mod tests {
             panic!()
         };
         assert!(r.name.is_empty() && r.product_instance_id.is_empty() && !r.pending);
+        // csd1 (the name words) more than pl: Command Malformed.
+        let q = raw(&[0x10, 0x00, 0x01, 0x00]);
+        let PacketItem::Command(c) = command_packets(&q).unwrap().next().unwrap() else {
+            panic!()
+        };
+        assert_eq!(Command::parse(c), Err(Malformed));
     }
 
     #[test]
@@ -1072,13 +1099,59 @@ mod tests {
             panic!()
         };
         assert_eq!(Command::parse(c), Err(Malformed));
-        let mut small = [0u8; 6];
-        let mut w = PayloadWriter::new(&mut small, MaxPayload::default());
+        // pl 0 for Ping is Malformed too.
+        let p = raw(&[0x20, 0, 0, 0]);
+        let PacketItem::Command(c) = command_packets(&p).unwrap().next().unwrap() else {
+            panic!()
+        };
+        assert_eq!(Command::parse(c), Err(Malformed));
+        // Ping Reply: extra words and csd ignored; Session Reset Reply: csd ignored.
         assert_eq!(
-            write_ping(&mut w, 1),
-            Err(CommandError::Packet(PacketError::TooLarge))
+            one(&raw(&[0x21, 2, 0xFF, 0xFF, 0, 0, 0, 9, 1, 1, 1, 1]).clone()),
+            Command::PingReply(9)
         );
-        assert!(w.is_empty());
+        assert_eq!(
+            one(&raw(&[0x83, 0, 0xFF, 0xFF]).clone()),
+            Command::SessionResetReply
+        );
+        // Each writer: a buffer too small for the Signature and the Command gives TooLarge, and
+        // one with no room after a first Command gives Overflow; nothing is written.
+        type Writer = fn(&mut PayloadWriter<'_>) -> Result<(), CommandError>;
+        let writers: [Writer; 7] = [
+            |w| write_ping(w, 1),
+            |w| write_ping_reply(w, 1),
+            |w| write_empty(w, CommandCode::SessionReset),
+            |w| write_empty(w, CommandCode::SessionResetReply),
+            |w| write_empty(w, CommandCode::ByeReply),
+            |w| Bye::write(w, Role::Host, ByeReason::TIMEOUT, ""),
+            |w| {
+                Nak::write(
+                    w,
+                    NakReason::OTHER,
+                    Header::from_bytes([0x30, 0x01, 0, 0]),
+                    "",
+                )
+            },
+        ];
+        for (i, f) in writers.into_iter().enumerate() {
+            let mut small = [0u8; 6];
+            let mut w = PayloadWriter::new(&mut small, MaxPayload::default());
+            assert_eq!(
+                f(&mut w),
+                Err(CommandError::Packet(PacketError::TooLarge)),
+                "{i}"
+            );
+            assert!(w.is_empty(), "{i}");
+            let mut buf = [0u8; 9];
+            let mut w = PayloadWriter::new(&mut buf, MaxPayload::default());
+            write_empty(&mut w, CommandCode::ByeReply).unwrap();
+            assert_eq!(
+                f(&mut w),
+                Err(CommandError::Packet(PacketError::Overflow)),
+                "{i}"
+            );
+            assert_eq!(w.finish(), Ok(8), "{i}");
+        }
     }
 
     #[test]
@@ -1119,6 +1192,10 @@ mod tests {
         assert!(!n.reason.is_defined());
         assert_eq!(n.text.as_bytes(), [0xFF, b'x']);
         assert!(n.text.to_str().is_err());
+        // A text with no 0x00 byte is all of the field.
+        let q = raw(&[0x8F, 2, 0x20, 0, 1, 2, 3, 4, b'a', b'b', b'c', b'd']);
+        let Command::Nak(n) = one(&q) else { panic!() };
+        assert_eq!(n.text.to_str(), Ok("abcd"));
         let z = raw(&[0x8F, 0, 0, 0]);
         let PacketItem::Command(c) = command_packets(&z).unwrap().next().unwrap() else {
             panic!()
@@ -1153,11 +1230,50 @@ mod tests {
             write(|w| Bye::write(w, Role::Host, ByeReason::TIMEOUT, &"x".repeat(1020))).len()
                 > 1020
         );
+        // The 0x00 fill after the text; pl 255 for the longest text; the text rules.
+        let p = write(|w| Bye::write(w, Role::Client, ByeReason::USER_TERMINATED, "Bye"));
+        assert_eq!(p, raw(&[0xF0, 1, 0x01, 0, b'B', b'y', b'e', 0]));
+        let p = write(|w| Bye::write(w, Role::Host, ByeReason::TIMEOUT, &"x".repeat(1020)));
+        assert_eq!(p[5], 255);
+        for bad in ["\u{FEFF}x", "a\0b"] {
+            assert_eq!(
+                write_err(|w| Bye::write(w, Role::Host, ByeReason::TIMEOUT, bad)),
+                CommandError::InvalidText
+            );
+        }
         // Reader: any reason, pl 0 and up, reserved ignored.
         let tmp = raw(&[0xF0, 0, 0x99, 0x12]);
         let Command::Bye(b) = one(&tmp) else { panic!() };
         assert_eq!((b.reason, b.text.is_empty()), (ByeReason(0x99), true));
         assert!(!b.reason.is_defined());
+        // Reader text: up to the first 0x00, or all of the field; not UTF-8 is given and
+        // reported.
+        for (bytes, text) in [
+            ([b'B', b'y', b'e', 0], Ok("Bye")),
+            ([b'a', b'b', b'c', b'd'], Ok("abcd")),
+        ] {
+            let q = raw(&[0xF0, 1, 0x01, 0, bytes[0], bytes[1], bytes[2], bytes[3]]);
+            let Command::Bye(b) = one(&q) else { panic!() };
+            assert_eq!(b.text.to_str(), text);
+        }
+        let q = raw(&[0xF0, 1, 0x01, 0, 0xFF, b'x', 0, 0]);
+        let Command::Bye(b) = one(&q) else { panic!() };
+        assert_eq!(b.text.as_bytes(), [0xFF, b'x']);
+        assert!(b.text.to_str().is_err());
+        // Table 27: each defined reason, and who may write it.
+        let defined = (0x00..=0x07).chain(0x40..=0x45).chain([0x80]);
+        for r in defined {
+            let reason = ByeReason(r);
+            assert!(reason.is_defined(), "{r:#04X}");
+            assert_eq!(
+                reason.allowed_for(Role::Client),
+                !(0x40..=0x45).contains(&r)
+            );
+            assert_eq!(reason.allowed_for(Role::Host), r != 0x80);
+        }
+        for r in [0x08, 0x3F, 0x46, 0x7F, 0x81, 0xFF] {
+            assert!(!ByeReason(r).is_defined(), "{r:#04X}");
+        }
     }
 
     #[test]
