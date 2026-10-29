@@ -7,6 +7,14 @@ change the API. All crates and packages have the same version.
 
 ## [Unreleased]
 
+### Fixed
+
+- `zmidi-ci`, `zmidi-ci-pe`: a responder-only build (feature `initiator` off) can send Subscription updates
+  again. The Device keeps the PE Capabilities from the Inquiry of the peer, and `pe_request` accepts a
+  Subscription message in both roles (M2-101 8.11). (#1)
+- `zmidi-ci-pe`: the reply path of the Property Exchange engine uses about 730 B less stack (`on_reply` no
+  longer copies the transaction). (#1)
+
 ## [0.1.0-alpha.1]
 
 First public release.

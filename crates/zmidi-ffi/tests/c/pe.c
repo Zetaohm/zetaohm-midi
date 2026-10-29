@@ -448,10 +448,9 @@ int main(void) {
   CHECK(zmidi_pe_subscription(&pa, 99, &sub) == ZMIDI_STATUS_NO_PENDING);
   /* B sends a "full" update with 20 bytes; A gets the command and its subscription entry. */
   CHECK(zmidi_pe_update(&pb, &b, (size_t)index, ZMIDI_PE_COMMAND_START, 0, 20, now, &id2) == ZMIDI_STATUS_INVALID_ARGUMENT);
-  /* B sends Subscription messages as initiator of each one: it needs the PE Capabilities of A first
-   * (M2-101 8.4, the Number of Simultaneous Requests). */
-  CHECK(zmidi_pe_update(&pb, &b, (size_t)index, ZMIDI_PE_COMMAND_FULL, 0, 20, now, &id2) == ZMIDI_STATUS_REJECTED);
-  CHECK(zmidi_pe_last_error(&pb, NULL) == ZMIDI_PE_ERROR_DEVICE);
+  /* B sends Subscription messages as initiator of each one: it needs the Number of Simultaneous
+   * Requests of A (M2-101 8.4), which it keeps from the Inquiry: PE Capabilities of A (REQ-CI-PEF-045)
+   * or from its own Inquiry below. */
   CHECK(zmidi_ci_discovery(&b, 0, 0, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
   deliver(&a, &pa, msgs, n, replies, &rn);
   deliver(&b, &pb, replies, rn, msgs, &n);

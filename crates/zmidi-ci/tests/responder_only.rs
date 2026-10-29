@@ -246,3 +246,50 @@ fn categories_follow_their_features() {
         );
     }
 }
+
+// Property Exchange messages need the category (DEC-017).
+#[cfg(feature = "property-exchange")]
+#[test]
+fn responder_sends_subscription_messages() {
+    // REQ-CI-PEF-044, -045 (DEC-CI-001 addendum of 2026-10-29): the Responder keeps the PE
+    // Capabilities of the Initiator from its Inquiry and can then send it Subscription messages;
+    // a Get or Set inquiry still needs the Initiator role.
+    let mut d = device();
+    deliver(&mut d, &discovery_from(PEER));
+    assert_eq!(
+        d.pe_request(PEER, PeKind::Subscription, b"{}", Some(0), None)
+            .err(),
+        Some(DeviceError::NotInquired)
+    );
+    let mut buf = [0u8; 64];
+    let n = zmidi_ci::PeCapabilities {
+        simultaneous: 3,
+        major: None,
+        minor: None,
+    }
+    .write_inquiry(PEER, d.muid(), Framing::Bare, &mut buf)
+    .unwrap();
+    let (_, out) = deliver(&mut d, &buf[..n]);
+    assert_eq!(out.len(), 1, "the Reply to Inquiry: PE Capabilities");
+    assert_eq!(
+        d.peer(PEER)
+            .and_then(|p| p.pe_capabilities)
+            .map(|c| c.simultaneous),
+        Some(3)
+    );
+    let (id, _) = d
+        .pe_request(
+            PEER,
+            PeKind::Subscription,
+            br#"{"command":"notify"}"#,
+            Some(0),
+            None,
+        )
+        .unwrap();
+    d.pe_end(PEER, id, zmidi_ci::Direction::Initiator);
+    assert_eq!(
+        d.pe_request(PEER, PeKind::GetInquiry, b"{}", Some(0), None)
+            .err(),
+        Some(DeviceError::NotSupported)
+    );
+}

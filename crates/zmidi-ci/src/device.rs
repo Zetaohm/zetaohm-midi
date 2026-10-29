@@ -120,7 +120,8 @@ pub struct Peer {
     pub categories: Categories,
     /// True after this Device sent a Profile Inquiry to the peer.
     pub profiles_inquired: bool,
-    /// PE Capabilities of the peer, kept until the MUID is invalidated (REQ-CI-PEF-032).
+    /// PE Capabilities of the peer, from its Reply or its Inquiry, kept until the MUID is
+    /// invalidated (REQ-CI-PEF-032, -045).
     pub pe_capabilities: Option<PeCapabilities>,
     /// Discovery window in which the peer replied, and the Output Path ID of that reply, for
     /// REQ-CI-MUID-015.
@@ -1337,7 +1338,12 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
             }
             #[cfg(feature = "property-exchange")]
             SubId2::PeCapabilities => {
-                PeCapabilities::read(h, body)?;
+                // REQ-CI-PEF-045: the Initiator's own values (M2-101 Table 30), kept as a Reply
+                // keeps them, so a Responder can send it Subscription messages.
+                let theirs = PeCapabilities::read(h, body)?;
+                if let Some(p) = self.peer_mut(src) {
+                    p.pe_capabilities = Some(theirs);
+                }
                 let capabilities = PeCapabilities {
                     simultaneous: REQUESTS as u8,
                     major: None,
@@ -1687,7 +1693,9 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
     }
 
     /// Allocates a Request ID and gives a ChunkWriter for a Get, Set or Subscription message
-    /// (REQ-CI-PEF-031, -034, -036, -038, -042).
+    /// (REQ-CI-PEF-031, -034, -036, -038, -042). A Get or Set inquiry needs the Initiator role
+    /// (feature `initiator`); a Subscription message works in both roles, because the Responder
+    /// sends the updates (REQ-CI-PEF-044).
     pub fn pe_request<'h>(
         &mut self,
         peer: Muid,
@@ -1696,19 +1704,21 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
         total_len: Option<usize>,
         chunk_size: Option<usize>,
     ) -> Result<(u8, ChunkWriter<'h>), DeviceError> {
-        // DEC-017 addendum of 2026-10-22, DEC-CI-001: an Initiator call of a category or role that
-        // this build does not have.
-        #[cfg(not(all(feature = "property-exchange", feature = "initiator")))]
+        // DEC-017 addendum of 2026-10-22: a call of a category that this build does not have.
+        #[cfg(not(feature = "property-exchange"))]
         {
             let _ = (peer, kind, header, total_len, chunk_size);
             Err(DeviceError::NotSupported)
         }
-        #[cfg(all(feature = "property-exchange", feature = "initiator"))]
+        #[cfg(feature = "property-exchange")]
         {
-            if !matches!(
-                kind,
-                PeKind::GetInquiry | PeKind::SetInquiry | PeKind::Subscription
-            ) {
+            // DEC-CI-001 addendum of 2026-10-29: a Subscription message in both roles (the
+            // Responder sends the updates, M2-101 8.11, REQ-CI-PEF-044); a Get or Set inquiry
+            // only with the Initiator role.
+            let allowed = matches!(kind, PeKind::Subscription)
+                || (cfg!(feature = "initiator")
+                    && matches!(kind, PeKind::GetInquiry | PeKind::SetInquiry));
+            if !allowed {
                 return Err(DeviceError::NotSupported);
             }
             let p = self.known(peer)?;
