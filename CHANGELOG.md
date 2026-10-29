@@ -14,6 +14,10 @@ change the API. All crates and packages have the same version.
   Subscription message in both roles (M2-101 8.11). (#1)
 - `zmidi-ci-pe`: the reply path of the Property Exchange engine uses about 730 B less stack (`on_reply` no
   longer copies the transaction). (#1)
+- `zmidi-ci-pe`: an Inquiry: Get or Set Property Data with no "mutualEncoding" is "ASCII" (M2-103 6.1.6).
+  For a Resource whose "encodings" do not list "ASCII", the responder now replies 415. Before, the
+  inquiry went to the application, and a reply in another encoding was refused, so the transaction
+  stayed open until its timeout.
 
 ## [0.1.0-alpha.1]
 
