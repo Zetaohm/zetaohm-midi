@@ -65,8 +65,10 @@ JOBS = {
     "ci_device_initiator": ("ci_init", "base", 8192, 768, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
     "pe_engine": ("ci,pe", "ci", 26192, 3056, 1500, None, "midi2 C99 PE part (about)"),
     "pe_engine_no_subscriptions": ("ci,pe_nosub", "ci", 22608, 2576, 1500, None, "midi2 C99 PE part (about)"),
-    "pe_one_chunk": ("ci,pe_one_chunk", "ci", 4880, 752, 1500, None, "midi2 C99 PE part (about)"),
-    "pe_one_chunk_flat": ("ci,pe_one_chunk_flat", "ci", 4272, 752, 1500, None, "midi2 C99 PE part (about)"),
+    # pe_one_chunk: 2026-10-29, about +64 B: the Responder stores the PE Capabilities of the peer, for
+    # Subscription messages in both roles (DEC-CI-001).
+    "pe_one_chunk": ("ci,pe_one_chunk", "ci", 5008, 752, 1500, None, "midi2 C99 PE part (about)"),
+    "pe_one_chunk_flat": ("ci,pe_one_chunk_flat", "ci", 4416, 752, 1500, None, "midi2 C99 PE part (about)"),
     # ci_one_chunk: the same job as the midi2 C99 number (CI with PE Get and Set), OPT-049.
     "ci_one_chunk": ("ci,pe_one_chunk", "base", 11856, 1448, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
     "ci_one_chunk_flat": ("ci,pe_one_chunk_flat", "base", 11264, 1448, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
