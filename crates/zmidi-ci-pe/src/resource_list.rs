@@ -158,7 +158,8 @@ impl ResourceCaps {
     /// - 400: no "resId" with requireResId (REQ-PE-RES-001).
     /// - 406: "flowControl":true without fcOnGet / fcOnSet (REQ-PE-HDR-010, REQ-PE-FLOW-007).
     /// - 407: a Set with no "flowControl":true with fcOnSet (REQ-PE-FLOW-008).
-    /// - 415: a "mutualEncoding" that "encodings" does not list (REQ-PE-ENC-007,
+    /// - 415: a "mutualEncoding" that "encodings" does not list, also no "mutualEncoding" (that
+    ///   is "ASCII") in a Get or a Set where "encodings" does not list "ASCII" (REQ-PE-ENC-007,
     ///   REQ-PE-STAT-012).
     pub fn check(&self, op: Operation, header: &Header<'_>) -> Result<(), Status> {
         match op {
@@ -185,7 +186,14 @@ impl ResourceCaps {
             }
             _ => {}
         }
-        if let Some(e) = header.mutual_encoding {
+        // No "mutualEncoding" in a Get or a Set is "ASCII" (REQ-PE-ENC-003).
+        let encoding = match op {
+            Operation::Get | Operation::Set => {
+                Some(header.mutual_encoding.unwrap_or(EncodingName::Ascii))
+            }
+            _ => header.mutual_encoding,
+        };
+        if let Some(e) = encoding {
             if !self.encodings.contains(e) {
                 return Err(Status::UNSUPPORTED_MEDIA);
             }
@@ -1361,6 +1369,34 @@ mod tests {
             ),
             Err(Status::UNSUPPORTED_MEDIA)
         );
+        // An Mcoded7-only Resource: no "mutualEncoding" is "ASCII", so a Get or a Set gets 415;
+        // a Subscription message with no "mutualEncoding" is not refused for it.
+        let m7 = ResourceCaps {
+            encodings: Encodings {
+                ascii: false,
+                mcoded7: true,
+                zlib_mcoded7: false,
+            },
+            can_set: CanSet::Full,
+            can_subscribe: true,
+            ..base
+        };
+        assert_eq!(
+            m7.check(Operation::Get, &h(|_| {})),
+            Err(Status::UNSUPPORTED_MEDIA)
+        );
+        assert_eq!(
+            m7.check(Operation::Set, &h(|_| {})),
+            Err(Status::UNSUPPORTED_MEDIA)
+        );
+        assert_eq!(
+            m7.check(
+                Operation::Get,
+                &h(|h| h.mutual_encoding = Some(EncodingName::Mcoded7))
+            ),
+            Ok(())
+        );
+        assert_eq!(m7.check(Operation::Subscribe, &h(|_| {})), Ok(()));
         let t = table();
         assert_eq!(
             find_resource(&t, &HeaderStr::Raw(b"CMList")).map(|e| e.resource),

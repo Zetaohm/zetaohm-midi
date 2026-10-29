@@ -79,7 +79,12 @@ fn resources() -> &'static [ResourceEntry<'static>] {
     let mut bin = ResourceEntry::new("X-Bin");
     bin.caps.can_set = CanSet::Full;
     bin.media_types = &["application/octet-stream"];
-    Box::leak(Box::new([info, patch, fc, list, z, bin]))
+    // Mcoded7 only: no "ASCII" (as the X-Pattern Resource of FLXS1).
+    let mut m7 = ResourceEntry::new("X-M7");
+    m7.caps.can_set = CanSet::Full;
+    m7.caps.encodings.ascii = false;
+    m7.caps.encodings.mcoded7 = true;
+    Box::leak(Box::new([info, patch, fc, list, z, bin, m7]))
 }
 
 struct Side {
@@ -479,7 +484,7 @@ fn responder_statuses() {
     // responder, each with a "message".
     let (a, mut b) = pair(512);
     let (src, dst) = (a.muid(), b.muid());
-    let cases: [(&[u8], PeKind, u16); 8] = [
+    let cases: [(&[u8], PeKind, u16); 10] = [
         (br#"{"resource":"Nope"}"#, PeKind::GetInquiry, 404),
         (br#"{"resource":"DeviceInfo"}"#, PeKind::SetInquiry, 405),
         (br#"{"resource":"DeviceInfo","offset":1}"#, PeKind::GetInquiry, 400),
@@ -487,6 +492,9 @@ fn responder_statuses() {
         (br#"{"resource":"DeviceInfo","mutualEncoding":"UTF-9"}"#, PeKind::GetInquiry, 415),
         (br#"{"resource":"DeviceInfo","mutualEncoding":"Mcoded7"}"#, PeKind::GetInquiry, 415),
         (br#"{"resource":"X-Bin","mediaType":"text/plain"}"#, PeKind::SetInquiry, 415),
+        // No "mutualEncoding" is "ASCII", which the Resource does not list.
+        (br#"{"resource":"X-M7"}"#, PeKind::GetInquiry, 415),
+        (br#"{"resource":"X-M7"}"#, PeKind::SetInquiry, 415),
         (br#"{"resource":"DeviceInfo","x":"0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789"}"#, PeKind::GetInquiry, 413),
     ];
     for (i, (h, kind, want)) in cases.into_iter().enumerate() {
