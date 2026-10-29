@@ -1259,7 +1259,6 @@ impl<'a> Iterator for Ms1Descriptors<'a> {
 mod tests {
     extern crate std;
     use super::*;
-    use crate::constants::{AUDIO, INTERFACE, MIDISTREAMING};
     use proptest::prelude::*;
     use std::vec::Vec;
 
@@ -1455,6 +1454,13 @@ mod tests {
         );
         let e = Element::read(&one(&[13, 0x24, 4, 5, 1, 1, 1, 1, 0, 0, 1, 0x02, 0])).unwrap();
         assert_eq!(e.string, None);
+        // iInterface: 0 is no string, another index is kept.
+        for s in [0u8, 3] {
+            let i = crate::ms2::MsInterface::read(&one(&[9, 4, 1, 0, 2, 1, 3, 0, s]))
+                .unwrap()
+                .unwrap();
+            assert_eq!(i.string_index, s);
+        }
     }
 
     #[test]
@@ -2131,35 +2137,21 @@ mod tests {
         );
     }
 
-    /// Test-only writer and reader of the 9-byte standard MIDI Streaming interface descriptor
-    /// (owned by the Ms2 module): (interface number, alternate setting, endpoints, iInterface).
-    fn local_interface(n: u8, alt: u8, eps: u8, s: u8) -> [u8; 9] {
-        [9, INTERFACE, n, alt, eps, AUDIO, MIDISTREAMING, 0, s]
-    }
-
-    fn local_interface_read(b: &[u8]) -> Option<(u8, u8, u8, Option<NonZeroU8>)> {
-        let d = one(b);
-        (d.is_interface() && d.byte(5) == Some(AUDIO) && d.byte(6) == Some(MIDISTREAMING)).then(
-            || {
-                (
-                    d.byte(2).unwrap_or(0),
-                    d.byte(3).unwrap_or(0),
-                    d.byte(4).unwrap_or(0),
-                    d.byte(8).and_then(NonZeroU8::new),
-                )
-            },
-        )
-    }
-
     #[test]
     fn interface_table_b5_bytes() {
-        // REQ-USB-VEC1-003: Table B-5 with interface 1, two MIDI endpoints, no string. The
-        // writer of this descriptor is in Ms2; this test uses a local writer, and takes
-        // bNumEndpoints from the topology.
+        // REQ-USB-VEC1-003: Table B-5 with interface 1, two MIDI endpoints, no string, from the
+        // writer and the reader of the crate (Ms2); bNumEndpoints from the topology.
         let t = appendix_b();
-        let b = local_interface(1, 0, t.num_endpoints(), 0);
+        let i = crate::ms2::MsInterface {
+            interface_number: 1,
+            alternate_setting: 0,
+            num_endpoints: t.num_endpoints(),
+            string_index: 0,
+        };
+        let mut b = [0u8; 9];
+        assert_eq!(i.write(&mut b), Ok(9));
         assert_eq!(b, [0x09, 0x04, 0x01, 0x00, 0x02, 0x01, 0x03, 0x00, 0x00]);
-        assert_eq!(local_interface_read(&b), Some((1, 0, 2, None)));
+        assert_eq!(crate::ms2::MsInterface::read(&one(&b)), Some(Ok(i)));
         let mut all = Vec::from(b);
         all.extend(write_vec(&t));
         let g = crate::walk::interfaces(&all).next().unwrap();

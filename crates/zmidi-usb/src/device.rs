@@ -1113,6 +1113,11 @@ mod tests {
         assert_eq!(write_function(&cfg, &mut buf), Ok(92));
         assert_eq!(buf[..92], V1_FUNCTION);
         assert!(buf[92..].iter().all(|&b| b == 0xAA));
+        // REQ-USB-MS1-027: one cable in each direction by default.
+        for speed in [BusSpeed::Full, BusSpeed::High] {
+            let c = CableCounts::default_for(speed);
+            assert_eq!((c.n_out, c.n_in), (1, 1));
+        }
     }
 
     #[cfg(feature = "alt0")]
@@ -1134,6 +1139,10 @@ mod tests {
             interface_list(&bytes),
             [(0, 0, 1, 1), (1, 0, 1, 3), (1, 1, 1, 3)]
         );
+        // REQ-USB-GTB-015: no Group Terminal Block descriptor (0x26) in the configuration.
+        assert!(Descriptors::new(&bytes)
+            .flatten()
+            .all(|d| d.dtype() != 0x26));
     }
 
     #[cfg(feature = "alt0")]

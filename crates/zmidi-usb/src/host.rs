@@ -970,6 +970,38 @@ mod tests {
     }
 
     #[test]
+    fn setting_reader_skips_unknown_descriptors_and_reports_short_ones() {
+        // REQ-USB-MS1-006: an unknown type, subtype 0x00 and a CS_GR_TRM_BLOCK (0x26) are
+        // skipped; a Jack that is too short gives one problem, and the next Jack is read.
+        let rest = cat(&[
+            &[0x06, 0x24, 0x02, 0x01, 0x01, 0x00], // Embedded MIDI IN Jack 1
+            &[0x03, 0x77, 0x00],                   // unknown bDescriptorType
+            &[0x03, 0x24, 0x00],                   // subtype 0x00 (undefined)
+            &[0x05, 0x26, 0x01, 0x00, 0x00],       // CS_GR_TRM_BLOCK
+            &[0x04, 0x24, 0x02, 0x01],             // MIDI IN Jack, too short
+            &[0x06, 0x24, 0x02, 0x02, 0x02, 0x00], // External MIDI IN Jack 2
+        ]);
+        let bytes = config(&setting(1, 0, 0x0100, &rest));
+        let f = read_configuration(&bytes);
+        let s = f.settings().next().unwrap();
+        let ids: Vec<_> = s.jacks().map(|j| j.id()).collect();
+        assert_eq!(ids, [1, 2]);
+        // The skipped descriptors are `Other`; the short Jack gives one error.
+        assert_eq!(s.ms1_problems().count(), 1);
+        let kinds: Vec<_> = s
+            .ms1_descriptors()
+            .map(|d| match d {
+                Ok(Ms1Desc::Header(_)) => 'h',
+                Ok(Ms1Desc::InJack(_)) => 'j',
+                Ok(Ms1Desc::Other(_)) => 'o',
+                Ok(_) => '?',
+                Err(_) => 'e',
+            })
+            .collect();
+        assert_eq!(kinds, ['h', 'j', 'o', 'o', 'o', 'e', 'j']);
+    }
+
+    #[test]
     fn unknown_version_skips_setting_and_continues() {
         // REQ-USB-GEN-003: another high byte: report an unknown version, do not read the other
         // class-specific descriptors of the setting, continue with the next setting.

@@ -1797,6 +1797,11 @@ mod tests {
         };
         let v = write_vec(&list(&[b]), &pair(&[1])).unwrap();
         assert_eq!(v[5 + 7], 5);
+        // The host-side reader gives 0 back: no string.
+        let v = write_vec(&GtbList::default_list(), &pair(&[1])).unwrap();
+        let info = read_set::<8, _>(&v, &pair(&[1]));
+        assert!(info.is_clean());
+        assert_eq!(info.blocks.as_slice()[0].string_index, 0);
     }
 
     #[test]

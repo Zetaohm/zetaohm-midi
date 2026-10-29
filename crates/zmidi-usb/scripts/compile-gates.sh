@@ -29,3 +29,6 @@ run 'cargo' 'check' '--quiet' '--lib' '--no-default-features' '--target' 'thumbv
 
 echo 'compile-gates: gate test' >&2
 run 'cargo' 'test' '--quiet' '--all-features'
+
+echo 'compile-gates: gate test-no-default-features' >&2
+run 'cargo' 'test' '--quiet' '--no-default-features'

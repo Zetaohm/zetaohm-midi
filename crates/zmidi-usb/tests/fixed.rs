@@ -65,6 +65,40 @@ fn write_rust_makes_the_stored_fixtures() {
     check_fixture("two_settings_fn.rs", &source(&two_settings_cfg(), "MIDI"));
 }
 
+#[test]
+fn write_rust_checks_the_rules_of_the_writers() {
+    // REQ-USB-FIX-001: a configuration that breaks a rule gives an error, not a source.
+    let mut s = String::new();
+    // The function writer: no USB-MIDI 1.0 Alternate Setting 0.
+    let mut c = default_cfg();
+    c.midi1 = None;
+    assert_eq!(
+        write_rust(&c, "MIDI", &mut s),
+        Err(FixedError::Device(
+            zmidi_usb::device::DeviceError::NoMidi1Setting
+        ))
+    );
+    // The Group Terminal Block writer: a USB MIDI 2.0 setting with no block.
+    let mut c = default_cfg();
+    let mut m2 = Midi2Setting::new(BusSpeed::Full).unwrap();
+    m2.blocks.clear();
+    c.midi2.as_mut_slice()[0] = m2;
+    assert!(matches!(
+        write_rust(&c, "MIDI", &mut s),
+        Err(FixedError::Device(_))
+    ));
+    // The adapter rule: two endpoints in one direction in one Alternate Setting.
+    let mut c = default_cfg();
+    let mut m2 = Midi2Setting::new(BusSpeed::Full).unwrap();
+    m2.endpoints.as_mut_slice()[1].direction = EndpointDirection::MidiOut;
+    m2.endpoints.as_mut_slice()[1].number = 2;
+    c.midi2.as_mut_slice()[0] = m2;
+    assert!(matches!(
+        write_rust(&c, "MIDI", &mut s),
+        Err(FixedError::Endpoints { .. })
+    ));
+}
+
 /// A sink that writes each descriptor again as bytes.
 #[derive(Default)]
 struct Bytes(Vec<u8>);

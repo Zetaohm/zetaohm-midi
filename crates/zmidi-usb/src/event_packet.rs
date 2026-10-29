@@ -1542,11 +1542,12 @@ mod tests {
         // REQ-USB-EVT-021; unparsed: at most 13 packets.
         proptest!(|(umps in proptest::collection::vec(proptest::array::uniform4(any::<u32>()), 0..16), unparsed in any::<bool>())| {
             let mut w = PacketWriter::<16>::new(WriterOptions { unparsed });
-            let max = if unparsed { MAX_UNPARSED_PACKETS_PER_UMP } else { MAX_PACKETS_PER_UMP };
+            // 20 bytes parsed, 52 bytes (13 packets) unparsed.
+            let max = if unparsed { 52 } else { 20 };
             for u in umps {
                 let mut buf = [0u8; 64];
                 let n = w.write(&u, &mut buf).unwrap();
-                prop_assert!(n <= max * PACKET_LEN);
+                prop_assert!(n <= max);
             }
         });
     }
