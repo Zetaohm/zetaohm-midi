@@ -754,6 +754,22 @@ mod tests {
     }
 
     #[test]
+    fn reader_data_bytes_of_each_status() {
+        // REQ-SMF-TRK-003: DnH has 1 data byte; AnH, BnH and EnH have 2.
+        let (f, n) = track_bytes(&[
+            0x00, 0xD0, 0x40, 0x00, 0xE0, 0x01, 0x02, 0x00, 0xA1, 0x3C, 0x10, 0x00, 0xB2, 0x07,
+            0x64, 0x00, 0xFF, 0x2F, 0x00,
+        ]);
+        let (e, err) = events(&f[..n]);
+        assert_eq!(e[0], ch(0xD0, 0x40, 0));
+        assert_eq!(e[1], ch(0xE0, 0x01, 0x02));
+        assert_eq!(e[2], ch(0xA1, 0x3C, 0x10));
+        assert_eq!(e[3], ch(0xB2, 0x07, 0x64));
+        assert_eq!(e[4].unwrap().meta(), Some(MetaEvent::EndOfTrack));
+        assert_eq!(err, None);
+    }
+
+    #[test]
     fn reader_meta_order_lengths_and_raw_values() {
         // REQ-SMF-META-001: Set Tempo before Time Signature at one time (the reverse of the
         // example), both read.

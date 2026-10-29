@@ -556,7 +556,7 @@ mod tests {
             ProfileOn {
                 profile_id: id,
                 destination: ProfileDestination::Channel(3),
-                channels: 0x81,
+                channels: 0x85,
             },
             ProfileOn {
                 profile_id: id,
@@ -572,7 +572,8 @@ mod tests {
         let n = w.len();
         let ws = words(&buf[..n]);
         assert_eq!(ws[0..2], [0x3016_7E03, 0x0D22_027F]);
-        assert_eq!(ws[6..8], [0x3032_0101, 0]);
+        // 0x85 channels, LSB first: 05 01.
+        assert_eq!(ws[6..8], [0x3032_0501, 0]);
         assert_eq!(ws[8..10], [0x3016_7E7F, 0x0D22_027F]);
         assert_eq!(ws[14..16], [0x3032_0000, 0]);
         let bad = [ProfileOn {
@@ -604,6 +605,11 @@ mod tests {
         assert_eq!(
             w.config_event(&[0x3006_7E7F, 0x0D34_0201]),
             Err(ClipWriteError::PropertyExchange)
+        );
+        // CFG-002: exactly one DCTPQ; the caller can not add a second one.
+        assert_eq!(
+            w.config_event(&[0x0030_0060]),
+            Err(ClipWriteError::ReservedMessage)
         );
         let n = w.len();
         assert_eq!(words(&buf[..n])[2..], [DCS0, NOTE_ON[0], NOTE_ON[1]]);
@@ -693,6 +699,15 @@ mod tests {
             ClipWriter::new(&mut [0u8; 64], &config(0)).err(),
             Some(ClipWriteError::InvalidConfig)
         );
+        // DC-003: End of Clip before the last event is out of order, and changes nothing.
+        let mut buf = [0u8; 256];
+        let mut w = ClipWriter::new(&mut buf, &config(96)).unwrap();
+        w.start(0, None, None).unwrap();
+        w.event(20, &NOTE_ON).unwrap();
+        let n = w.len();
+        assert_eq!(w.finish(19), Err(ClipWriteError::OutOfOrder));
+        assert_eq!(w.len(), n);
+        assert!(w.finish(20).is_ok());
     }
 
     #[test]
@@ -763,6 +778,15 @@ mod tests {
         // 3/8 from tick 384: a bar is 144 ticks.
         assert_eq!(w.event(500, &sig), Err(ClipWriteError::BarTiming));
         w.event(528, &sig).unwrap();
+        // start() checks a time signature at the Start of Clip too.
+        let three_eight = SetTimeSignature::try_new(g0(), 3, 3, 8).unwrap();
+        let mut buf = [0u8; 256];
+        let mut w = ClipWriter::new(&mut buf, &cfg).unwrap();
+        assert_eq!(
+            w.start(100, None, Some(three_eight)),
+            Err(ClipWriteError::BarTiming)
+        );
+        w.start(384, None, Some(three_eight)).unwrap();
     }
 
     #[test]

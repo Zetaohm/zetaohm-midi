@@ -724,6 +724,19 @@ mod tests {
             ..TimeSignature::DEFAULT
         });
         assert_eq!(w.meta(0, &sig), Err(SmfWriteError::BadValue));
+        // The limits themselves are accepted: sf 7 and -7, denominator power 31.
+        {
+            let mut b = [0u8; 64];
+            let mut v = SmfWriter::new(&mut b, FileFormat::Single, TPQ96).unwrap();
+            v.begin_track().unwrap();
+            v.meta(0, &key(7)).unwrap();
+            v.meta(0, &key(-7)).unwrap();
+            let sig31 = MetaEvent::TimeSignature(TimeSignature {
+                denominator_power: 31,
+                ..TimeSignature::DEFAULT
+            });
+            v.meta(0, &sig31).unwrap();
+        }
         w.end_track(0).unwrap();
         let n = w.finish().unwrap();
         #[rustfmt::skip]

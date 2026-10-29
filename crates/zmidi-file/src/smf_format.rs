@@ -872,6 +872,21 @@ mod tests {
             let n = e.write_data(&mut buf).unwrap();
             assert_eq!((e.kind(), &buf[..n]), (kind, data), "{e:?}");
         }
+        // Key Signature major with sf 7 (07 00), and the reserved text type 0x08: written and read.
+        let major = MetaEvent::KeySignature(KeySignature {
+            sharps_flats: 7,
+            minor: false,
+        });
+        let mut buf = [0u8; 4];
+        assert_eq!(major.write_data(&mut buf), Some(2));
+        assert_eq!(buf[..2], [0x07, 0x00]);
+        assert_eq!(MetaEvent::decode(0x59, &[0x07, 0x00]), Some(major));
+        let reserved = MetaEvent::Text {
+            kind: TextKind::Reserved(0x08),
+            text: b"x",
+        };
+        assert_eq!(reserved.kind(), 0x08);
+        assert_eq!(MetaEvent::decode(0x08, b"x"), Some(reserved));
         let mut short = [0u8; 2];
         assert_eq!(MetaEvent::SetTempo(1).write_data(&mut short), None);
         let s = MetaEvent::SmpteOffset(SmpteOffset {
@@ -911,6 +926,10 @@ mod tests {
 
     #[test]
     fn meta_decode_rejects_short_or_out_of_range() {
+        // The limits are accepted: sf 7 and -7, denominator power 31.
+        assert!(MetaEvent::decode(0x59, &[7, 0]).is_some());
+        assert!(MetaEvent::decode(0x59, &[0xF9, 1]).is_some());
+        assert!(MetaEvent::decode(0x58, &[4, 31, 24, 8]).is_some());
         assert_eq!(MetaEvent::decode(0x51, &[0x07, 0xA1]), None);
         assert_eq!(MetaEvent::decode(0x00, &[1]), None);
         assert_eq!(MetaEvent::decode(0x20, &[16]), None);
