@@ -224,6 +224,20 @@ fn check_function<const J: usize, const S: usize, const E: usize, const B: usize
 fn fixed_function_gives_the_run_time_descriptors_and_answers() {
     check_function(&default_fn::MIDI, &default_cfg());
     check_function(&two_settings_fn::MIDI, &two_settings_cfg());
+    // REQ-USB-FIX-001: the stored bytes are those of write_function for interfaces 0 and 1 with
+    // no strings.
+    let mut buf = [0u8; 512];
+    let n = write_function(&default_cfg(), &mut buf).unwrap();
+    assert_eq!(default_fn::MIDI.descriptors(), &buf[..n]);
+    let n = write_function(&two_settings_cfg(), &mut buf).unwrap();
+    assert_eq!(two_settings_fn::MIDI.descriptors(), &buf[..n]);
+}
+
+#[test]
+fn alt0_is_a_default_feature() {
+    // REQ-USB-GEN-014: Alternate Setting 0 with ports is on by default.
+    let manifest = include_str!("../Cargo.toml");
+    assert!(manifest.contains("default = [\"alt0\"]"), "{manifest}");
 }
 
 #[test]
@@ -234,7 +248,9 @@ fn replay_stops_at_a_broken_length_with_no_panic() {
         let f = FixedFunction::new(d, &[], &[GroupMask::ALL], &[]).unwrap();
         let mut got = Bytes::default();
         f.replay(&FixedIds::default(), &mut got).unwrap();
-        assert!(got.0.len() <= d.len());
+        // REQ-USB-FIX-002: only the whole descriptors before the broken one are replayed.
+        let want: &[u8] = if d[0] == 3 { &[3, 0x24, 1] } else { &[] };
+        assert_eq!(got.0, want, "{d:?}");
     }
 }
 

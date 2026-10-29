@@ -2032,6 +2032,15 @@ mod tests {
         ]);
         assert_eq!(r.len(), 2);
         assert!(r.iter().all(Result::is_ok));
+        // External OUT Jacks whose sources are an Embedded and an External MIDI IN Jack.
+        let r = read_all(&[
+            6, 0x24, 2, 1, 1, 0, // Embedded MIDI IN Jack 1
+            6, 0x24, 2, 2, 3, 0, // External MIDI IN Jack 3
+            9, 0x24, 3, 2, 6, 1, 1, 1, 0, // External OUT Jack 6 from Jack 1
+            9, 0x24, 3, 2, 7, 1, 3, 1, 0, // External OUT Jack 7 from Jack 3
+        ]);
+        assert_eq!(r.len(), 4);
+        assert!(r.iter().all(Result::is_ok));
     }
 
     #[test]
