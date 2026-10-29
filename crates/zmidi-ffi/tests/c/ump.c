@@ -32,6 +32,9 @@ static void writers(void) {
   /* 7.4.9 Program Change (Figure 64): program 5, Bank 1/2. */
   CHECK(zmidi_ump_midi2_program_change(0, 0, 5, true, 1, 2, w) == ZMIDI_STATUS_OK);
   CHECK(w[0] == 0x40C00001u && w[1] == 0x05000102u);
+  /* With no Bank: Bank Valid 0 and the bank bytes 0. */
+  CHECK(zmidi_ump_midi2_program_change(0, 0, 5, false, 1, 2, w) == ZMIDI_STATUS_OK);
+  CHECK(w[0] == 0x40C00000u && w[1] == 0x05000000u);
   CHECK(zmidi_ump_midi2_channel_pressure(0, 3, 0x89ABCDEFu, w) == ZMIDI_STATUS_OK);
   CHECK(w[0] == 0x40D30000u && w[1] == 0x89ABCDEFu);
   /* 7.4.11 Pitch Bend: the center is 0x80000000. */
@@ -57,6 +60,21 @@ static void parse(void) {
   CHECK(info.words[0] == note_on[0] && info.words[1] == note_on[1] && info.words[2] == 0);
   CHECK(zmidi_ump_parse(clock, 1, &info) == ZMIDI_STATUS_OK);
   CHECK(info.message_type == 0x1 && info.status == 0xF8 && info.group == 3 && !info.has_channel);
+  CHECK(info.has_group && info.has_status && info.decoded);
+  /* Utility NOOP: no Group (M2-104 2.1.2), Status 0. */
+  {
+    static const uint32_t noop[1] = {0x00000000u};
+    static const uint32_t reserved[1] = {0x6A000000u};
+    CHECK(zmidi_ump_parse(noop, 1, &info) == ZMIDI_STATUS_OK);
+    CHECK(info.message_type == 0x0 && !info.has_group && info.has_status && info.status == 0);
+    CHECK(info.decoded && !info.has_channel);
+    /* A reserved Message Type: not decoded, no status. */
+    CHECK(zmidi_ump_parse(reserved, 1, &info) == ZMIDI_STATUS_OK);
+    CHECK(info.message_type == 0x6 && info.word_count == 1 && !info.decoded);
+    CHECK(!info.has_status && !info.has_channel);
+    /* M2-104 2.1.2: a reserved Message Type may be defined with or without a Group. */
+    CHECK(!info.has_group);
+  }
   /* Too few words for Message Type 0x4, and null pointers. */
   CHECK(zmidi_ump_parse(note_on, 1, &info) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_ump_parse(NULL, 1, &info) == ZMIDI_STATUS_INVALID_ARGUMENT);
@@ -74,6 +92,32 @@ static void translate(void) {
   CHECK(zmidi_ump_midi2_note_on(0, 0, 60, 0x0100, w) == ZMIDI_STATUS_OK);
   CHECK(zmidi_ump_midi2_to_midi1(w, 2, out, 4, &n) == ZMIDI_STATUS_OK);
   CHECK(n == 1 && out[0] == 0x20903C01u);
+  /* D.2: Control Change data 0xFFFFFFFF gives value 0x7F. */
+  CHECK(zmidi_ump_midi2_control_change(0, 0, 7, 0xFFFFFFFFu, w) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_ump_midi2_to_midi1(w, 2, out, 4, &n) == ZMIDI_STATUS_OK);
+  CHECK(n == 1 && out[0] == 0x20B0077Fu);
+  /* D.2: Program Change with Bank gives Bank Select MSB, LSB, then Program Change. */
+  CHECK(zmidi_ump_midi2_program_change(0, 0, 5, true, 1, 2, w) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_ump_midi2_to_midi1(w, 2, out, 4, &n) == ZMIDI_STATUS_OK);
+  CHECK(n == 3 && out[0] == 0x20B00001u && out[1] == 0x20B02002u && out[2] == 0x20C00500u);
+  /* D.2: Pitch Bend center 0x80000000 gives 0x2000 (LSB 0x00, MSB 0x40). */
+  CHECK(zmidi_ump_midi2_pitch_bend(0, 0, 0x80000000u, w) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_ump_midi2_to_midi1(w, 2, out, 4, &n) == ZMIDI_STATUS_OK);
+  CHECK(n == 1 && out[0] == 0x20E00040u);
+  /* D.2: Registered Controller (RPN) 0/1 with data 0x80000000 gives 4 Control Changes. */
+  {
+    static const uint32_t rpn[2] = {0x40200001u, 0x80000000u};
+    CHECK(zmidi_ump_midi2_to_midi1(rpn, 2, out, 4, &n) == ZMIDI_STATUS_OK);
+    CHECK(n == 4 && out[0] == 0x20B06500u && out[1] == 0x20B06401u);
+    CHECK(out[2] == 0x20B00640u && out[3] == 0x20B02600u);
+  }
+  /* REQ-FFI-UMP-004: Per-Note Management has no MIDI 1.0 form: zero words. */
+  {
+    static const uint32_t pnm[2] = {0x40F03C00u, 0};
+    n = 99;
+    CHECK(zmidi_ump_midi2_to_midi1(pnm, 2, out, 4, &n) == ZMIDI_STATUS_OK);
+    CHECK(n == 0);
+  }
   /* Not a MIDI 2.0 Channel Voice packet. */
   out[0] = 0x20903C64u;
   CHECK(zmidi_ump_midi2_to_midi1(out, 1, w, 2, &n) == ZMIDI_STATUS_NOT_SUPPORTED);
@@ -100,6 +144,11 @@ static void scaling(void) {
   CHECK(zmidi_ump_upscale(0x80, 7, 16, &v) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_ump_upscale(0, 7, 33, &v) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_ump_upscale(0, 7, 16, NULL) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  /* Downscale: the target width must be smaller, and the value must fit the source width. */
+  CHECK(zmidi_ump_downscale(0, 7, 7, &v) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_ump_downscale(0, 7, 16, &v) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_ump_downscale(0x10000, 16, 7, &v) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_ump_downscale(0, 16, 7, NULL) == ZMIDI_STATUS_INVALID_ARGUMENT);
 }
 
 int main(void) {

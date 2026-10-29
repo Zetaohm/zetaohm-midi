@@ -80,9 +80,13 @@ static void bytes_to_ump_invalid(void) {
   CHECK(zmidi_bytes_to_ump_init(&r, 0, 3) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_bytes_to_ump_init(NULL, 0, 1) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_bytes_to_ump_init(&r, 0, 1) == ZMIDI_STATUS_OK);
-  CHECK(zmidi_bytes_to_ump_push(NULL, 0x90, w, 4, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
-  CHECK(zmidi_bytes_to_ump_push(&r, 0x90, NULL, 4, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
-  CHECK(zmidi_bytes_to_ump_push(&r, 0x90, w, 4, NULL) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(push(&r, 0x90, w) == 0);
+  CHECK(zmidi_bytes_to_ump_push(NULL, 0x3C, w, 4, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_bytes_to_ump_push(&r, 0x3C, NULL, 4, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_bytes_to_ump_push(&r, 0x3C, w, 4, NULL) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  /* REQ-FFI-ABI-002: the null calls changed no state: the Note On goes on as before. */
+  CHECK(push(&r, 0x3C, w) == 0);
+  CHECK(push(&r, 0x64, w) == 1 && w[0] == 0x20903C64u);
 }
 
 static size_t write1(ZmidiUmpToBytes *wr, uint32_t word, uint8_t *out, size_t cap, ZmidiStatus *st) {
@@ -112,6 +116,12 @@ static void ump_to_bytes(void) {
   CHECK(st == ZMIDI_STATUS_BUFFER_TOO_SMALL);
   n = write1(&wr, 0x20903C64u, b, 3, &st);
   CHECK(st == ZMIDI_STATUS_OK && n == 3 && b[0] == 0x90);
+  /* Running status off: each message has its status byte (REQ-FFI-IO-003). */
+  CHECK(zmidi_ump_to_bytes_init(&wr, false) == ZMIDI_STATUS_OK);
+  n = write1(&wr, 0x20903C64u, b, sizeof b, &st);
+  CHECK(st == ZMIDI_STATUS_OK && n == 3 && b[0] == 0x90 && b[1] == 0x3C && b[2] == 0x64);
+  n = write1(&wr, 0x20903E40u, b, sizeof b, &st);
+  CHECK(st == ZMIDI_STATUS_OK && n == 3 && b[0] == 0x90 && b[1] == 0x3E && b[2] == 0x40);
   /* Null pointers. */
   CHECK(zmidi_ump_to_bytes_init(NULL, false) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_ump_to_bytes_refresh_status(NULL) == ZMIDI_STATUS_INVALID_ARGUMENT);
@@ -146,8 +156,16 @@ static void bytes_to_ump_feed(void) {
 }
 
 static void sizes_and_version(void) {
-  CHECK(zmidi_bytes_to_ump_size() <= sizeof(ZmidiBytesToUmp));
-  CHECK(zmidi_ump_to_bytes_size() <= sizeof(ZmidiUmpToBytes));
+  void *p;
+  CHECK(zmidi_bytes_to_ump_size() > 0 && zmidi_bytes_to_ump_size() <= sizeof(ZmidiBytesToUmp));
+  CHECK(zmidi_ump_to_bytes_size() > 0 && zmidi_ump_to_bytes_size() <= sizeof(ZmidiUmpToBytes));
+  /* REQ-FFI-IO-005: storage of exactly the given size is enough (AddressSanitizer checks it). */
+  p = malloc(zmidi_bytes_to_ump_size());
+  CHECK(p != NULL && zmidi_bytes_to_ump_init((ZmidiBytesToUmp *)p, 0, 2) == ZMIDI_STATUS_OK);
+  free(p);
+  p = malloc(zmidi_ump_to_bytes_size());
+  CHECK(p != NULL && zmidi_ump_to_bytes_init((ZmidiUmpToBytes *)p, true) == ZMIDI_STATUS_OK);
+  free(p);
   CHECK(zmidi_abi_version() == ((uint32_t)ZMIDI_ABI_MAJOR << 16 | ZMIDI_ABI_MINOR));
 }
 

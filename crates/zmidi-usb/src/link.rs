@@ -211,6 +211,9 @@ pub struct MidiLink<const CABLES: usize = 1, const X: usize = 0> {
     ump_reader: UmpPacketReader,
     /// UMP writer of the sent endpoint (USB MIDI 2.0 settings).
     ump_writer: UmpPacketWriter,
+    /// wMaxPacketSize of the sent endpoint of Alternate Setting 0 (`LinkConfig::max_packet`),
+    /// the packet size again after a USB reset or a configuration change.
+    alt0_max_packet: u16,
 }
 
 /// The Event Packet reader and writer of Alternate Setting 0 (feature `alt0`, on by default).
@@ -281,6 +284,7 @@ impl<const CABLES: usize, const X: usize> MidiLink<CABLES, X> {
             alt0: Alt0::new(&config)?,
             ump_reader: UmpPacketReader::new(config.receive, config.mask),
             ump_writer,
+            alt0_max_packet: config.max_packet,
         })
     }
 
@@ -356,6 +360,12 @@ impl<const CABLES: usize, const X: usize> MidiLink<CABLES, X> {
         self.alt0.reset();
         self.ump_reader.reset();
         self.ump_writer.reset();
+        if matches!(event, LinkEvent::UsbReset | LinkEvent::ConfigurationChange) {
+            // Alternate Setting 0 again: the packet size of its endpoint (REQ-USB-MS2-009).
+            if let Ok(w) = UmpPacketWriter::new(self.alt0_max_packet) {
+                self.ump_writer = w;
+            }
+        }
     }
 
     /// Takes the selection of Alternate Setting `setting` as [`Self::report`] does with
@@ -952,6 +962,22 @@ mod tests {
         assert_eq!(l.write_packet(&mut it, &mut buf), Err(LinkError::Overflow));
         assert_eq!(buf, [0xAA; 3]);
         assert!(it.peek().is_some());
+    }
+
+    #[test]
+    fn reset_and_configuration_change_restore_the_alternate_setting_0_packet_size() {
+        // REQ-USB-MS2-009, REQ-USB-UMP-007: after a USB reset or a configuration change the
+        // writer uses wMaxPacketSize of the Alternate Setting 0 endpoint again.
+        let mut l: MidiLink = MidiLink::new(LinkConfig::default()).unwrap();
+        assert_eq!(l.packet_size(), 64);
+        for event in [LinkEvent::UsbReset, LinkEvent::ConfigurationChange] {
+            l.report_setting(SettingNumber(1), GroupMask::ALL, 32)
+                .unwrap();
+            assert_eq!(l.packet_size(), 32);
+            l.report(event);
+            assert_eq!(l.setting(), SettingNumber::MIDI1);
+            assert_eq!(l.packet_size(), 64);
+        }
     }
 
     #[test]

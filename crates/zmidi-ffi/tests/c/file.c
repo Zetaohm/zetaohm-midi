@@ -55,6 +55,7 @@ static void write_and_read_back(void) {
   bool has = false;
   uint16_t tpq = 0;
   size_t len = 0, events = 0, seq_notes = 0;
+  bool profile = false, tempo = false, time_sig = false, config_note = false;
   memset(&p, 0, sizeof p);
   p.profile_id[0] = 0x7E;
   p.profile_id[2] = 0x01;
@@ -68,7 +69,11 @@ static void write_and_read_back(void) {
   c.profiles = &p;
   c.profile_count = 1;
   CHECK(zmidi_clip_writer_init(&w, buf, sizeof buf, &c, &e) == ZMIDI_STATUS_OK);
+  /* REQ-FFI-FILE-002: a configuration event before the start. */
+  CHECK(zmidi_clip_writer_config_event(&w, note_on, 2, &e) == ZMIDI_STATUS_OK);
   CHECK(zmidi_clip_writer_start(&w, 0, false, 0, 0, &e) == ZMIDI_STATUS_OK);
+  /* After the start it is in the wrong phase. */
+  CHECK(zmidi_clip_writer_config_event(&w, note_on, 2, &e) == ZMIDI_STATUS_REJECTED && e == ZMIDI_CLIP_ERROR_WRONG_PHASE);
   CHECK(zmidi_clip_writer_event(&w, 0, note_on, 2, &e) == ZMIDI_STATUS_OK);
   CHECK(zmidi_clip_writer_event(&w, 96, note_off, 2, &e) == ZMIDI_STATUS_OK);
   /* Ticks never decrease (events are in presentation order). */
@@ -83,6 +88,13 @@ static void write_and_read_back(void) {
     CHECK(zmidi_clip_reader_next(&r, &ev, &has, &e) == ZMIDI_STATUS_OK);
     if (!has) break;
     events++;
+    if (ev.section == 0) {
+      /* Set Profile On, Group destination: 7E 7E 0D 22 02 7F in the first SysEx7 UMP. */
+      if (ev.words[0] == 0x30167E7Eu && ev.words[1] == 0x0D22027Fu) profile = true;
+      if (ev.words[0] == 0xD0100000u && ev.words[1] == 50000000u) tempo = true;
+      if (ev.words[0] == 0xD0100001u && ev.words[1] == 0x04020800u) time_sig = true;
+      if (ev.words[0] == note_on[0] && ev.word_count == 2 && ev.ticks == 0) config_note = true;
+    }
     if (ev.section == 1 && (ev.words[0] == note_on[0] || ev.words[0] == note_off[0])) {
       CHECK(ev.word_count == 2);
       CHECK(ev.ticks == (ev.words[0] == note_on[0] ? 0u : 96u));
@@ -91,6 +103,7 @@ static void write_and_read_back(void) {
     if (events > 64) break;
   }
   CHECK(seq_notes == 2);
+  CHECK(profile && tempo && time_sig && config_note);
   CHECK(zmidi_clip_reader_ticks_per_quarter_note(&r, &tpq) && tpq == 96);
 }
 
@@ -102,6 +115,28 @@ static void bad_input(void) {
   ZmidiClipConfig c = config(0);
   ZmidiClipError e = ZMIDI_CLIP_ERROR_NONE;
   CHECK(zmidi_clip_reader_init(&r, not_a_clip, sizeof not_a_clip, &e) == ZMIDI_STATUS_REJECTED && e == ZMIDI_CLIP_ERROR_BAD_HEADER);
+  {
+    /* REQ-FFI-FILE-001: a truncated clip and data after End of Clip. */
+    uint8_t clip[128];
+    ZmidiClipWriter cw;
+    ZmidiClipConfig cc = config(96);
+    ZmidiClipEvent ev;
+    bool has = true;
+    size_t len = 0, guard;
+    ZmidiStatus st = ZMIDI_STATUS_OK;
+    CHECK(zmidi_clip_writer_init(&cw, clip, sizeof clip, &cc, &e) == ZMIDI_STATUS_OK);
+    CHECK(zmidi_clip_writer_start(&cw, 0, false, 0, 0, &e) == ZMIDI_STATUS_OK);
+    CHECK(zmidi_clip_writer_finish(&cw, 0, &len, &e) == ZMIDI_STATUS_OK);
+    CHECK(zmidi_clip_reader_init(&r, clip, len - 4, &e) == ZMIDI_STATUS_OK);
+    for (guard = 0; guard < 16 && st == ZMIDI_STATUS_OK && has; guard++) st = zmidi_clip_reader_next(&r, &ev, &has, &e);
+    CHECK(st == ZMIDI_STATUS_REJECTED && e == ZMIDI_CLIP_ERROR_TRUNCATED);
+    clip[len] = 0x00; clip[len + 1] = 0x40; clip[len + 2] = 0x00; clip[len + 3] = 0x00;
+    CHECK(zmidi_clip_reader_init(&r, clip, len + 4, &e) == ZMIDI_STATUS_OK);
+    st = ZMIDI_STATUS_OK;
+    has = true;
+    for (guard = 0; guard < 16 && st == ZMIDI_STATUS_OK && has; guard++) st = zmidi_clip_reader_next(&r, &ev, &has, &e);
+    CHECK(st == ZMIDI_STATUS_REJECTED && e == ZMIDI_CLIP_ERROR_DATA_AFTER_END);
+  }
   /* A TPQ of 0 is not a valid configuration. */
   CHECK(zmidi_clip_writer_init(&w, buf, sizeof buf, &c, &e) == ZMIDI_STATUS_INVALID_ARGUMENT && e == ZMIDI_CLIP_ERROR_INVALID_CONFIG);
   /* A buffer too small for the header. */

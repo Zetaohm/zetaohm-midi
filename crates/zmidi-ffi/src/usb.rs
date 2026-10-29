@@ -269,7 +269,6 @@ pub unsafe extern "C" fn zmidi_usb_link_read(
                 n += 1;
             }
         }
-        Err(LinkError::Tail { .. }) => {}
         Err(_) => bad += 1,
     });
     // SAFETY: caller contract above.
