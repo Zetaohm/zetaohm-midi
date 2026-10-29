@@ -86,6 +86,8 @@ mod tests {
     #[test]
     fn read_value_is_empty_and_interval_is_15_ms() {
         assert!(READ_VALUE.is_empty());
+        assert_eq!(MAX_CONNECTION_INTERVAL_MS, 15);
+        assert_eq!(MAX_CONNECTION_INTERVAL_UNITS, 12);
         assert_eq!(
             MAX_CONNECTION_INTERVAL_UNITS * 125,
             MAX_CONNECTION_INTERVAL_MS * 100

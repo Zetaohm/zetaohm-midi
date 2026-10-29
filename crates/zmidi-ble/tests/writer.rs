@@ -340,6 +340,11 @@ fn umps_with_no_midi1_form_and_the_group() {
         ],
     );
     assert_eq!(p, vec![vec![hdr(2), ts(2), 0x90, 0x3C, 0x64]]);
+    // The undefined status bytes F4H, F5H, F9H and FDH are never written.
+    for status in [0xF4u32, 0xF5, 0xF9, 0xFD] {
+        let ump = [0x1000_0000 | status << 16];
+        assert!(packets(&mut w, &[(3, &ump)]).is_empty(), "{status:#X}");
+    }
     // Nothing to send: 0 and no packet.
     assert!(packets(&mut w, &[]).is_empty());
 }
