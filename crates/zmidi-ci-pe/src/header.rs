@@ -1109,6 +1109,382 @@ mod tests {
     }
 
     #[test]
+    fn parse_errors_name_the_property() {
+        // REQ-PE-HDR-002 (object or null value), -006, -007, -011, -012, REQ-PE-STAT-001,
+        // REQ-PE-SUB-001, -002: the exact error of each refused value, and the largest value
+        // that is accepted.
+        let r37 = "r".repeat(37);
+        let m76 = std::format!("application/{}", "x".repeat(64));
+        let m75 = std::format!("application/{}", "x".repeat(63));
+        let cases: [(String, HeaderKind, HeaderError); 13] = [
+            (
+                r#"{"resource":{}}"#.into(),
+                HeaderKind::Inquiry,
+                HeaderError::WrongType("resource"),
+            ),
+            (
+                r#"{"resource":null}"#.into(),
+                HeaderKind::Inquiry,
+                HeaderError::WrongType("resource"),
+            ),
+            (
+                r#"{"resource":""}"#.into(),
+                HeaderKind::Inquiry,
+                HeaderError::Invalid("resource"),
+            ),
+            (
+                std::format!(r#"{{"resource":"{r37}"}}"#),
+                HeaderKind::Inquiry,
+                HeaderError::Invalid("resource"),
+            ),
+            (
+                std::format!(r#"{{"resource":"a","resId":"{r37}"}}"#),
+                HeaderKind::Inquiry,
+                HeaderError::Invalid("resId"),
+            ),
+            (
+                std::format!(r#"{{"resource":"a","mediaType":"{m76}"}}"#),
+                HeaderKind::Inquiry,
+                HeaderError::Invalid("mediaType"),
+            ),
+            (
+                r#"{"status":200,"cacheTime":1e3}"#.into(),
+                HeaderKind::Reply,
+                HeaderError::Invalid("cacheTime"),
+            ),
+            (
+                r#"{"status":200,"cacheTime":-1}"#.into(),
+                HeaderKind::Reply,
+                HeaderError::Invalid("cacheTime"),
+            ),
+            (
+                r#"{"status":200,"cacheTime":4294967296}"#.into(),
+                HeaderKind::Reply,
+                HeaderError::Invalid("cacheTime"),
+            ),
+            (
+                r#"{"status":65536}"#.into(),
+                HeaderKind::Reply,
+                HeaderError::Invalid("status"),
+            ),
+            (
+                r#"{"command":"full","subscribeId":""}"#.into(),
+                HeaderKind::Subscription,
+                HeaderError::Invalid("subscribeId"),
+            ),
+            (
+                r#"{"subscribeId":"a"}"#.into(),
+                HeaderKind::Subscription,
+                HeaderError::Missing("command"),
+            ),
+            (
+                r#"{"command":"notify"}"#.into(),
+                HeaderKind::Subscription,
+                HeaderError::Missing("subscribeId"),
+            ),
+        ];
+        for (text, kind, want) in &cases {
+            assert_eq!(Header::parse(*kind, text.as_bytes()), Err(*want), "{text}");
+        }
+        // The limits are accepted; the parser accepts any characters (REQ-PE-HDR-006, -007,
+        // REQ-PE-SUB-001).
+        let r36 = "é".repeat(35) + "-";
+        let ok = std::format!(
+            r#"{{"resource":"Re-s é","resId":"{r36}","mediaType":"{m75}","setPartial":false}}"#
+        );
+        let h = Header::parse(HeaderKind::Inquiry, ok.as_bytes()).unwrap();
+        assert_eq!(
+            (s(&h.resource), s(&h.res_id), s(&h.media_type)),
+            (String::from("Re-s é"), r36.clone(), m75.clone())
+        );
+        // REQ-PE-TXN-001: "setPartial":false is a Full SET.
+        assert!(!h.set_partial);
+        let h = Header::parse(
+            HeaderKind::Reply,
+            br#"{"status":65535,"cacheTime":4294967295}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            (h.status, h.cache_time),
+            (Some(Status(65535)), Some(u32::MAX))
+        );
+        let h = Header::parse(
+            HeaderKind::Subscription,
+            "{\"command\":\"full\",\"subscribeId\":\"Ab-\u{e9} 0123456789x\"}".as_bytes(),
+        )
+        .unwrap();
+        assert_eq!(s(&h.subscribe_id), "Ab-\u{e9} 0123456789x", "16 characters");
+    }
+
+    #[test]
+    fn writer_errors_name_the_property() {
+        // REQ-PE-HDR-006, -007, -012, REQ-PE-STAT-001, -005, REQ-PE-SUB-001, REQ-PE-LINK-008:
+        // the exact error of each refused caller value, and the largest value that is written.
+        let base = Header {
+            resource: Some(HeaderStr::Text("Res")),
+            ..Default::default()
+        };
+        let a36 = "a".repeat(36);
+        let a37 = "a".repeat(37);
+        let m75 = std::format!("application/{}", "x".repeat(63));
+        let m76 = std::format!("application/{}", "x".repeat(64));
+        // 512 and 513 bytes after the escape step: "\n" is 2 bytes, "é" 6 ("é").
+        let nl256 = "\n".repeat(256);
+        let e85 = std::format!("a{}a", "é".repeat(85));
+        let e85b = std::format!("ab{}a", "é".repeat(85));
+        let refused: [(Header<'_>, HeaderError); 13] = [
+            (
+                Header {
+                    resource: Some(HeaderStr::Text("")),
+                    ..base
+                },
+                HeaderError::Invalid("resource"),
+            ),
+            (
+                Header {
+                    resource: Some(HeaderStr::Text(&a37)),
+                    ..base
+                },
+                HeaderError::Invalid("resource"),
+            ),
+            (
+                Header {
+                    res_id: Some(HeaderStr::Text(&a37)),
+                    ..base
+                },
+                HeaderError::Invalid("resId"),
+            ),
+            (
+                Header {
+                    media_type: Some(HeaderStr::Text("")),
+                    ..base
+                },
+                HeaderError::Invalid("mediaType"),
+            ),
+            (
+                Header {
+                    media_type: Some(HeaderStr::Text(&m76)),
+                    ..base
+                },
+                HeaderError::Invalid("mediaType"),
+            ),
+            (
+                Header {
+                    subscribe_id: Some(HeaderStr::Text("")),
+                    ..base
+                },
+                HeaderError::Invalid("subscribeId"),
+            ),
+            (
+                Header {
+                    subscribe_id: Some(HeaderStr::Text("Ab")),
+                    ..base
+                },
+                HeaderError::Invalid("subscribeId"),
+            ),
+            (
+                Header {
+                    subscribe_id: Some(HeaderStr::Text("a-b")),
+                    ..base
+                },
+                HeaderError::Invalid("subscribeId"),
+            ),
+            (
+                Header {
+                    message: Some(HeaderStr::Text(&e85b)),
+                    ..base
+                },
+                HeaderError::Invalid("message"),
+            ),
+            (
+                Header {
+                    msg: Some(HeaderStr::Text(&(nl256.clone() + "x"))),
+                    ..base
+                },
+                HeaderError::Invalid("msg"),
+            ),
+            (
+                Header {
+                    msg: Some(HeaderStr::Text(&e85b)),
+                    ..base
+                },
+                HeaderError::Invalid("msg"),
+            ),
+            (
+                Header {
+                    status: Some(Status(202)),
+                    ..base
+                },
+                HeaderError::Invalid("status"),
+            ),
+            (
+                Header {
+                    status: Some(Status(444)),
+                    ..base
+                },
+                HeaderError::Invalid("status"),
+            ),
+        ];
+        for (i, (h, want)) in refused.iter().enumerate() {
+            assert_eq!(write(h, HeaderKind::Inquiry), Err(*want), "case {i}");
+        }
+        let ok = Header {
+            resource: Some(HeaderStr::Text(&a36)),
+            res_id: Some(HeaderStr::Text("Ab_9")),
+            media_type: Some(HeaderStr::Text(&m75)),
+            subscribe_id: Some(HeaderStr::Text("abc_1234")),
+            message: Some(HeaderStr::Text("aé")),
+            ..Default::default()
+        };
+        // "message" and "msg" of 512 bytes after the escape step are written.
+        for (h, empty) in [
+            (
+                Header {
+                    message: Some(HeaderStr::Text(&e85)),
+                    ..base
+                },
+                r#"{"resource":"Res","message":""}"#,
+            ),
+            (
+                Header {
+                    msg: Some(HeaderStr::Text(&nl256)),
+                    ..base
+                },
+                r#"{"resource":"Res","msg":""}"#,
+            ),
+        ] {
+            assert_eq!(
+                write(&h, HeaderKind::Inquiry).unwrap().len(),
+                empty.len() + 512
+            );
+        }
+        let out = write(&ok, HeaderKind::Inquiry).unwrap();
+        assert_eq!(
+            out,
+            std::format!(
+                r#"{{"resource":"{a36}","resId":"Ab_9","mediaType":"{m75}","subscribeId":"abc_1234","message":"a\u00e9"}}"#
+            )
+        );
+        // REQ-PE-TXN-001: a Full SET has no "setPartial".
+        assert_eq!(
+            write(&base, HeaderKind::Inquiry).unwrap(),
+            r#"{"resource":"Res"}"#
+        );
+    }
+
+    #[test]
+    fn status_table_and_classes() {
+        // REQ-PE-STAT-002: the 15 codes of Table 15 are known, every other code is not;
+        // REQ-PE-STAT-003: the class boundaries.
+        let table = [
+            200u16, 201, 341, 342, 343, 400, 403, 404, 405, 406, 407, 413, 415, 445, 500,
+        ];
+        for c in 0..=1000u16 {
+            assert_eq!(Status(c).is_known(), table.contains(&c), "{c}");
+        }
+        assert!(!Status(u16::MAX).is_known());
+        let consts = [
+            Status::OK,
+            Status::ACCEPTED,
+            Status::UNAVAILABLE,
+            Status::BAD_DATA,
+            Status::TOO_MANY_REQUESTS,
+            Status::BAD_REQUEST,
+            Status::FORBIDDEN,
+            Status::NOT_FOUND,
+            Status::NOT_ALLOWED,
+            Status::FLOW_CONTROL_NOT_SUPPORTED,
+            Status::FLOW_CONTROL_REQUIRED,
+            Status::PAYLOAD_TOO_LARGE,
+            Status::UNSUPPORTED_MEDIA,
+            Status::INVALID_VERSION,
+            Status::INTERNAL_ERROR,
+        ];
+        assert_eq!(consts.map(|s| s.0), table);
+        for (c, class) in [
+            (0, StatusClass::Unknown),
+            (199, StatusClass::Unknown),
+            (200, StatusClass::Success),
+            (299, StatusClass::Success),
+            (300, StatusClass::Redirection),
+            (399, StatusClass::Redirection),
+            (400, StatusClass::ClientError),
+            (499, StatusClass::ClientError),
+            (500, StatusClass::ServerError),
+            (599, StatusClass::ServerError),
+            (600, StatusClass::Unknown),
+            (65535, StatusClass::Unknown),
+        ] {
+            assert_eq!(Status(c).class(), class, "{c}");
+        }
+    }
+
+    #[test]
+    fn encoding_names_spelling_and_case() {
+        // REQ-PE-ENC-005: the writer spelling of Table 12; the reader compares with no case.
+        assert_eq!(
+            [
+                EncodingName::Ascii,
+                EncodingName::Mcoded7,
+                EncodingName::ZlibMcoded7
+            ]
+            .map(EncodingName::as_str),
+            ["ASCII", "Mcoded7", "zlib+Mcoded7"]
+        );
+        for (text, want) in [
+            ("ascii", Some(EncodingName::Ascii)),
+            ("ASCII", Some(EncodingName::Ascii)),
+            ("MCODED7", Some(EncodingName::Mcoded7)),
+            ("ZLIB+MCODED7", Some(EncodingName::ZlibMcoded7)),
+            ("Zlib+mcoded7", Some(EncodingName::ZlibMcoded7)),
+            ("zlib", None),
+            ("Mcoded", None),
+            ("ASCII ", None),
+        ] {
+            assert_eq!(EncodingName::parse(&HeaderStr::Text(text)), want, "{text}");
+        }
+        let h = Header::parse(
+            HeaderKind::Inquiry,
+            br#"{"resource":"a","mutualEncoding":"ZLIB+mcoded7"}"#,
+        )
+        .unwrap();
+        assert_eq!(h.mutual_encoding, Some(EncodingName::ZlibMcoded7));
+        assert_eq!(
+            write(&h, HeaderKind::Inquiry).unwrap(),
+            r#"{"resource":"a","mutualEncoding":"zlib+Mcoded7"}"#
+        );
+    }
+
+    #[test]
+    fn long_message_is_cut_at_512_bytes() {
+        // DEC-010 D-4, REQ-PE-STAT-005: a "message" of more than 512 escaped bytes is cut at the
+        // last escape or character boundary at or before 512, marked, and the other Properties
+        // are kept; a "message" of 512 bytes is not cut.
+        let reply =
+            |body: &str| std::format!(r#"{{"status":404,"message":"{body}","cacheTime":7}}"#);
+        // 8-byte groups: the cut is at 512 exactly.
+        let t = reply(&"ab\\u00e9".repeat(100));
+        let h = Header::parse(HeaderKind::Reply, t.as_bytes()).unwrap();
+        assert_eq!(s(&h.message), "abé".repeat(64));
+        assert!(h.message_truncated && !h.msg_truncated);
+        assert_eq!((h.status, h.cache_time), (Some(Status::NOT_FOUND), Some(7)));
+        // An escape across the 512 boundary: cut before it (1 + 85 x 6 = 511).
+        let t = reply(&std::format!("a{}", "\\u00e9".repeat(90)));
+        let h = Header::parse(HeaderKind::Reply, t.as_bytes()).unwrap();
+        assert_eq!(s(&h.message), std::format!("a{}", "é".repeat(85)));
+        assert!(h.message_truncated);
+        // A UTF-8 character across the boundary: cut before it (1 + 255 x 2 = 511).
+        let t = reply(&std::format!("a{}", "é".repeat(256)));
+        let h = Header::parse(HeaderKind::Reply, t.as_bytes()).unwrap();
+        assert_eq!(s(&h.message), std::format!("a{}", "é".repeat(255)));
+        assert!(h.message_truncated);
+        // 512 bytes: not cut.
+        let t = reply(&"x".repeat(512));
+        let h = Header::parse(HeaderKind::Reply, t.as_bytes()).unwrap();
+        assert_eq!((s(&h.message).len(), h.message_truncated), (512, false));
+    }
+
+    #[test]
     fn prop_parse_never_panics() {
         proptest!(|(bytes in proptest::collection::vec(any::<u8>(), 0..80))| {
             let _ = Header::parse(HeaderKind::Reply, &bytes);

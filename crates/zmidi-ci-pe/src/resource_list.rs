@@ -1071,7 +1071,9 @@ impl<'i, const S: usize> ListEvents<'_, 'i, S> {
                         ColumnKind::Property(a)
                     };
                     let (title, title_truncated) = match st.col_title_len {
-                        Some((n, cut)) => (Some(utf8_prefix(&st.col_title[..n])), cut || n == S),
+                        // REQ-PE-LIST-008: marked only when the reader cut it; a title of
+                        // exactly S bytes is whole.
+                        Some((n, cut)) => (Some(utf8_prefix(&st.col_title[..n])), cut),
                         None => (None, false),
                     };
                     return Some(ListEvent::Column(ColumnDecl {
@@ -1333,6 +1335,21 @@ mod tests {
             full.check(Operation::Set, &h(|h| h.set_partial = true)),
             Err(Status::NOT_ALLOWED)
         );
+        // "partial" permits a Partial SET and a Full SET (REQ-PE-TXN-003).
+        let partial = ResourceCaps {
+            can_set: CanSet::Partial,
+            ..base
+        };
+        assert_eq!(partial.check(Operation::Set, &h(|_| {})), Ok(()));
+        assert_eq!(
+            partial.check(Operation::Set, &h(|h| h.set_partial = true)),
+            Ok(())
+        );
+        // REQ-PE-HDR-010: "flowControl":true in a Set without fcOnSet.
+        assert_eq!(
+            full.check(Operation::Set, &h(|h| h.flow_control = true)),
+            Err(Status::FLOW_CONTROL_NOT_SUPPORTED)
+        );
         assert_eq!(
             base.check(Operation::Subscribe, &h(|_| {})),
             Err(Status::NOT_ALLOWED)
@@ -1403,6 +1420,247 @@ mod tests {
             Some("CMList")
         );
         assert!(find_resource(&t, &HeaderStr::Text("Nope")).is_none());
+    }
+
+    /// The Resource declarations (name, caps, present) and the Columns (name, link, title,
+    /// truncated) of one ResourceList, and the other events.
+    #[allow(clippy::type_complexity)]
+    fn read_full<const S: usize>(
+        text: &[u8],
+    ) -> (
+        Vec<(String, ResourceCaps, Present)>,
+        Vec<(String, bool, Option<String>, bool)>,
+        Vec<ListError>,
+    ) {
+        let mut r = ResourceListReader::<S>::new();
+        let (mut res, mut cols, mut errs) = (Vec::new(), Vec::new(), Vec::new());
+        let mut ev = r.push(text);
+        while let Some(e) = ev.next_event() {
+            match e {
+                ListEvent::Resource(d) => res.push((d.resource.to_string(), d.caps, d.present)),
+                ListEvent::Column(c) => {
+                    let (a, link) = match c.kind {
+                        ColumnKind::Link(a) => (a, true),
+                        ColumnKind::Property(a) => (a, false),
+                    };
+                    cols.push((
+                        a.to_string(),
+                        link,
+                        c.title.map(|t| t.to_string()),
+                        c.title_truncated,
+                    ))
+                }
+                ListEvent::Invalid(e) => errs.push(e),
+                _ => {}
+            }
+        }
+        (res, cols, errs)
+    }
+
+    #[test]
+    fn reader_defaults_and_present_flags() {
+        // REQ-PE-LIST-003, -004, -007: an absent Property has its Table 79 / 80 default and is
+        // marked absent; a present one is marked present, with its value.
+        let (res, _, errs) = read_full::<32>(
+            br#"[{"resource":"A"},{"resource":"B","canGet":false,"canSet":"full","canSubscribe":true,"requireResId":true,"fcOnGet":true,"fcOnSet":true,"mediaTypes":["a/b"],"encodings":["Mcoded7"],"schema":{},"canPaginate":true,"columns":[]}]"#,
+        );
+        assert!(errs.is_empty());
+        let defaults = ResourceCaps {
+            can_get: true,
+            can_set: CanSet::None,
+            can_subscribe: false,
+            require_res_id: false,
+            fc_on_get: false,
+            fc_on_set: false,
+            encodings: Encodings {
+                ascii: true,
+                mcoded7: false,
+                zlib_mcoded7: false,
+            },
+            can_paginate: false,
+        };
+        let all = Present {
+            can_get: true,
+            can_set: true,
+            can_subscribe: true,
+            require_res_id: true,
+            fc_on_get: true,
+            fc_on_set: true,
+            media_types: true,
+            encodings: true,
+            schema: true,
+            can_paginate: true,
+            columns: true,
+        };
+        let b = ResourceCaps {
+            can_get: false,
+            can_set: CanSet::Full,
+            can_subscribe: true,
+            require_res_id: true,
+            fc_on_get: true,
+            fc_on_set: true,
+            encodings: Encodings {
+                ascii: false,
+                mcoded7: true,
+                zlib_mcoded7: false,
+            },
+            can_paginate: true,
+        };
+        assert_eq!(
+            res,
+            [
+                (String::from("A"), defaults, Present::default()),
+                (String::from("B"), b, all)
+            ]
+        );
+        assert_eq!(ResourceCaps::default(), defaults);
+    }
+
+    #[test]
+    fn reader_object_errors() {
+        // REQ-PE-LIST-004, -006, -007, -008: the error of each object; the reader continues
+        // with the next object ("Z").
+        let r37 = "r".repeat(37);
+        for (obj, want) in [
+            (
+                std::format!(r#"{{"resource":"{r37}"}}"#),
+                ListError::Invalid("resource"),
+            ),
+            (
+                r#"{"resource":"A","canPaginate":"yes"}"#.into(),
+                ListError::Invalid("canPaginate"),
+            ),
+            (
+                r#"{"resource":"A","canPaginate":1}"#.into(),
+                ListError::Invalid("canPaginate"),
+            ),
+            (
+                r#"{"resource":"A","columns":{"property":"p"}}"#.into(),
+                ListError::Invalid("columns"),
+            ),
+            (
+                r#"{"resource":"A","columns":[{"title":"t"}]}"#.into(),
+                ListError::Invalid("columns"),
+            ),
+            (
+                r#"{"resource":"A","columns":[{"property":"p","title":"t"},{"link":"0123456789012345678901234567890123456"}]}"#.into(),
+                ListError::Invalid("link"),
+            ),
+        ] {
+            let text = std::format!(r#"[{obj},{{"resource":"Z"}}]"#);
+            let (res, _, errs) = read_full::<64>(text.as_bytes());
+            assert_eq!(errs, [want], "{obj}");
+            assert_eq!(res.len(), 1, "{obj}");
+            assert_eq!(res[0].0, "Z");
+        }
+        // A "property" or "link" longer than the caller buffer (8 bytes).
+        for obj in [
+            r#"{"resource":"A","columns":[{"property":"abcdefghi","title":"t"}]}"#,
+            r#"{"resource":"A","columns":[{"link":"abcdefghi"}]}"#,
+        ] {
+            let text = std::format!(r#"[{obj},{{"resource":"Z"}}]"#);
+            let (res, _, errs) = read_full::<8>(text.as_bytes());
+            assert_eq!(
+                (errs, res.len()),
+                (std::vec![ListError::Overflow], 1),
+                "{obj}"
+            );
+        }
+        // A "schema" that is not valid JSON, or deeper than 64 levels: the JSON error ends the
+        // list.
+        let deep = std::format!("{}{}", "[".repeat(64), "]".repeat(64));
+        for (schema, want) in [
+            (String::from(r#"{"a":}"#), JsonError::Syntax),
+            (std::format!(r#"{{"a":{deep}}}"#), JsonError::Depth),
+        ] {
+            let text = std::format!(r#"[{{"resource":"A","schema":{schema}}}]"#);
+            let mut r = ResourceListReader::<32>::new();
+            let mut ev = r.push(text.as_bytes());
+            let mut got = Vec::new();
+            while let Some(e) = ev.next_event() {
+                if let ListEvent::Invalid(e) = e {
+                    got.push(e);
+                }
+            }
+            assert_eq!(got, [ListError::Json(want)], "{schema}");
+            assert_eq!(r.finish(), Err(ListError::Json(want)));
+        }
+    }
+
+    #[test]
+    fn reader_column_titles() {
+        // REQ-PE-LIST-008: a Column with no "title" is accepted; a "title" longer than the
+        // caller buffer (8 bytes) is cut at a character boundary and marked.
+        let (res, cols, errs) = read_full::<8>(
+            "[{\"resource\":\"A\",\"columns\":[{\"property\":\"p\"},{\"link\":\"L\",\"title\":\"abcdefg\u{e9}\"},{\"property\":\"q\",\"title\":\"abcdefgh_\"},{\"property\":\"r\",\"title\":\"abc\"}]}]"
+                .as_bytes(),
+        );
+        assert!(errs.is_empty());
+        assert_eq!(res.len(), 1);
+        assert_eq!(
+            cols,
+            [
+                (String::from("p"), false, None, false),
+                (String::from("L"), true, Some(String::from("abcdefg")), true),
+                (
+                    String::from("q"),
+                    false,
+                    Some(String::from("abcdefgh")),
+                    true
+                ),
+                (String::from("r"), false, Some(String::from("abc")), false),
+            ]
+        );
+        let (_, cols, _) = read_full::<8>(
+            br#"[{"resource":"A","columns":[{"property":"p","title":"abcdefgh"}]}]"#,
+        );
+        assert_eq!(
+            cols,
+            [(
+                String::from("p"),
+                false,
+                Some(String::from("abcdefgh")),
+                false
+            )]
+        );
+    }
+
+    #[test]
+    fn writer_errors_and_list_properties() {
+        // REQ-PE-LIST-004: "resource" of 1 to 36 characters; REQ-PE-LIST-007: "canPaginate";
+        // REQ-PE-LIST-008: a Column needs a "title".
+        let mut buf = [0u8; 200];
+        let a36 = "a".repeat(36);
+        let a37 = "a".repeat(37);
+        assert_eq!(
+            ResourceEntry::new(&a37).write(&mut buf),
+            Err(ListError::Invalid("resource"))
+        );
+        assert_eq!(
+            ResourceEntry::new("").write(&mut buf),
+            Err(ListError::Invalid("resource"))
+        );
+        let n = ResourceEntry::new(&a36).write(&mut buf).unwrap();
+        assert_eq!(
+            &buf[..n],
+            std::format!(r#"{{"resource":"{a36}"}}"#).as_bytes()
+        );
+        let mut p = ResourceEntry::new("P");
+        p.caps.can_paginate = true;
+        p.columns = &[Column {
+            kind: ColumnKind::Link("Detail"),
+            title: "More",
+        }];
+        let n = p.write(&mut buf).unwrap();
+        assert_eq!(
+            &buf[..n],
+            br#"{"resource":"P","canPaginate":true,"columns":[{"link":"Detail","title":"More"}]}"#
+        );
+        p.columns = &[Column {
+            kind: ColumnKind::Property("name"),
+            title: "",
+        }];
+        assert_eq!(p.write(&mut buf), Err(ListError::Missing("title")));
     }
 
     #[test]

@@ -29,3 +29,9 @@ run 'cargo' 'check' '--quiet' '--lib' '--no-default-features' '--target' 'thumbv
 
 echo 'compile-gates: gate test' >&2
 run 'cargo' 'test' '--quiet'
+
+echo 'compile-gates: gate test-responder-only' >&2
+run 'cargo' 'test' '--quiet' '--no-default-features' '--features' 'profiles,property-exchange,process-inquiry'
+
+echo 'compile-gates: gate test-categories-off' >&2
+run 'cargo' 'test' '--quiet' '--no-default-features' '--features' 'initiator'

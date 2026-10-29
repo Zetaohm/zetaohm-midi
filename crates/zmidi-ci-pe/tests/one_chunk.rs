@@ -156,6 +156,11 @@ impl Pair {
         data: &[u8],
     ) -> Vec<u8> {
         let mut buf = [0u8; 600];
+        // The zmidi-ci writer writes an Inquiry: Get Property Data only as Chunk 1 of 1 with no
+        // Property Data (M2-101 Table 33). The Responder must also answer a peer that breaks
+        // this rule, so such a Chunk is written as a Set and its Sub-ID#2 is changed to 0x34.
+        let odd_get = kind == PeKind::GetInquiry && (total, number, data.len()) != (1, 1, 0);
+        let as_kind = if odd_get { PeKind::SetInquiry } else { kind };
         let n = PeChunk {
             request_id: rid,
             header,
@@ -163,8 +168,17 @@ impl Pair {
             number,
             data,
         }
-        .write(kind, self.a.muid(), self.b.muid(), Framing::Bare, &mut buf)
+        .write(
+            as_kind,
+            self.a.muid(),
+            self.b.muid(),
+            Framing::Bare,
+            &mut buf,
+        )
         .unwrap();
+        if odd_get {
+            buf[3] = PeKind::GetInquiry.sub_id2();
+        }
         buf[..n].to_vec()
     }
 }
@@ -308,7 +322,7 @@ fn flat_responder_gives_the_same_statuses() {
 fn bad_headers(flat: bool) {
     let mut p = Pair::new();
     p.flat = flat;
-    let cases: [(PeKind, &[u8], u16); 9] = [
+    let cases: [(PeKind, &[u8], u16); 11] = [
         (
             PeKind::GetInquiry,
             br#"{"resource":"X-State","mutualEncoding":"Mcoded7"}"#,
@@ -336,6 +350,18 @@ fn bad_headers(flat: bool) {
         (
             PeKind::GetInquiry,
             br#"{"resource":"X-State","resId":"0123456789012345678901234567890123456"}"#,
+            400,
+        ),
+        // REQ-PE-ONE-004: a "resId" that is not a string (the application would give 200), and a
+        // "resource" of 37 characters (the application would give 404).
+        (
+            PeKind::GetInquiry,
+            br#"{"resource":"X-State","resId":5}"#,
+            400,
+        ),
+        (
+            PeKind::GetInquiry,
+            br#"{"resource":"X-State0123456789012345678901234567890"}"#,
             400,
         ),
     ];

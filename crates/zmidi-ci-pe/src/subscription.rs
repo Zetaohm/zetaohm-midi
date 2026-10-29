@@ -588,6 +588,12 @@ mod tests {
             0,
             "REQ-PE-LINK-009: same resId only"
         );
+        assert_eq!(
+            t.updates_for("Y", Some(long.as_str())).count(),
+            0,
+            "REQ-PE-LINK-009: same resource only"
+        );
+        assert_eq!(t.updates_for("X", Some(long.as_str())).count(), 1);
     }
 
     #[test]
@@ -641,6 +647,68 @@ mod tests {
             t.receive(peer(7), &msg(Command::End, id, None)),
             Ok(SubscriptionInput::Ended(_))
         ));
+    }
+
+    #[test]
+    fn end_picks_the_entry_by_ended_by() {
+        // REQ-PE-SUB-004: the same peer and "subscribeId" in both roles. An "end" ends the entry
+        // in which the sender has the role that "endedBy" gives; with no "endedBy", the entry in
+        // which the sender is the initiator, else the one in which it is the responder.
+        // REQ-PE-SUB-004, -017: the "end" header of each role.
+        let caps = ResourceCaps {
+            can_subscribe: true,
+            ..Default::default()
+        };
+        let s = start_header(&get("X"));
+        let both = || {
+            let mut t = SubscriptionTable::<4>::new();
+            let r = t.accept_start(peer(5), &s, &caps).unwrap();
+            assert_eq!(t.get(r).unwrap().subscribe_id(), "s0");
+            let i = t.add_started(peer(5), &s, &reply(Some("s0"))).unwrap();
+            (t, r, i)
+        };
+        let ended = |t: &mut SubscriptionTable<4>, by: Option<EndedBy>| match t
+            .receive(peer(5), &msg(Command::End, "s0", by))
+        {
+            Ok(SubscriptionInput::Ended(e)) => e.role(),
+            other => panic!("{other:?}"),
+        };
+        let (mut t, r, i) = both();
+        assert_eq!(ended(&mut t, Some(EndedBy::Initiator)), Role::Responder);
+        assert!(t.get(r).is_none() && t.get(i).is_some());
+        assert_eq!(
+            t.receive(peer(5), &msg(Command::End, "s0", Some(EndedBy::Initiator))),
+            Ok(SubscriptionInput::EndUnknown),
+            "no entry in which the sender is the initiator"
+        );
+        let (mut t, r, i) = both();
+        assert_eq!(ended(&mut t, Some(EndedBy::Responder)), Role::Initiator);
+        assert!(t.get(r).is_some() && t.get(i).is_none());
+        let (mut t, r, i) = both();
+        assert_eq!(ended(&mut t, None), Role::Responder);
+        assert!(t.get(r).is_none() && t.get(i).is_some());
+        assert_eq!(ended(&mut t, None), Role::Initiator, "then the other role");
+        assert_eq!(t.entries().count(), 0);
+        let (t, r, i) = both();
+        let mut buf = [0u8; 128];
+        for (index, want) in [
+            (
+                r,
+                &br#"{"command":"end","subscribeId":"s0","endedBy":"responder"}"#[..],
+            ),
+            (
+                i,
+                br#"{"command":"end","subscribeId":"s0","endedBy":"initiator"}"#,
+            ),
+        ] {
+            let n = t
+                .get(index)
+                .unwrap()
+                .end_header()
+                .write(HeaderKind::Subscription, &mut buf)
+                .unwrap();
+            assert_eq!(&buf[..n], want);
+        }
     }
 
     #[test]

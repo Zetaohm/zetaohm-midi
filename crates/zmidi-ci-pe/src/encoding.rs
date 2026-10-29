@@ -317,6 +317,7 @@ mod tests {
         let mut a = DataEncoder::new(EncodingName::Ascii).unwrap();
         let mut buf = [0u8; 4];
         assert_eq!(a.encode(b"ab", &mut buf), Ok(2));
+        assert_eq!(&buf[..2], b"ab", "no change");
         assert_eq!(
             a.encode(&[0x41, 0xC3], &mut buf),
             Err(EncodingError::NotSevenBit)
@@ -338,7 +339,46 @@ mod tests {
         );
         let mut d = DataDecoder::new(EncodingName::Ascii).unwrap();
         assert_eq!(d.decode(b"xyz", &mut buf), Ok(3));
+        assert_eq!(&buf[..3], b"xyz", "no change");
         d.finish().unwrap();
+    }
+
+    /// JSON text with a character that is not ASCII, after the escape step of 6.1.1.
+    fn escaped_json() -> Vec<u8> {
+        let mut buf = [0u8; 32];
+        let mut w = crate::json::JsonWriter::new(&mut buf);
+        w.begin_object().unwrap();
+        w.name("t", 20).unwrap();
+        w.string("\u{266a}").unwrap();
+        w.end_object().unwrap();
+        let n = w.finish().unwrap();
+        buf[..n].to_vec()
+    }
+
+    #[test]
+    fn json_escape_comes_before_the_encoding() {
+        // REQ-PE-DATA-001: "ASCII" sends the escaped JSON text with no other change.
+        // REQ-PE-DATA-003: Mcoded7 encodes the escaped text (two groups of 7 ASCII bytes, each
+        // with header byte 0x00), and the decoder gives the escaped text back.
+        let text = escaped_json();
+        assert_eq!(text, br#"{"t":"\u266a"}"#);
+        let mut a = DataEncoder::new(EncodingName::Ascii).unwrap();
+        let mut out = [0u8; 32];
+        let n = a.encode(&text, &mut out).unwrap();
+        assert_eq!(&out[..n], br#"{"t":"\u266a"}"#);
+        let mut m = DataEncoder::new(EncodingName::Mcoded7).unwrap();
+        let mut n = m.encode(&text, &mut out).unwrap();
+        n += m.finish(&mut out[n..]).unwrap();
+        let mut want = std::vec![0x00];
+        want.extend_from_slice(br#"{"t":"\"#);
+        want.push(0x00);
+        want.extend_from_slice(br#"u266a"}"#);
+        assert_eq!(&out[..n], want.as_slice());
+        let mut d = DataDecoder::new(EncodingName::Mcoded7).unwrap();
+        let mut back = [0u8; 32];
+        let k = d.decode(&out[..n], &mut back).unwrap();
+        d.finish().unwrap();
+        assert_eq!(&back[..k], text.as_slice());
     }
 
     #[test]

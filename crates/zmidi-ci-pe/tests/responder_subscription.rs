@@ -216,13 +216,22 @@ fn responder_reads_the_replies_to_its_subscription_updates() {
     };
     assert_eq!(reply_status(&out[0]), 200);
 
+    // REQ-PE-SUB-023: "notify", "full", "partial" and "end"; each reply frees the Request ID,
+    // so every update uses the same one.
+    let mut rids = Vec::new();
     for (command, status) in [
         (Command::Notify, 200),
         (Command::Full, 200),
+        (Command::Partial, 200),
         (Command::Notify, 500),
     ] {
         let (m, rid) = b.update(index, command);
-        assert!(!m.is_empty());
+        let header = String::from_utf8(chunk_header(&m)).unwrap();
+        assert!(
+            header.starts_with(&format!(r#"{{"command":"{}""#, command.as_str())),
+            "{header}"
+        );
+        rids.push(rid);
         let reply = format!(r#"{{"status":{status}}}"#);
         let (got, out) = b.rx(&raw(PeKind::SubscriptionReply, me, rid, reply.as_bytes()));
         assert_eq!(got, Got::Reply(TxnKind::Subscription, Some(status)));
@@ -232,4 +241,46 @@ fn responder_reads_the_replies_to_its_subscription_updates() {
         assert_eq!(got, Got::Nothing);
     }
     assert_eq!(b.eng.subscriptions().entries().count(), 1);
+    // The responder ends the subscription.
+    let (info, entry) = b.eng.unsubscribe(&mut b.dev, index, b.now).unwrap();
+    assert_eq!(b.eng.subscriptions().entries().count(), 0);
+    let mut buf = [0u8; 600];
+    let n = b
+        .eng
+        .send(
+            &mut b.dev,
+            Muid::new(SUBSCRIBER).unwrap(),
+            info.request_id,
+            Direction::Initiator,
+            &[],
+            true,
+            b.now,
+            &mut buf,
+        )
+        .unwrap();
+    assert_eq!(
+        chunk_header(&buf[..n]),
+        format!(
+            r#"{{"command":"end","subscribeId":"{}","endedBy":"responder"}}"#,
+            entry.subscribe_id()
+        )
+        .into_bytes()
+    );
+    rids.push(info.request_id);
+    let (got, out) = b.rx(&raw(
+        PeKind::SubscriptionReply,
+        me,
+        info.request_id,
+        br#"{"status":200}"#,
+    ));
+    assert_eq!(got, Got::Reply(TxnKind::Subscription, Some(200)));
+    assert!(out.is_empty());
+    assert_eq!(b.eng.open(), 0);
+    assert!(rids.iter().all(|r| *r == rids[0]), "{rids:?}");
+}
+
+/// The Header Data of one Chunk message.
+fn chunk_header(msg: &[u8]) -> Vec<u8> {
+    let (h, body) = zmidi_ci::Header::parse(msg).unwrap();
+    PeChunk::read(&h, body).unwrap().header.to_vec()
 }

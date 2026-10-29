@@ -13,7 +13,7 @@ use zmidi_ci_pe::resource_list::CanSet;
 use zmidi_ci_pe::{
     schema_ref, CloseReason, Command, EncodingName, EngineConfig, Header, HeaderKind, HeaderStr,
     Mcoded7Encoder, Outgoing, PartialSetReader, PeEngine, PeEvent, PeHost, ResourceCaps,
-    ResourceEntry, Status, SubscriptionError, TransactionError, TxnKind,
+    ResourceEntry, ScalarValue, Status, SubscriptionError, TransactionError, TxnKind,
 };
 
 type Dev = CiDevice<'static, 4, 2, 8>;
@@ -102,6 +102,8 @@ enum Ev {
         kind: TxnKind,
         status: Option<u16>,
         header: bool,
+        /// "mediaType" of the header (REQ-PE-ENC-001).
+        media: Option<String>,
         resource: Option<usize>,
         data: Vec<u8>,
         end: ChunkEnd,
@@ -124,6 +126,10 @@ fn own(e: PeEvent<'_, '_>) -> Ev {
             kind: m.kind,
             status: m.header.and_then(|h| h.status).map(|s| s.0),
             header: m.header.is_some(),
+            media: m
+                .header
+                .and_then(|h| h.media_type)
+                .map(|t| t.chars().collect()),
             resource: m.resource,
             data: m.data.to_vec(),
             end: m.end,
@@ -184,6 +190,19 @@ impl Side {
         };
         out.extend(self.pending());
         (e, out)
+    }
+
+    /// Delivers one message as `rx` does, but writes no pending message of the engine.
+    fn rx_held(&mut self, msg: &[u8]) -> Option<Ev> {
+        let ev = self
+            .dev
+            .receive(0, msg, self.now * 1000, &mut rng(7))
+            .event()?;
+        let mut scratch = [0u8; 600];
+        self.eng
+            .receive(&mut self.dev, &ev, self.now, &mut scratch)
+            .unwrap()
+            .map(own)
     }
 
     fn pending(&mut self) -> Vec<Vec<u8>> {
@@ -297,6 +316,44 @@ fn status(msg: &[u8]) -> u16 {
 
 fn header_text(msg: &[u8]) -> String {
     String::from_utf8(chunk(msg).header.to_vec()).unwrap()
+}
+
+/// A MIDI-CI NAK from `from` to `to` for Request ID `rid`.
+fn nak_from(from: &Side, to: Muid, orig: u8, status: NakStatus, rid: u8, chunk: u16) -> Vec<u8> {
+    let nk = Nak {
+        original_sub_id2: orig,
+        status,
+        details: Details::PropertyExchange {
+            request_id: rid,
+            chunk,
+        },
+        text: &[],
+    };
+    let mut buf = [0u8; 128];
+    let n = from
+        .dev
+        .nak(to, zmidi_ci::DeviceId::FunctionBlock, &nk, "", &mut buf)
+        .unwrap();
+    buf[..n].to_vec()
+}
+
+/// A MIDI-CI ACK from `from` to `to` for Request ID `rid`.
+fn ack_from(from: &Side, to: Muid, orig: u8, status: AckStatus, rid: u8, chunk: u16) -> Vec<u8> {
+    let k = Ack {
+        original_sub_id2: orig,
+        status,
+        details: Details::PropertyExchange {
+            request_id: rid,
+            chunk,
+        },
+        text: &[],
+    };
+    let mut buf = [0u8; 128];
+    let n = from
+        .dev
+        .ack(to, zmidi_ci::DeviceId::FunctionBlock, &k, "", &mut buf)
+        .unwrap();
+    buf[..n].to_vec()
 }
 
 fn nak(msg: &[u8]) -> Nak<'_> {
@@ -484,8 +541,15 @@ fn responder_statuses() {
     // responder, each with a "message".
     let (a, mut b) = pair(512);
     let (src, dst) = (a.muid(), b.muid());
-    let cases: [(&[u8], PeKind, u16); 10] = [
+    let media76 = format!(
+        r#"{{"resource":"X-Bin","mediaType":"application/{}"}}"#,
+        "x".repeat(64)
+    );
+    let cases: [(&[u8], PeKind, u16); 12] = [
         (br#"{"resource":"Nope"}"#, PeKind::GetInquiry, 404),
+        (br#"{"resource":"Nope"}"#, PeKind::SetInquiry, 404),
+        // A "mediaType" of 76 characters, which the header parser refuses.
+        (media76.as_bytes(), PeKind::SetInquiry, 415),
         (br#"{"resource":"DeviceInfo"}"#, PeKind::SetInquiry, 405),
         (br#"{"resource":"DeviceInfo","offset":1}"#, PeKind::GetInquiry, 400),
         (br#"{"resId":"x"}"#, PeKind::GetInquiry, 400),
@@ -505,6 +569,12 @@ fn responder_statuses() {
         assert_eq!(status(&out[0]), want, "{i}");
         assert!(header_text(&out[0]).contains(r#""message":""#), "{i}");
         assert_eq!(chunk(&out[0]).request_id, i as u8);
+        // REQ-PE-STAT-012: no Property Data in the reply.
+        assert_eq!(
+            (chunk(&out[0]).total, chunk(&out[0]).data),
+            (1, &b""[..]),
+            "{i}"
+        );
     }
     // REQ-PE-GEN-004: all 4 slots in use.
     for rid in 20..24 {
@@ -750,6 +820,14 @@ fn timeouts_and_waits() {
         (k.status, k.original_sub_id2),
         (AckStatus::TimeoutWait(3), 0x34)
     );
+    // REQ-PE-END-010: the Request ID in the ACK details (and the last Chunk received).
+    assert_eq!(
+        k.details,
+        Details::PropertyExchange {
+            request_id: rid,
+            chunk: 1
+        }
+    );
     let (e, _) = a.rx(&out[0]);
     assert_eq!(e, None);
     // A: 3 s + 300 ms after its Chunk.
@@ -994,6 +1072,10 @@ fn flow_control_set() {
             assert_eq!(a.rx(&out[0]).0, Some(Ev::Ready(rid)));
         }
     }
+    // REQ-PE-FLOW-009: an ACK 0x11 for the last Chunk is ignored; the reply still ends it.
+    let k = ack_from(&b, a.muid(), 0x36, AckStatus::FlowControlSendNext, rid, 3);
+    assert_eq!(a.rx(&k), (None, vec![]));
+    assert_eq!(a.eng.open(), 1);
     let r = Header {
         status: Some(Status::OK),
         ..Default::default()
@@ -1075,6 +1157,17 @@ fn flow_control_get() {
             );
             let (_, out) = a.rx(&c1);
             assert_eq!(ack(&out[0]).status, AckStatus::FlowControlSendNext);
+            // REQ-PE-FLOW-003: the Sub-ID#2 of a Get inquiry, the Request ID and Chunk 1.
+            assert_eq!(
+                (ack(&out[0]).original_sub_id2, ack(&out[0]).details),
+                (
+                    0x34,
+                    Details::PropertyExchange {
+                        request_id: rid,
+                        chunk: 1
+                    }
+                )
+            );
             assert_eq!(b.rx(&out[0]).0, Some(Ev::Ready(rid)));
             let c2 = b.send(a.muid(), rid, Direction::Responder, &data[room1..], true);
             assert_eq!(b.eng.open(), 0, "closed after the last Chunk");
@@ -1318,6 +1411,9 @@ fn early_406_and_407() {
     let c1 = a.send(dst, rid, Direction::Initiator, &data[..room], false);
     let (_, out) = b.rx(&c1);
     assert_eq!(status(&out[0]), 407);
+    // B ignores the later Chunks of that Request ID.
+    let c2 = raw(PeKind::SetInquiry, src, dst, rid, b"", 2, 2, &data[room..]);
+    assert_eq!(b.rx(&c2), (None, vec![]));
     let (e, _) = a.rx(&out[0]);
     assert!(matches!(
         e,
@@ -1617,6 +1713,8 @@ fn subscribed(a: &mut Side, b: &mut Side) -> (usize, usize) {
     };
     assert_eq!(status(&out[0]), 200);
     assert!(header_text(&out[0]).contains(r#""subscribeId":"s"#));
+    // REQ-PE-SUB-006: the Reply to Subscription of a "start" has no Property Data.
+    assert_eq!((chunk(&out[0]).total, chunk(&out[0]).data), (1, &b""[..]));
     let (e, _) = a.rx(&out[0]);
     let Some(Ev::Msg {
         started: Some(Ok(ai)),
@@ -1688,14 +1786,66 @@ fn subscription_start_update_end() {
     let Some(Ev::Msg { data: d, .. }) = e else {
         panic!("{e:?}")
     };
+    assert_eq!(d, data);
     let mut r = PartialSetReader::<20>::new();
     let mut items = r.push(&d);
     let item = items.next_item().unwrap().unwrap();
-    assert_eq!(item.key, "/name");
+    assert_eq!(
+        (item.key, item.value),
+        (
+            "/name",
+            ScalarValue::String {
+                text: "Pad",
+                truncated: false
+            }
+        )
+    );
+    assert!(items.next_item().is_none());
+    r.finish().unwrap();
+    // A "partial" whose data is not in the Partial SET format: the engine gives it with the
+    // subscription and replies 200 (REQ-PE-SUB-016); the Partial SET reader refuses the key.
+    let data = br#"{"name":"Pad"}"#;
+    let info = b
+        .eng
+        .update(
+            &mut b.dev,
+            bi,
+            Command::Partial,
+            EncodingName::Ascii,
+            Some(data.len()),
+            b.now,
+        )
+        .unwrap();
+    let m = b.send(a.muid(), info.request_id, Direction::Initiator, data, true);
+    let (e, out) = a.rx(&m);
+    assert_eq!(status(&out[0]), 200);
+    b.rx(&out[0]);
+    let Some(Ev::Msg {
+        data: d,
+        sub: Some(s),
+        ..
+    }) = e
+    else {
+        panic!("{e:?}")
+    };
+    assert_eq!((s, d.as_slice()), (ai, &data[..]));
+    let mut r = PartialSetReader::<20>::new();
+    assert_eq!(
+        r.push(&d).next_item().map(|i| i.map(|_| ())),
+        Some(Err(zmidi_ci_pe::PropertyDataError::InvalidKey))
+    );
     // The initiator ends it; B removes its entry and gives an event.
     let (info, entry) = a.eng.unsubscribe(&mut a.dev, ai, a.now).unwrap();
     let m = a.send(b.muid(), info.request_id, Direction::Initiator, &[], true);
-    assert!(header_text(&m).contains(r#""endedBy":"initiator""#));
+    // REQ-PE-SUB-004, -017: "command", "subscribeId" and "endedBy", no Property Data.
+    assert_eq!(
+        header_text(&m),
+        format!(
+            r#"{{"command":"end","subscribeId":"{}","endedBy":"initiator"}}"#,
+            entry.subscribe_id()
+        )
+    );
+    assert_eq!(chunk(&m).data, b"");
     let (e, out) = b.rx(&m);
     assert_eq!(e, Some(Ev::SubEnded(entry.subscribe_id().to_string())));
     assert_eq!(status(&out[0]), 200);
@@ -1871,6 +2021,8 @@ fn set_chunk_deadline_and_incomplete_reply() {
     // NAK 0x20. REQ-PE-STAT-008: an incomplete reply is an error for the caller.
     let (mut a, mut b) = pair(512);
     let (src, dst) = (a.muid(), b.muid());
+    // Every message that the engines write, for REQ-PE-END-007.
+    let mut sent: Vec<Vec<u8>> = Vec::new();
     let m = raw(
         PeKind::SetInquiry,
         src,
@@ -1881,11 +2033,16 @@ fn set_chunk_deadline_and_incomplete_reply() {
         1,
         b"{",
     );
-    assert!(matches!(b.rx(&m).0, Some(Ev::Msg { .. })));
+    let (e, out) = b.rx(&m);
+    assert!(matches!(e, Some(Ev::Msg { .. })));
+    sent.extend(out);
     b.now += 3_000;
-    assert_eq!(b.poll().0, None);
+    let (e, out) = b.poll();
+    assert_eq!(e, None);
+    sent.extend(out);
     b.now += 1;
     let (e, out) = b.poll();
+    sent.extend(out.clone());
     assert_eq!(
         e,
         Some(Ev::Closed(4, Direction::Responder, CloseReason::Timeout))
@@ -1897,7 +2054,8 @@ fn set_chunk_deadline_and_incomplete_reply() {
         }
     );
     // The initiator gets a reply that ends with Chunk 0x0000.
-    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    let (rid, _, out) = get_request(&mut a, &mut b, "DeviceInfo");
+    sent.extend(out);
     let m = raw(
         PeKind::GetReply,
         dst,
@@ -1908,15 +2066,18 @@ fn set_chunk_deadline_and_incomplete_reply() {
         1,
         b"[",
     );
+    let (e, out) = a.rx(&m);
     assert!(matches!(
-        a.rx(&m).0,
+        e,
         Some(Ev::Msg {
             end: ChunkEnd::More,
             ..
         })
     ));
+    sent.extend(out);
     let m = raw(PeKind::GetReply, dst, src, rid, b"", 2, 0, b"]");
     let (e, out) = a.rx(&m);
+    sent.extend(out.clone());
     assert!(matches!(
         e,
         Some(Ev::Msg {
@@ -1926,10 +2087,11 @@ fn set_chunk_deadline_and_incomplete_reply() {
     ));
     assert!(out.is_empty());
     assert_eq!(a.eng.open(), 0);
-    // This crate never sends a Notify (REQ-PE-END-007): no engine call writes Sub-ID#2 0x3F.
-    for m in b.pending().iter().chain(a.pending().iter()) {
-        assert_ne!(sub_id2(m), 0x3F);
-    }
+    // This crate never sends a Notify (REQ-PE-END-007): no message above has Sub-ID#2 0x3F.
+    // At the deadline of the Set, the NAK 0x20 in place of a Notify 144; nothing else.
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sub_id2(&sent[0]), 0x7F);
+    assert!(sent.iter().all(|m| sub_id2(m) != 0x3F));
 }
 
 #[test]
@@ -2297,4 +2459,1144 @@ fn engine_with_no_subscriptions_lists_no_subscribable_resource() {
     let has = |t: &[u8]| t.windows(19).any(|w| w == b"\"canSubscribe\":true");
     assert!(!has(&a), "{}", String::from_utf8_lossy(&a));
     assert!(has(&b), "{}", String::from_utf8_lossy(&b));
+}
+
+/// A starts a Set of `len` bytes to `resource`; gives the Request ID and the Chunk parts.
+fn set_parts(
+    a: &mut Side,
+    b: &Side,
+    resource: &'static str,
+    len: usize,
+    caps: Option<&ResourceCaps>,
+) -> (u8, Vec<Vec<u8>>) {
+    let data = vec![b' '; len];
+    let rid = a
+        .eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Set,
+            &Outgoing::json(get(resource), len),
+            caps,
+            a.now,
+        )
+        .unwrap()
+        .request_id;
+    let room1 = a
+        .eng
+        .data_room(&a.dev, b.muid(), rid, Direction::Initiator)
+        .unwrap();
+    let mut parts = vec![data[..room1].to_vec()];
+    for p in data[room1..].chunks(512 - 22) {
+        parts.push(p.to_vec());
+    }
+    (rid, parts)
+}
+
+/// B starts a reply of `len` bytes to the Get `rid` of A; gives the room of Chunk 1.
+fn get_reply(a: &Side, b: &mut Side, rid: u8, len: usize) -> usize {
+    let r = Header {
+        status: Some(Status::OK),
+        ..Default::default()
+    };
+    b.eng
+        .reply(&mut b.dev, a.muid(), rid, &Outgoing::json(r, len), b.now)
+        .unwrap();
+    b.eng
+        .data_room(&b.dev, a.muid(), rid, Direction::Responder)
+        .unwrap()
+}
+
+fn terminate(by_initiator: bool) -> NakStatus {
+    NakStatus::Terminate { by_initiator }
+}
+
+fn pe(request_id: u8, chunk: u16) -> Details {
+    Details::PropertyExchange { request_id, chunk }
+}
+
+#[test]
+fn timeout_counts_from_the_last_chunk() {
+    // REQ-PE-END-011: an ACK 0x10 that comes 1 s after the last Chunk adds its wait to the
+    // timeout of that Chunk (3.3 s after it); it does not start the 3 s again. A NAK 0x00 that
+    // answers an ACK does not start them again either. REQ-PE-END-012: a Notify 100 that comes
+    // 1 s after the last Chunk adds 3 s (6 s after it). REQ-PE-END-007: the ACK 0x10 and the
+    // NAK 0x42 are sent, no Notify. REQ-PE-GEN-005: the Request ID is free after the timeout.
+    let (mut a, mut b) = pair(512);
+    let mut sent: Vec<Vec<u8>> = Vec::new();
+    let t0 = a.now;
+    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    b.eng
+        .wait(a.muid(), rid, Direction::Responder, 250)
+        .unwrap();
+    let out = b.pending();
+    sent.extend(out.clone());
+    a.now = t0 + 1_000;
+    assert_eq!(a.rx(&out[0]), (None, vec![]));
+    let juce = nak_from(&b, a.muid(), 0x7D, NakStatus::Nak, rid, 0);
+    assert_eq!(a.rx(&juce), (None, vec![]));
+    a.now = t0 + 3_300;
+    assert_eq!(a.poll(), (None, vec![]));
+    a.now += 1;
+    let (e, out) = a.poll();
+    assert_eq!(
+        e,
+        Some(Ev::Closed(rid, Direction::Initiator, CloseReason::Timeout))
+    );
+    assert_eq!(
+        (nak(&out[0]).status, nak(&out[0]).original_sub_id2),
+        (NakStatus::Timeout, 0x34)
+    );
+    sent.extend(out.clone());
+    b.rx(&out[0]);
+    let t1 = a.now;
+    let (rid2, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    assert_eq!(rid2, rid);
+    a.now = t1 + 1_000;
+    let m = raw(
+        PeKind::Notify,
+        b.muid(),
+        a.muid(),
+        rid2,
+        br#"{"status":100}"#,
+        1,
+        1,
+        b"",
+    );
+    assert_eq!(a.rx(&m), (None, vec![]));
+    a.now = t1 + 6_000;
+    assert_eq!(a.poll(), (None, vec![]));
+    a.now += 1;
+    let (e, out) = a.poll();
+    assert_eq!(
+        e,
+        Some(Ev::Closed(rid2, Direction::Initiator, CloseReason::Timeout))
+    );
+    sent.extend(out);
+    assert_eq!(
+        sent.iter().map(|m| sub_id2(m)).collect::<Vec<_>>(),
+        [0x7D, 0x7F, 0x7F]
+    );
+}
+
+#[test]
+fn reply_deadline_counts_from_the_last_inquiry_chunk_and_waits() {
+    // REQ-PE-END-008: the deadline of the reply is 3 s after the last Chunk of the inquiry (here
+    // 2 s after Chunk 1), plus the 300 ms of the ACK 0x10 that B sent; a reply after it gives
+    // Late and is not sent.
+    let (a, mut b) = pair(512);
+    let (src, dst) = (a.muid(), b.muid());
+    let t0 = b.now;
+    for rid in [1u8, 2] {
+        let m = raw(
+            PeKind::SetInquiry,
+            src,
+            dst,
+            rid,
+            br#"{"resource":"X-Patch"}"#,
+            2,
+            1,
+            b"{",
+        );
+        assert!(matches!(b.rx(&m).0, Some(Ev::Msg { .. })));
+    }
+    b.now = t0 + 2_000;
+    for rid in [1u8, 2] {
+        let m = raw(PeKind::SetInquiry, src, dst, rid, b"", 2, 2, b"}");
+        assert!(matches!(
+            b.rx(&m).0,
+            Some(Ev::Msg {
+                end: ChunkEnd::Complete,
+                ..
+            })
+        ));
+    }
+    for rid in [1u8, 2] {
+        b.eng.wait(src, rid, Direction::Responder, 250).unwrap();
+    }
+    assert_eq!(b.pending().len(), 2);
+    let ok = Outgoing::json(
+        Header {
+            status: Some(Status::OK),
+            ..Default::default()
+        },
+        0,
+    );
+    b.now = t0 + 5_300;
+    b.eng.reply(&mut b.dev, src, 1, &ok, b.now).unwrap();
+    let m = b.send(src, 1, Direction::Responder, &[], true);
+    assert_eq!((sub_id2(&m), status(&m)), (0x37, 200));
+    b.now += 1;
+    assert_eq!(
+        b.eng.reply(&mut b.dev, src, 2, &ok, b.now),
+        Err(TransactionError::Late)
+    );
+    assert_eq!(b.pending(), Vec::<Vec<u8>>::new());
+    assert_eq!(b.eng.open(), 0);
+}
+
+#[test]
+fn next_chunk_deadline_of_the_sender() {
+    // REQ-PE-END-009: the deadline of the next Chunk is 3 s after the Chunk before, plus the
+    // wait of each ACK 0x10 of the responder. A Chunk after it gives Late and is not sent; the
+    // transaction ends with NAK 0x20 (Status Data 0x01 as initiator, 0x00 as responder).
+    let (mut a, mut b) = pair(512);
+    let mut buf = [0u8; 600];
+    let (rid, parts) = set_parts(&mut a, &b, "X-Patch", 700, None);
+    assert_eq!(parts.len(), 2);
+    let c1 = a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
+    b.rx(&c1);
+    a.now += 3_001;
+    assert_eq!(
+        a.eng.send(
+            &mut a.dev,
+            b.muid(),
+            rid,
+            Direction::Initiator,
+            &parts[1],
+            true,
+            a.now,
+            &mut buf
+        ),
+        Err(TransactionError::Late)
+    );
+    let out = a.pending();
+    assert_eq!(out.len(), 1, "the NAK, not the Chunk");
+    let n = nak(&out[0]);
+    assert_eq!(
+        (n.status, n.original_sub_id2, n.details),
+        (terminate(true), 0x36, pe(rid, 0))
+    );
+    assert_eq!(
+        b.rx(&out[0]).0,
+        Some(Ev::Closed(
+            rid,
+            Direction::Responder,
+            CloseReason::Terminated
+        ))
+    );
+    // An ACK 0x10 of 500 ms from B, 100 ms after Chunk 1: the deadline is 3.5 s after Chunk 1.
+    for (extra, late) in [(3_500u64, false), (3_501, true)] {
+        let t = a.now;
+        let (rid, parts) = set_parts(&mut a, &b, "X-Patch", 700, None);
+        let c1 = a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
+        b.rx(&c1);
+        b.eng
+            .wait(a.muid(), rid, Direction::Responder, 500)
+            .unwrap();
+        let out = b.pending();
+        assert_eq!(ack(&out[0]).status, AckStatus::TimeoutWait(5));
+        a.now = t + 100;
+        assert_eq!(a.rx(&out[0]).0, None);
+        a.now = t + extra;
+        let r = a.eng.send(
+            &mut a.dev,
+            b.muid(),
+            rid,
+            Direction::Initiator,
+            &parts[1],
+            true,
+            a.now,
+            &mut buf,
+        );
+        if late {
+            assert_eq!(r, Err(TransactionError::Late));
+            let out = a.pending();
+            assert_eq!(nak(&out[0]).status, terminate(true));
+            b.rx(&out[0]);
+        } else {
+            let n = r.unwrap();
+            assert!(matches!(
+                b.rx(&buf[..n]).0,
+                Some(Ev::Msg {
+                    end: ChunkEnd::Complete,
+                    ..
+                })
+            ));
+            b.eng
+                .reply_status(&mut b.dev, a.muid(), rid, Status::OK, b.now)
+                .unwrap();
+            let out = b.pending();
+            a.rx(&out[0]);
+        }
+    }
+    assert_eq!((a.eng.open(), b.eng.open()), (0, 0));
+    // The responder: a reply in 2 Chunks.
+    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    let data = vec![b' '; 700];
+    let room = get_reply(&a, &mut b, rid, data.len());
+    b.send(a.muid(), rid, Direction::Responder, &data[..room], false);
+    b.now += 3_001;
+    assert_eq!(
+        b.eng.send(
+            &mut b.dev,
+            a.muid(),
+            rid,
+            Direction::Responder,
+            &data[room..],
+            true,
+            b.now,
+            &mut buf
+        ),
+        Err(TransactionError::Late)
+    );
+    let out = b.pending();
+    assert_eq!(out.len(), 1, "the NAK, not the Chunk");
+    let n = nak(&out[0]);
+    assert_eq!(
+        (n.status, n.original_sub_id2, n.details),
+        (terminate(false), 0x34, pe(rid, 0))
+    );
+}
+
+#[test]
+fn responder_nak_0x20_stops_the_initiator() {
+    // REQ-PE-END-002: NAK 0x20 with Status Data 0x00, the Sub-ID#2 of the inquiry and the
+    // Request ID. REQ-PE-END-003: for 0x34 A gives no later reply Chunk to the caller, for 0x36
+    // A sends no more Chunks; A closes with no reply and the Request ID is free at once.
+    let (mut a, mut b) = pair(512);
+    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    let data = vec![b' '; 700];
+    let room = get_reply(&a, &mut b, rid, data.len());
+    let c1 = b.send(a.muid(), rid, Direction::Responder, &data[..room], false);
+    assert!(matches!(
+        a.rx(&c1).0,
+        Some(Ev::Msg {
+            end: ChunkEnd::More,
+            ..
+        })
+    ));
+    b.eng
+        .abort(&mut b.dev, a.muid(), rid, Direction::Responder)
+        .unwrap();
+    let out = b.pending();
+    let n = nak(&out[0]);
+    assert_eq!(
+        (n.status, n.original_sub_id2, n.details),
+        (terminate(false), 0x34, pe(rid, 0))
+    );
+    assert_eq!(
+        a.rx(&out[0]),
+        (
+            Some(Ev::Closed(
+                rid,
+                Direction::Initiator,
+                CloseReason::Terminated
+            )),
+            vec![]
+        )
+    );
+    let c2 = raw(PeKind::GetReply, b.muid(), a.muid(), rid, b"", 2, 2, b" ");
+    assert_eq!(a.rx(&c2), (None, vec![]));
+    let (rid2, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    assert_eq!(rid2, rid, "the Request ID is free again");
+    // 0x36: A sends no more Chunks of its Set.
+    let (rid, parts) = set_parts(&mut a, &b, "X-Patch", 700, None);
+    let c1 = a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
+    b.rx(&c1);
+    b.eng
+        .abort(&mut b.dev, a.muid(), rid, Direction::Responder)
+        .unwrap();
+    let out = b.pending();
+    let n = nak(&out[0]);
+    assert_eq!(
+        (n.status, n.original_sub_id2, n.details),
+        (terminate(false), 0x36, pe(rid, 0))
+    );
+    assert_eq!(
+        a.rx(&out[0]),
+        (
+            Some(Ev::Closed(
+                rid,
+                Direction::Initiator,
+                CloseReason::Terminated
+            )),
+            vec![]
+        )
+    );
+    let mut buf = [0u8; 600];
+    assert_eq!(
+        a.eng.send(
+            &mut a.dev,
+            b.muid(),
+            rid,
+            Direction::Initiator,
+            &parts[1],
+            true,
+            a.now,
+            &mut buf
+        ),
+        Err(TransactionError::UnknownTransaction)
+    );
+}
+
+#[test]
+fn initiator_nak_0x20_stops_the_responder() {
+    // REQ-PE-END-004: NAK 0x20 with Status Data 0x01, the Sub-ID#2 of the inquiry and the
+    // Request ID. REQ-PE-END-005: for 0x34 B sends no more Chunks, for 0x36 B gives no later
+    // Chunk to the caller; B closes with no reply.
+    let (mut a, mut b) = pair(512);
+    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    let data = vec![b' '; 700];
+    let room = get_reply(&a, &mut b, rid, data.len());
+    let c1 = b.send(a.muid(), rid, Direction::Responder, &data[..room], false);
+    a.rx(&c1);
+    a.eng
+        .abort(&mut a.dev, b.muid(), rid, Direction::Initiator)
+        .unwrap();
+    let out = a.pending();
+    let n = nak(&out[0]);
+    assert_eq!(
+        (n.status, n.original_sub_id2, n.details),
+        (terminate(true), 0x34, pe(rid, 0))
+    );
+    assert_eq!(
+        b.rx(&out[0]),
+        (
+            Some(Ev::Closed(
+                rid,
+                Direction::Responder,
+                CloseReason::Terminated
+            )),
+            vec![]
+        )
+    );
+    let mut buf = [0u8; 600];
+    assert_eq!(
+        b.eng.send(
+            &mut b.dev,
+            a.muid(),
+            rid,
+            Direction::Responder,
+            &data[room..],
+            true,
+            b.now,
+            &mut buf
+        ),
+        Err(TransactionError::UnknownTransaction)
+    );
+    // 0x36: B gives no later Chunk of the Set to the caller.
+    let (rid, parts) = set_parts(&mut a, &b, "X-Patch", 700, None);
+    let c1 = a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
+    assert!(matches!(b.rx(&c1).0, Some(Ev::Msg { .. })));
+    a.eng
+        .abort(&mut a.dev, b.muid(), rid, Direction::Initiator)
+        .unwrap();
+    let out = a.pending();
+    let n = nak(&out[0]);
+    assert_eq!(
+        (n.status, n.original_sub_id2, n.details),
+        (terminate(true), 0x36, pe(rid, 0))
+    );
+    assert_eq!(
+        b.rx(&out[0]),
+        (
+            Some(Ev::Closed(
+                rid,
+                Direction::Responder,
+                CloseReason::Terminated
+            )),
+            vec![]
+        )
+    );
+    let c2 = raw(
+        PeKind::SetInquiry,
+        a.muid(),
+        b.muid(),
+        rid,
+        b"",
+        2,
+        2,
+        &parts[1],
+    );
+    assert_eq!(b.rx(&c2), (None, vec![]));
+    assert_eq!((a.eng.open(), b.eng.open()), (0, 0));
+}
+
+#[test]
+fn notify_144_stops_both_directions() {
+    // REQ-PE-END-006: after a Notify 144, no later Chunk of that Request ID goes to the caller,
+    // no more Chunks are sent, nothing answers it, and the Request ID is free.
+    let (mut a, mut b) = pair(512);
+    let notify = |from: Muid, to: Muid, rid: u8| {
+        raw(
+            PeKind::Notify,
+            from,
+            to,
+            rid,
+            br#"{"status":144}"#,
+            1,
+            1,
+            b"",
+        )
+    };
+    // During a reply: A receives no more.
+    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    let data = vec![b' '; 700];
+    let room = get_reply(&a, &mut b, rid, data.len());
+    let c1 = b.send(a.muid(), rid, Direction::Responder, &data[..room], false);
+    a.rx(&c1);
+    assert_eq!(
+        a.rx(&notify(b.muid(), a.muid(), rid)),
+        (
+            Some(Ev::Closed(
+                rid,
+                Direction::Initiator,
+                CloseReason::Terminated
+            )),
+            vec![]
+        )
+    );
+    let c2 = b.send(a.muid(), rid, Direction::Responder, &data[room..], true);
+    assert_eq!(a.rx(&c2), (None, vec![]));
+    let (rid2, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    assert_eq!(rid2, rid, "the Request ID is free again");
+    // During a Set: A sends no more; B (from a Notify of A) receives no more.
+    let (rid, parts) = set_parts(&mut a, &b, "X-Patch", 700, None);
+    let c1 = a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
+    b.rx(&c1);
+    assert_eq!(
+        a.rx(&notify(b.muid(), a.muid(), rid)).0,
+        Some(Ev::Closed(
+            rid,
+            Direction::Initiator,
+            CloseReason::Terminated
+        ))
+    );
+    let mut buf = [0u8; 600];
+    assert_eq!(
+        a.eng.send(
+            &mut a.dev,
+            b.muid(),
+            rid,
+            Direction::Initiator,
+            &parts[1],
+            true,
+            a.now,
+            &mut buf
+        ),
+        Err(TransactionError::UnknownTransaction)
+    );
+    assert_eq!(
+        b.rx(&notify(a.muid(), b.muid(), rid)),
+        (
+            Some(Ev::Closed(
+                rid,
+                Direction::Responder,
+                CloseReason::Terminated
+            )),
+            vec![]
+        )
+    );
+    let c2 = raw(
+        PeKind::SetInquiry,
+        a.muid(),
+        b.muid(),
+        rid,
+        b"",
+        2,
+        2,
+        &parts[1],
+    );
+    assert_eq!(b.rx(&c2), (None, vec![]));
+}
+
+#[test]
+fn nak_0x42_stops_the_responder() {
+    // REQ-PE-END-013, -014: A times out during a reply in 2 Chunks and sends NAK 0x42; B closes
+    // with no reply and sends no more Chunks.
+    let (mut a, mut b) = pair(512);
+    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    let data = vec![b' '; 700];
+    let room = get_reply(&a, &mut b, rid, data.len());
+    let c1 = b.send(a.muid(), rid, Direction::Responder, &data[..room], false);
+    a.rx(&c1);
+    a.now += 3_001;
+    let (e, out) = a.poll();
+    assert_eq!(
+        e,
+        Some(Ev::Closed(rid, Direction::Initiator, CloseReason::Timeout))
+    );
+    let n = nak(&out[0]);
+    assert_eq!(
+        (n.status, n.original_sub_id2, n.details),
+        (NakStatus::Timeout, 0x34, pe(rid, 0))
+    );
+    assert_eq!(
+        b.rx(&out[0]),
+        (
+            Some(Ev::Closed(
+                rid,
+                Direction::Responder,
+                CloseReason::PeerTimeout
+            )),
+            vec![]
+        )
+    );
+    let mut buf = [0u8; 600];
+    assert_eq!(
+        b.eng.send(
+            &mut b.dev,
+            a.muid(),
+            rid,
+            Direction::Responder,
+            &data[room..],
+            true,
+            b.now,
+            &mut buf
+        ),
+        Err(TransactionError::UnknownTransaction)
+    );
+}
+
+#[test]
+fn flow_control_get_next_chunk_before_the_ack() {
+    // REQ-PE-FLOW-005: A takes Chunk 2 before it sends the ACK of Chunk 1; then both ACKs go out
+    // (REQ-PE-FLOW-003, -004: 0x34, the Request ID and each Chunk number).
+    let (mut a, b) = pair(512);
+    let h = Header {
+        flow_control: true,
+        ..get("X-Flow")
+    };
+    let rid = a
+        .eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Get,
+            &Outgoing::json(h, 0),
+            None,
+            a.now,
+        )
+        .unwrap()
+        .request_id;
+    a.send(b.muid(), rid, Direction::Initiator, &[], true);
+    let c1 = raw(
+        PeKind::GetReply,
+        b.muid(),
+        a.muid(),
+        rid,
+        br#"{"status":200}"#,
+        2,
+        1,
+        b"ab",
+    );
+    let c2 = raw(PeKind::GetReply, b.muid(), a.muid(), rid, b"", 2, 2, b"cd");
+    let Some(Ev::Msg { data, end, .. }) = a.rx_held(&c1) else {
+        panic!()
+    };
+    assert_eq!((data.as_slice(), end), (&b"ab"[..], ChunkEnd::More));
+    let Some(Ev::Msg { data, end, .. }) = a.rx_held(&c2) else {
+        panic!()
+    };
+    assert_eq!((data.as_slice(), end), (&b"cd"[..], ChunkEnd::Complete));
+    let out = a.pending();
+    assert_eq!(out.len(), 2);
+    for (i, m) in out.iter().enumerate() {
+        let k = ack(m);
+        assert_eq!(
+            (k.status, k.original_sub_id2, k.details),
+            (AckStatus::FlowControlSendNext, 0x34, pe(rid, i as u16 + 1))
+        );
+    }
+    assert_eq!(a.eng.open(), 0);
+}
+
+#[test]
+fn flow_control_get_responder_resends() {
+    // REQ-PE-FLOW-012, -013 with the responder as the sender (a Get with "flowControl":true): a
+    // NAK 0x12 gets the Chunk again; a NAK 0x12 for a Chunk that is not the last one sent ends
+    // the transaction with NAK 0x20, Status Data 0x00; no ACK for 3 s gets the Chunk again, 3
+    // times, then NAK 0x20 with Status Data 0x00.
+    let (mut a, mut b) = pair(512);
+    let data = vec![b'x'; 1100];
+    let start = |a: &mut Side, b: &mut Side| -> (u8, usize) {
+        let h = Header {
+            flow_control: true,
+            ..get("X-Flow")
+        };
+        let rid = a
+            .eng
+            .request(
+                &mut a.dev,
+                b.muid(),
+                TxnKind::Get,
+                &Outgoing::json(h, 0),
+                None,
+                a.now,
+            )
+            .unwrap()
+            .request_id;
+        let m = a.send(b.muid(), rid, Direction::Initiator, &[], true);
+        b.rx(&m);
+        (rid, get_reply(a, b, rid, 1100))
+    };
+    let (rid, room1) = start(&mut a, &mut b);
+    let c1 = b.send(a.muid(), rid, Direction::Responder, &data[..room1], false);
+    let resend = nak_from(&a, b.muid(), 0x34, NakStatus::FlowControlResend, rid, 0);
+    assert_eq!(b.rx(&resend), (Some(Ev::Resend(rid, 1)), vec![]));
+    assert_eq!(
+        b.send(a.muid(), rid, Direction::Responder, &data[..room1], false),
+        c1
+    );
+    let (_, out) = a.rx(&c1);
+    assert_eq!(b.rx(&out[0]).0, Some(Ev::Ready(rid)));
+    b.send(
+        a.muid(),
+        rid,
+        Direction::Responder,
+        &data[room1..room1 + 490],
+        false,
+    );
+    // Chunk 1 again: it is not the last Chunk sent.
+    let (e, out) = b.rx(&resend);
+    assert_eq!(
+        e,
+        Some(Ev::Closed(
+            rid,
+            Direction::Responder,
+            CloseReason::ResendFailed
+        ))
+    );
+    let n = nak(&out[0]);
+    assert_eq!(
+        (n.status, n.original_sub_id2, n.details),
+        (terminate(false), 0x34, pe(rid, 0))
+    );
+    // No ACK: 3 resends, then NAK 0x20.
+    let (rid, room1) = start(&mut a, &mut b);
+    let c1 = b.send(a.muid(), rid, Direction::Responder, &data[..room1], false);
+    for k in 0..3 {
+        b.now += 3_000;
+        assert_eq!(b.poll(), (None, vec![]), "{k}");
+        b.now += 1;
+        assert_eq!(b.poll(), (Some(Ev::Resend(rid, 1)), vec![]), "{k}");
+        assert_eq!(
+            b.send(a.muid(), rid, Direction::Responder, &data[..room1], false),
+            c1
+        );
+    }
+    b.now += 3_001;
+    let (e, out) = b.poll();
+    assert_eq!(
+        e,
+        Some(Ev::Closed(rid, Direction::Responder, CloseReason::Timeout))
+    );
+    let n = nak(&out[0]);
+    assert_eq!(
+        (n.status, n.original_sub_id2, n.details),
+        (terminate(false), 0x34, pe(rid, 0))
+    );
+}
+
+#[test]
+fn flow_control_waits() {
+    // REQ-PE-FLOW-014. The sender counts the 3 s of REQ-PE-END-009 from the ACK 0x11 (1 s after
+    // the Chunk). An ACK 0x10 of 500 ms adds to the ACK wait of the sender. The receiver closes
+    // 12 s after its ACK 0x11, plus the 500 ms of the ACK 0x10 that it sent.
+    let (mut a, mut b) = pair(512);
+    let (rid, parts) = flow_set(&mut a, &mut b);
+    let t = a.now;
+    let c1 = a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
+    let (_, out) = b.rx(&c1);
+    a.now = t + 1_000;
+    assert_eq!(a.rx(&out[0]).0, Some(Ev::Ready(rid)));
+    a.now = t + 4_000;
+    assert_eq!(a.poll(), (None, vec![]));
+    a.now += 1;
+    let (e, out) = a.poll();
+    assert_eq!(
+        e,
+        Some(Ev::Closed(rid, Direction::Initiator, CloseReason::Timeout))
+    );
+    assert_eq!(nak(&out[0]).status, terminate(true));
+    b.rx(&out[0]);
+    let (rid, parts) = flow_set(&mut a, &mut b);
+    let c1 = a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
+    let (_, out) = b.rx(&c1);
+    a.rx(&out[0]);
+    let (ta, tb) = (a.now, b.now);
+    let c2 = a.send(b.muid(), rid, Direction::Initiator, &parts[1], false);
+    let (_, out) = b.rx(&c2);
+    assert_eq!(ack(&out[0]).details, pe(rid, 2), "not given to A");
+    b.eng
+        .wait(a.muid(), rid, Direction::Responder, 500)
+        .unwrap();
+    let out = b.pending();
+    let k = ack(&out[0]);
+    assert_eq!(
+        (k.status, k.original_sub_id2),
+        (AckStatus::TimeoutWait(5), 0x36)
+    );
+    assert_eq!(a.rx(&out[0]), (None, vec![]));
+    a.now = ta + 3_500;
+    assert_eq!(a.poll(), (None, vec![]));
+    a.now += 1;
+    assert_eq!(a.poll(), (Some(Ev::Resend(rid, 2)), vec![]));
+    b.now = tb + 12_500;
+    assert_eq!(b.poll(), (None, vec![]));
+    b.now += 1;
+    let (e, out) = b.poll();
+    assert_eq!(
+        e,
+        Some(Ev::Closed(rid, Direction::Responder, CloseReason::Timeout))
+    );
+    assert_eq!(nak(&out[0]).status, terminate(false));
+}
+
+#[test]
+fn caller_refuses_set_data_with_413() {
+    // REQ-PE-STAT-011: the caller refuses the Property Data of a Set as too large: B replies 413
+    // with no Property Data and ignores the later Chunks.
+    let (a, mut b) = pair(512);
+    let (src, dst) = (a.muid(), b.muid());
+    let m = raw(
+        PeKind::SetInquiry,
+        src,
+        dst,
+        7,
+        br#"{"resource":"X-Patch"}"#,
+        2,
+        1,
+        b"{",
+    );
+    assert!(matches!(
+        b.rx(&m).0,
+        Some(Ev::Msg {
+            end: ChunkEnd::More,
+            ..
+        })
+    ));
+    b.eng
+        .reply_status(&mut b.dev, src, 7, Status::PAYLOAD_TOO_LARGE, b.now)
+        .unwrap();
+    let out = b.pending();
+    assert_eq!(out.len(), 1);
+    assert_eq!((sub_id2(&out[0]), chunk(&out[0]).request_id), (0x37, 7));
+    assert_eq!(
+        header_text(&out[0]),
+        r#"{"status":413,"message":"Payload too large"}"#
+    );
+    assert_eq!(chunk(&out[0]).data, b"");
+    let m = raw(PeKind::SetInquiry, src, dst, 7, b"", 2, 2, b"}");
+    assert_eq!(b.rx(&m), (None, vec![]));
+    assert_eq!(b.eng.open(), 0);
+}
+
+#[test]
+fn data_with_a_media_type() {
+    // REQ-PE-ENC-002: data that is not JSON: the header has the "mediaType" that the caller
+    // gives; with none, the request and the reply give NoMediaType. REQ-PE-ENC-001: the reader
+    // gives such data with the "mediaType" value; with no "mediaType" the data is JSON.
+    let (mut a, mut b) = pair(512);
+    let bytes = [0x00u8, 0x7F, 0x01, 0x22];
+    let h = Header {
+        media_type: text("application/octet-stream"),
+        ..get("X-Bin")
+    };
+    let msg = Outgoing {
+        json: false,
+        ..Outgoing::json(h, bytes.len())
+    };
+    let rid = a
+        .eng
+        .request(&mut a.dev, b.muid(), TxnKind::Set, &msg, None, a.now)
+        .unwrap()
+        .request_id;
+    let m = a.send(b.muid(), rid, Direction::Initiator, &bytes, true);
+    assert_eq!(
+        header_text(&m),
+        r#"{"resource":"X-Bin","mediaType":"application/octet-stream"}"#
+    );
+    let (e, out) = b.rx(&m);
+    assert!(out.is_empty());
+    let Some(Ev::Msg { media, data, .. }) = e else {
+        panic!("{e:?}")
+    };
+    assert_eq!(
+        (media.as_deref(), data.as_slice()),
+        (Some("application/octet-stream"), &bytes[..])
+    );
+    b.eng
+        .reply_status(&mut b.dev, a.muid(), rid, Status::OK, b.now)
+        .unwrap();
+    let out = b.pending();
+    a.rx(&out[0]);
+    // The reply to a Get.
+    let (rid, e, _) = get_request(&mut a, &mut b, "X-Bin");
+    assert!(matches!(e, Some(Ev::Msg { media: None, .. })));
+    let r = Header {
+        status: Some(Status::OK),
+        ..Default::default()
+    };
+    assert_eq!(
+        b.eng.reply(
+            &mut b.dev,
+            a.muid(),
+            rid,
+            &Outgoing {
+                json: false,
+                ..Outgoing::json(r, bytes.len())
+            },
+            b.now
+        ),
+        Err(TransactionError::NoMediaType)
+    );
+    let r = Header {
+        media_type: text("application/octet-stream"),
+        ..r
+    };
+    b.eng
+        .reply(
+            &mut b.dev,
+            a.muid(),
+            rid,
+            &Outgoing {
+                json: false,
+                ..Outgoing::json(r, bytes.len())
+            },
+            b.now,
+        )
+        .unwrap();
+    let m = b.send(a.muid(), rid, Direction::Responder, &bytes, true);
+    assert_eq!(
+        header_text(&m),
+        r#"{"status":200,"mediaType":"application/octet-stream"}"#
+    );
+    let Some(Ev::Msg { media, data, .. }) = a.rx(&m).0 else {
+        panic!()
+    };
+    assert_eq!(
+        (media.as_deref(), data.as_slice()),
+        (Some("application/octet-stream"), &bytes[..])
+    );
+}
+
+#[test]
+fn resource_list_get_ignores_offset_and_limit() {
+    // REQ-PE-LIST-001: a Get for "ResourceList" with "offset" and "limit" is a normal request:
+    // no error reply, and the reply needs no "totalCount".
+    let (mut a, mut b) = pair(512);
+    let m = raw(
+        PeKind::GetInquiry,
+        a.muid(),
+        b.muid(),
+        3,
+        br#"{"resource":"ResourceList","offset":5,"limit":1}"#,
+        1,
+        1,
+        b"",
+    );
+    let (e, out) = b.rx(&m);
+    assert!(out.is_empty());
+    assert!(matches!(
+        e,
+        Some(Ev::Msg {
+            role: Direction::Responder,
+            resource: None,
+            end: ChunkEnd::Complete,
+            ..
+        })
+    ));
+    let r = Header {
+        status: Some(Status::OK),
+        ..Default::default()
+    };
+    b.eng
+        .reply(&mut b.dev, a.muid(), 3, &Outgoing::json(r, 2), b.now)
+        .unwrap();
+    let m = b.send(a.muid(), 3, Direction::Responder, b"[]", true);
+    assert_eq!(header_text(&m), r#"{"status":200}"#);
+    let _ = a.rx(&m);
+}
+
+#[test]
+fn initiator_flow_control_needs_the_resource_list_entry() {
+    // REQ-PE-HDR-010: "flowControl":true is refused for a Get without "fcOnGet" and a Set
+    // without "fcOnSet" (status 406), and written where the entry gives them.
+    let (mut a, b) = pair(512);
+    let info = resources()[0].caps;
+    let patch = resources()[1].caps;
+    let fc = resources()[2].caps;
+    for (kind, resource, caps) in [
+        (TxnKind::Get, "DeviceInfo", info),
+        (TxnKind::Set, "X-Patch", patch),
+    ] {
+        let h = Header {
+            flow_control: true,
+            ..get(resource)
+        };
+        assert_eq!(
+            a.eng.request(
+                &mut a.dev,
+                b.muid(),
+                kind,
+                &Outgoing::json(h, 2),
+                Some(&caps),
+                a.now
+            ),
+            Err(TransactionError::Refused(
+                Status::FLOW_CONTROL_NOT_SUPPORTED
+            )),
+            "{resource}"
+        );
+    }
+    assert_eq!(a.eng.open(), 0);
+    let h = Header {
+        flow_control: true,
+        ..get("X-Flow")
+    };
+    let rid = a
+        .eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Get,
+            &Outgoing::json(h, 0),
+            Some(&fc),
+            a.now,
+        )
+        .unwrap()
+        .request_id;
+    let m = a.send(b.muid(), rid, Direction::Initiator, &[], true);
+    assert_eq!(
+        header_text(&m),
+        r#"{"resource":"X-Flow","flowControl":true}"#
+    );
+}
+
+#[test]
+fn subscription_start_reply_errors_add_no_entry() {
+    // REQ-PE-SUB-006: a reply outside 200-299, or with no "subscribeId", adds no entry and
+    // gives the error; 201 with a "subscribeId" adds one.
+    let (mut a, b) = pair(512);
+    let g = get("X-Patch");
+    for (reply, want) in [
+        (
+            &br#"{"status":405,"subscribeId":"s9"}"#[..],
+            Err(SubscriptionError::NotSuccess),
+        ),
+        (br#"{"status":200}"#, Err(SubscriptionError::NoSubscribeId)),
+        (br#"{"status":201,"subscribeId":"s9"}"#, Ok(0)),
+    ] {
+        let rid = a
+            .eng
+            .subscribe(&mut a.dev, b.muid(), &g, None, a.now)
+            .unwrap()
+            .request_id;
+        a.send(b.muid(), rid, Direction::Initiator, &[], true);
+        let m = raw(
+            PeKind::SubscriptionReply,
+            b.muid(),
+            a.muid(),
+            rid,
+            reply,
+            1,
+            1,
+            b"",
+        );
+        let (e, out) = a.rx(&m);
+        assert!(out.is_empty());
+        let Some(Ev::Msg { started, .. }) = e else {
+            panic!("{e:?}")
+        };
+        assert_eq!(started, Some(want));
+        assert_eq!(
+            a.eng.subscriptions().entries().count(),
+            usize::from(want.is_ok())
+        );
+        assert_eq!(a.eng.open(), 0);
+    }
+    let e = a.eng.subscriptions().get(0).unwrap();
+    assert_eq!((e.subscribe_id(), e.resource()), ("s9", "X-Patch"));
+}
+
+#[test]
+fn subscription_data_in_notify_and_end_is_ignored() {
+    // REQ-PE-SUB-013: the Property Data of a received "notify" is ignored: 200, then the Get.
+    // REQ-PE-SUB-017: the Property Data of a received "end" is ignored: 200, the entry ends.
+    let (mut a, mut b) = pair(512);
+    let (ai, bi) = subscribed(&mut a, &mut b);
+    let id = b
+        .eng
+        .subscriptions()
+        .get(bi)
+        .unwrap()
+        .subscribe_id()
+        .to_string();
+    let h = format!(r#"{{"command":"notify","subscribeId":"{id}"}}"#);
+    let m = raw(
+        PeKind::Subscription,
+        b.muid(),
+        a.muid(),
+        50,
+        h.as_bytes(),
+        1,
+        1,
+        br#"{"x":1}"#,
+    );
+    let (e, out) = a.rx(&m);
+    let Some(Ev::Msg { data, sub, .. }) = e else {
+        panic!("{e:?}")
+    };
+    assert_eq!((data.as_slice(), sub), (&b""[..], Some(ai)));
+    assert_eq!(out.len(), 2);
+    assert_eq!((sub_id2(&out[0]), status(&out[0])), (0x39, 200));
+    assert_eq!(
+        (sub_id2(&out[1]), header_text(&out[1])),
+        (
+            0x34,
+            String::from(r#"{"resource":"X-Patch","mutualEncoding":"Mcoded7"}"#)
+        )
+    );
+    let h = format!(r#"{{"command":"end","subscribeId":"{id}","endedBy":"responder"}}"#);
+    let m = raw(
+        PeKind::Subscription,
+        b.muid(),
+        a.muid(),
+        51,
+        h.as_bytes(),
+        1,
+        1,
+        b"{}",
+    );
+    let (e, out) = a.rx(&m);
+    assert_eq!(e, Some(Ev::SubEnded(id)));
+    assert_eq!(out.len(), 1);
+    assert_eq!(header_text(&out[0]), r#"{"status":200}"#);
+    assert_eq!(a.eng.subscriptions().entries().count(), 0);
+}
+
+#[test]
+fn subscription_update_that_the_caller_can_not_apply() {
+    // REQ-PE-SUB-016: A replies 200 to a "full" that its caller can not apply; the caller asks
+    // again, and A sends a Get with the "start" values.
+    let (mut a, mut b) = pair(512);
+    let (ai, bi) = subscribed(&mut a, &mut b);
+    let data = br#"{"name":"far too long for the caller"}"#;
+    let rid = b
+        .eng
+        .update(
+            &mut b.dev,
+            bi,
+            Command::Full,
+            EncodingName::Ascii,
+            Some(data.len()),
+            b.now,
+        )
+        .unwrap()
+        .request_id;
+    let m = b.send(a.muid(), rid, Direction::Initiator, data, true);
+    let (e, out) = a.rx(&m);
+    assert!(matches!(e, Some(Ev::Msg { sub: Some(s), .. }) if s == ai));
+    assert_eq!(out.len(), 1);
+    assert_eq!((sub_id2(&out[0]), status(&out[0])), (0x39, 200));
+    a.eng.refresh(ai).unwrap();
+    let out = a.pending();
+    assert_eq!(out.len(), 1);
+    assert_eq!(sub_id2(&out[0]), 0x34);
+    assert_eq!(
+        header_text(&out[0]),
+        r#"{"resource":"X-Patch","mutualEncoding":"Mcoded7"}"#
+    );
 }

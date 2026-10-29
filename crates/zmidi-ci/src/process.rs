@@ -415,7 +415,8 @@ pub struct Controller {
 /// Current values that the application reports. `group` is the absolute Group 0-15 and
 /// `channel` 0-15. Every method gives nothing by default. Values have the width of the
 /// Protocol: MIDI 1.0 7 bits (14 bits for Pitch Bend and RPN/NRPN), MIDI 2.0 32 bits.
-/// For DataControl NonDefault give only non-default values and active notes (REQ-CI-MMR-004).
+/// For DataControl NonDefault give only non-default values (REQ-CI-MMR-004): the crate does not
+/// know the defaults (DEC-009). The report writer itself leaves out the inactive notes.
 #[allow(unused_variables)]
 pub trait ReportSource {
     /// The eight Quarter Frame data nibbles of the current time, pieces 0-7 (REQ-CI-MMR-020).
@@ -559,6 +560,8 @@ pub struct ReportWriter<'s, S: ReportSource + ?Sized> {
     channels: u16,
     channel: u8,
     system: bool,
+    /// Message Data Control 0x01: report active notes only (REQ-CI-MMR-004).
+    active_only: bool,
     step: Step,
 }
 
@@ -596,6 +599,7 @@ impl<'s, S: ReportSource + ?Sized> ReportWriter<'s, S> {
             channels,
             channel: 0,
             system,
+            active_only: data_control == DataControl::NonDefault,
             step: if report { Step::Mtc(0) } else { Step::Done },
         };
         if report && !w.system {
@@ -939,6 +943,10 @@ impl<'s, S: ReportSource + ?Sized> ReportWriter<'s, S> {
                         continue;
                     };
                     self.step = Step::Note(pos + 1);
+                    // Table 44 0x01: active notes only (REQ-CI-MMR-004).
+                    if self.active_only && !n.on {
+                        continue;
+                    }
                     let op = if n.on { 0x9 } else { 0x8 };
                     return Some(if midi1 {
                         self.m1(op, n.note, midi1_velocity(n))
@@ -1049,12 +1057,26 @@ mod tests {
         // 9.2-9.8, Tables 43, 44, 46; REQ-CI-PI-001, -002, REQ-CI-MMR-001, -002, -005, -006, -008.
         let mut buf = [0u8; 32];
         let n = PiCapabilitiesInquiry::write(SRC, DST, Framing::Bare, &mut buf).unwrap();
-        assert_eq!((buf[1], buf[3], n), (0x7F, 0x40, 13));
+        assert_eq!(
+            &buf[..n],
+            &[0x7E, 0x7F, 0x0D, 0x40, 0x02, 0x56, 0x68, 0x48, 0x00, 0x21, 0x06, 0x15, 0x03]
+        );
         let n = PiCapabilities {
             midi_message_report: true,
         }
         .write(SRC, DST, Framing::Bare, &mut buf)
         .unwrap();
+        // Table 41; REQ-CI-PI-002: D0 set, reserved bits D1-D6 written as 0.
+        assert_eq!((buf[1], buf[3], buf[13], n), (0x7F, 0x41, 0x01, 14));
+        let n0 = PiCapabilities::default()
+            .write(SRC, DST, Framing::Bare, &mut [0u8; 32])
+            .unwrap();
+        assert_eq!(n0, 14);
+        assert!(
+            PiCapabilities::read(&parse(&buf[..n]).0, &[0x7F])
+                .unwrap()
+                .midi_message_report
+        );
         let (h, body) = parse(&buf[..n]);
         assert!(PiCapabilities::read(&h, body).unwrap().midi_message_report);
         assert!(
@@ -1087,6 +1109,25 @@ mod tests {
         let (h, body) = parse(&buf[..n]);
         assert_eq!(MessageReportInquiry::read(&h, body), Ok(q));
         assert_eq!(DataControl::from_byte(0x05), DataControl::Reserved(5));
+        // Table 44; REQ-CI-MMR-002: each value both ways.
+        for (b, dc) in [
+            (0x00, DataControl::BeginEndOnly),
+            (0x01, DataControl::NonDefault),
+            (0x02, DataControl::Reserved(0x02)),
+            (0x7E, DataControl::Reserved(0x7E)),
+            (0x7F, DataControl::Full),
+        ] {
+            assert_eq!(DataControl::from_byte(b), dc);
+            assert_eq!(dc.to_byte(), b);
+        }
+        let q1 = MessageReportInquiry {
+            data_control: DataControl::NonDefault,
+            ..q
+        };
+        let n = q1
+            .write(DeviceId::Group, SRC, DST, Framing::Bare, &mut [0u8; 32][..])
+            .unwrap();
+        assert_eq!(n, 18);
         assert_eq!(ChannelBits::from_byte(0xFF).to_byte(), 0x3F);
         assert_eq!(NoteBits::from_byte(0xFF).to_byte(), 0x1F);
         assert_eq!(SystemBits::from_byte(0xFF).to_byte(), 0x07);
@@ -1103,6 +1144,27 @@ mod tests {
             .unwrap();
         let (h, body) = parse(&buf[..n]);
         assert_eq!(MessageReportReply::read(&h, body), Ok(r));
+        // Table 45; REQ-CI-MMR-005: System, reserved 0x00, Channel, Note; reserved bits 0.
+        let r = MessageReportReply {
+            system: SystemBits::from_byte(0x02),
+            channel: ChannelBits::from_byte(0x12),
+            note: NoteBits::from_byte(0x01),
+        };
+        let n = r
+            .write(DeviceId::Channel(3), SRC, DST, Framing::Bare, &mut buf)
+            .unwrap();
+        assert_eq!((buf[1], buf[3]), (0x03, 0x43));
+        assert_eq!(&buf[13..n], &[0x02, 0x00, 0x12, 0x01]);
+        // The reader ignores the reserved byte and the reserved bits.
+        let (h, _) = parse(&buf[..n]);
+        assert_eq!(
+            MessageReportReply::read(&h, &[0x7A, 0x55, 0x52, 0x61]),
+            Ok(r)
+        );
+        assert_eq!(
+            MessageReportReply::read(&h, &[0x02, 0x00, 0x12]),
+            Err(ParseError::TooShort)
+        );
         let n =
             MessageReportEnd::write(DeviceId::Group, SRC, DST, Framing::Bare, &mut buf).unwrap();
         assert_eq!((buf[3], n), (0x44, 13));
@@ -1151,8 +1213,8 @@ mod tests {
                     note: 60,
                     on: true,
                     velocity: 0xFE00,
-                    attribute_type: 0,
-                    attribute_data: 0,
+                    attribute_type: 3,
+                    attribute_data: 0x1234,
                 },
                 NoteState {
                     note: 61,
@@ -1251,6 +1313,10 @@ mod tests {
                 (32, 2)
             ]
         );
+        // REQ-CI-MMR-029: Bank Select MSB, then LSB, then Program Change, one after the other.
+        let msb = t.iter().position(|x| *x == (0xB2, 0, 0, 1)).unwrap();
+        assert_eq!(t[msb + 1], (0xB2, 0, 32, 2));
+        assert_eq!(t[msb + 2], (0xC2, 0, 5, 0));
         let tail: Vec<_> = t.iter().filter(|x| x.0 != 0xB2).skip(10).collect();
         assert_eq!(*tail[0], (0xC2, 0, 5, 0));
         assert_eq!(*tail[1], (0x92, 0, 60, 0x7F));
@@ -1265,7 +1331,9 @@ mod tests {
 
     #[test]
     fn midi2_report_formats() {
-        // REQ-CI-MMR-031, -033: Program Change with Bank, Note On attributes.
+        // REQ-CI-MMR-031, -033: Program Change with Bank, Note On attributes. REQ-CI-MMR-014:
+        // the Synth gives every type, and only the two declared types are sent. REQ-CI-MMR-004:
+        // with 0x01 the inactive note 61 is not sent.
         let s = Synth::default();
         let bits = MessageReportReply {
             channel: ChannelBits {
@@ -1295,9 +1363,95 @@ mod tests {
             assert_eq!(q.group, 3);
             assert_eq!((q.words()[0] >> 16) & 0xF, 2);
         }
-        assert_eq!(p[0].words(), &[0x43C2_0001, 0x0500_0102]);
-        assert_eq!(p[1].words(), &[0x4392_3C00, 0xFE00_0000]);
-        assert_eq!(p.len(), 4);
+        let words: Vec<&[u32]> = p.iter().map(|q| q.words()).collect();
+        assert_eq!(
+            words,
+            [
+                &[0x43C2_0001, 0x0500_0102][..],
+                &[0x4392_3C03, 0xFE00_1234],
+                &[0x4382_3C00, 0x0000_0000],
+            ]
+        );
+    }
+
+    /// Values that the application gives for Message Data Control 0x01 (REQ-CI-MMR-004): one
+    /// non-default controller and per-note controller, one active and one inactive note.
+    struct Changed;
+
+    impl ReportSource for Changed {
+        fn control_change(&self, _g: u8, _c: u8, index: u8) -> Option<u32> {
+            (index == 7).then_some(0x1234_5678)
+        }
+        fn note(&self, _g: u8, _c: u8, p: usize) -> Option<NoteState> {
+            [
+                NoteState {
+                    note: 60,
+                    on: true,
+                    velocity: 0x8000,
+                    attribute_type: 0,
+                    attribute_data: 0,
+                },
+                NoteState {
+                    note: 61,
+                    on: false,
+                    velocity: 0,
+                    attribute_type: 0,
+                    attribute_data: 0,
+                },
+            ]
+            .get(p)
+            .copied()
+        }
+        fn registered_per_note(&self, _g: u8, _c: u8, p: usize) -> Option<Controller> {
+            (p == 0).then_some(Controller {
+                bank: 60,
+                index: 7,
+                value: 0xAAAA_0000,
+            })
+        }
+    }
+
+    #[test]
+    fn non_default_report_has_active_notes_only() {
+        // Table 44; REQ-CI-MMR-004: with 0x01 the writer sends the values that the application
+        // gives and leaves out the inactive notes; with 0x7F it sends the inactive notes too
+        // (9.5.1).
+        let bits = MessageReportReply {
+            channel: ChannelBits {
+                control_change: true,
+                ..Default::default()
+            },
+            note: NoteBits {
+                notes: true,
+                registered_per_note: true,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let report = |dc| {
+            let mut w = ReportWriter::new(
+                bits,
+                dc,
+                DeviceId::Channel(0),
+                0,
+                0,
+                1,
+                1,
+                Protocol::Midi2,
+                &Changed,
+            );
+            collect(&mut w)
+                .iter()
+                .map(|q| [q.words()[0], q.words()[1]])
+                .collect::<Vec<_>>()
+        };
+        let cc = [0x40B0_0700, 0x1234_5678];
+        let on = [0x4090_3C00, 0x8000_0000];
+        let per_note = [0x4000_3C07, 0xAAAA_0000];
+        let off = [0x4080_3C00, 0];
+        assert_eq!(report(DataControl::NonDefault), [cc, on, per_note, off]);
+        let inactive = [0x4080_3D00, 0];
+        assert_eq!(report(DataControl::Full), [cc, on, inactive, per_note, off]);
     }
 
     #[test]

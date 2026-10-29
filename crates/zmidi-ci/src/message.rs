@@ -802,6 +802,7 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
     use std::string::String;
+    use std::vec::Vec;
 
     /// The word check of `Header::parse` and `Emit::bytes` finds a byte over 0x7F at each place
     /// and in each length, and accepts 7-bit data.
@@ -825,6 +826,13 @@ mod tests {
         assert_eq!(m.to_bytes(), [0x67, 0x0A, 0x0D, 0x09]);
         assert_eq!(Muid::from_bytes(m.to_bytes()), Ok(m));
         assert_eq!(Muid::BROADCAST.to_bytes(), [0x7F; 4]);
+        // REQ-CI-MUID-007: [0x7F; 4] reads as the Broadcast MUID.
+        let b = Muid::from_bytes([0x7F; 4]).unwrap();
+        assert_eq!(
+            (b, b.value(), b.is_broadcast()),
+            (Muid::BROADCAST, 0x0FFF_FFFF, true)
+        );
+        assert!(!Muid::new(0x0FFF_FFFE).unwrap().is_broadcast());
         assert_eq!(Muid::new(0x1000_0000), Err(WriteError::InvalidValue));
         assert_eq!(
             Muid::from_bytes([0x80, 0, 0, 0]),
@@ -836,6 +844,10 @@ mod tests {
     fn muid_from_random_avoids_reserved_and_old() {
         // REQ-CI-MUID-006, REQ-CI-MUID-011.
         assert_eq!(Muid::from_random(0x0FFF_FF00, None), None);
+        assert_eq!(Muid::from_random(0x0FFF_FF80, None), None);
+        assert_eq!(Muid::from_random(0x0FFF_FFFE, None), None);
+        assert_eq!(Muid::from_random(0x0FFF_FFFF, None), None);
+        assert_eq!(Muid::from_random(0x1FFF_FFFE, None), None);
         assert_eq!(Muid::from_random(0xFFFF_FFFF, None), None);
         assert_eq!(
             Muid::from_random(0x0FFF_FEFF, None),
@@ -857,6 +869,20 @@ mod tests {
     fn device_id_values() {
         // Table 5; REQ-CI-MSG-005.
         assert_eq!(DeviceId::from_byte(0x05), Ok(DeviceId::Channel(5)));
+        // REQ-CI-ADDR-001: 0x00-0x0F Channels 1-16, 0x7E Group, 0x7F Function Block, both ways.
+        assert_eq!(DeviceId::from_byte(0x00), Ok(DeviceId::Channel(0)));
+        assert_eq!(DeviceId::from_byte(0x0F), Ok(DeviceId::Channel(15)));
+        assert_eq!(DeviceId::from_byte(0x80), Err(ParseError::InvalidByte));
+        for (id, b) in [
+            (DeviceId::Channel(0), 0x00),
+            (DeviceId::Channel(9), 0x09),
+            (DeviceId::Channel(15), 0x0F),
+            (DeviceId::Group, 0x7E),
+            (DeviceId::FunctionBlock, 0x7F),
+        ] {
+            assert_eq!(id.to_byte(), b);
+            assert_eq!(DeviceId::from_byte(b), Ok(id));
+        }
         assert_eq!(DeviceId::from_byte(0x7E), Ok(DeviceId::Group));
         assert_eq!(DeviceId::from_byte(0x7F), Ok(DeviceId::FunctionBlock));
         for b in 0x10..=0x7D {
@@ -880,8 +906,32 @@ mod tests {
         }
         assert_eq!(SubId2::Discovery.category(), Category::Management);
         assert_eq!(SubId2::Notify.category(), Category::PropertyExchange);
-        assert_eq!(Category::from_sub_id2(0x10), Category::ProtocolNegotiation);
-        assert_eq!(Category::from_sub_id2(0x55), Category::Reserved(5));
+        // Table 4; REQ-CI-MSG-001: the high nibble of each Sub-ID#2.
+        for (b, c) in [
+            (0x05, Category::Reserved(0)),
+            (0x10, Category::ProtocolNegotiation),
+            (0x1F, Category::ProtocolNegotiation),
+            (0x20, Category::ProfileConfiguration),
+            (0x2F, Category::ProfileConfiguration),
+            (0x30, Category::PropertyExchange),
+            (0x3F, Category::PropertyExchange),
+            (0x40, Category::ProcessInquiry),
+            (0x44, Category::ProcessInquiry),
+            (0x55, Category::Reserved(5)),
+            (0x60, Category::Reserved(6)),
+            (0x70, Category::Management),
+            (0x7F, Category::Management),
+        ] {
+            assert_eq!(Category::from_sub_id2(b), c, "{b:#04x}");
+        }
+        assert_eq!(
+            SubId2::ProfileInquiry.category(),
+            Category::ProfileConfiguration
+        );
+        assert_eq!(
+            SubId2::MidiMessageReport.category(),
+            Category::ProcessInquiry
+        );
     }
 
     #[test]
@@ -892,6 +942,17 @@ mod tests {
         assert!(Version::from_byte(0x22).unwrap().has_reserved_bits());
         assert!(!Version::CURRENT.has_reserved_bits());
         assert_eq!(Version::CURRENT.to_byte(), 0x02);
+        // REQ-CI-MSG-009: bit 6 and bit 5 are reserved; bits 4-0 are the minor version.
+        let v = |b| Version::from_byte(b).unwrap();
+        assert!(v(0x42).has_reserved_bits());
+        assert_eq!(v(0x42).minor(), 0x02);
+        assert!(v(0x60).has_reserved_bits());
+        assert_eq!(v(0x60).minor(), 0x00);
+        assert!(!v(0x1F).has_reserved_bits());
+        assert_eq!(v(0x1F).minor(), 0x1F);
+        assert_eq!(v(0x12).minor(), 0x12);
+        assert_eq!(v(0x01).minor(), 0x01);
+        assert_eq!(Version::from_byte(0x80), Err(ParseError::InvalidByte));
     }
 
     const DISCOVERY_HEADER: [u8; 13] = [
@@ -904,6 +965,8 @@ mod tests {
         let (h, body) = Header::parse(&DISCOVERY_HEADER).unwrap();
         assert_eq!(h.device_id, DeviceId::FunctionBlock);
         assert_eq!(h.sub_id2, 0x70);
+        // REQ-CI-MSG-012: the version is read with the header, before the message data.
+        assert_eq!(h.version, Version::CURRENT);
         assert_eq!(h.source.value(), 0x01 | 0x02 << 7 | 0x03 << 14 | 0x04 << 21);
         assert!(h.destination.is_broadcast());
         assert!(body.is_empty());
@@ -923,6 +986,20 @@ mod tests {
             Header::parse(&[0x7E, 0x7F, 0x0C, 0x70]),
             Err(ParseError::NotMidiCi)
         );
+        // REQ-CI-MSG-004: only a message that starts with 0x7E and has Sub-ID#1 0x0D.
+        let mut m = DISCOVERY_HEADER;
+        m[0] = 0x7D;
+        assert_eq!(Header::parse(&m), Err(ParseError::NotMidiCi));
+        m[0] = 0x7F;
+        assert_eq!(Header::parse(&m), Err(ParseError::NotMidiCi));
+        let mut framed = [0u8; 15];
+        framed[0] = 0xF0;
+        framed[1..14].copy_from_slice(&m);
+        framed[14] = 0xF7;
+        assert_eq!(Header::parse(&framed), Err(ParseError::NotMidiCi));
+        m = DISCOVERY_HEADER;
+        m[2] = 0x0E;
+        assert_eq!(Header::parse(&m), Err(ParseError::NotMidiCi));
         assert_eq!(
             Header::parse(&DISCOVERY_HEADER[..12]),
             Err(ParseError::TooShort)
@@ -944,13 +1021,34 @@ mod tests {
 
     #[test]
     fn header_write_round_trip() {
-        let (h, _) = Header::parse(&DISCOVERY_HEADER).unwrap();
+        // REQ-CI-MSG-004: 0x7E and 0x0D in each message; REQ-CI-MSG-007: version 0x02 also for
+        // a header read with a lower version.
+        let (mut h, _) = Header::parse(&DISCOVERY_HEADER).unwrap();
+        h.version = Version::from_byte(0x01).unwrap();
         let mut buf = [0u8; 15];
         let n = h.write(Framing::SysEx, &mut buf).unwrap().finish().unwrap();
         assert_eq!(n, 15);
         assert_eq!(buf[0], 0xF0);
         assert_eq!(&buf[1..14], &DISCOVERY_HEADER);
         assert_eq!(buf[14], 0xF7);
+        // REQ-CI-MSG-003: in UMP, no 0xF0 and no 0xF7.
+        let mut bare = [0u8; 13];
+        let n = h.write(Framing::Bare, &mut bare).unwrap().finish().unwrap();
+        assert_eq!((n, bare), (13, DISCOVERY_HEADER));
+        let mut w = start(
+            DeviceId::Group,
+            SubId2::Ack,
+            h.source,
+            h.destination,
+            Framing::Bare,
+            &mut buf,
+        );
+        w.u7(0x55);
+        assert_eq!(w.finish(), Ok(14));
+        assert_eq!(
+            &buf[..14],
+            &[0x7E, 0x7E, 0x0D, 0x7D, 0x02, 0x01, 0x02, 0x03, 0x04, 0x7F, 0x7F, 0x7F, 0x7F, 0x55]
+        );
         let mut small = [0u8; 12];
         assert_eq!(
             h.write(Framing::Bare, &mut small).err(),
@@ -992,6 +1090,12 @@ mod tests {
         // REQ-CI-TXT-001, -002, -004, -005.
         let s: String = TextChars::new(b"a\\/b/c\\\\\\u00e9\\u00E9\\uD834\\uDD1E\x01\n").collect();
         assert_eq!(s, "a/b/c\\éé𝄞\n");
+        // ECMA-404 escapes: \" and \n are kept; \b, \f, \r and \t are control characters,
+        // which the reader drops (REQ-CI-TXT-004).
+        let esc: String = TextChars::new(br#"\"q\" a\nb\tc\rd\be\ff"#).collect();
+        assert_eq!(esc, "\"q\" a\nbcdef");
+        let esc: Vec<char> = TextChars::new(br#"\b\f\r\t\"\\"#).collect();
+        assert_eq!(esc, ['"', '\\']);
         let bad: String = TextChars::new(b"\\q\\u12\\uD800x\\").collect();
         assert_eq!(bad, "\u{FFFD}\u{FFFD}12\u{FFFD}x\u{FFFD}");
     }

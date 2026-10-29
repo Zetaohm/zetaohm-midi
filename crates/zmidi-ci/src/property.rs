@@ -199,7 +199,9 @@ impl<'a> PeChunk<'a> {
         })
     }
 
-    /// Writes one Chunk with Device ID 0x7F; Header Data only when `number` is 1.
+    /// Writes one Chunk with Device ID 0x7F; Header Data only when `number` is 1. An Inquiry: Get
+    /// Property Data or a Reply to Set Property Data other than Chunk 1 of 1 with no Property Data
+    /// is an InvalidValue error.
     pub fn write(
         &self,
         kind: PeKind,
@@ -210,6 +212,13 @@ impl<'a> PeChunk<'a> {
     ) -> Result<usize, WriteError> {
         // Header Data only in Chunk 1, or in a first Chunk that is also an incomplete end.
         if self.request_id > 0x7F || (self.number >= 2 && !self.header.is_empty()) {
+            return Err(WriteError::InvalidValue);
+        }
+        // REQ-CI-PEF-007, -010 (Tables 33, 36): Inquiry: Get Property Data and Reply to Set
+        // Property Data are one Chunk (0x0001 of 0x0001) with no Property Data.
+        if matches!(kind, PeKind::GetInquiry | PeKind::SetReply)
+            && (self.total != 1 || self.number != 1 || !self.data.is_empty())
+        {
             return Err(WriteError::InvalidValue);
         }
         let hlen = u16::try_from(self.header.len()).map_err(|_| WriteError::InvalidValue)?;
@@ -495,6 +504,48 @@ mod tests {
         buf[4] = 1;
         let (h, body) = parse(&buf[..n]);
         assert_eq!(PeCapabilities::read(&h, body), Ok(c));
+
+        // Table 30: Inquiry: PE Capabilities, Sub-ID#2 0x30, the same fields (REQ-CI-PEF-004).
+        let n = c.write_inquiry(SRC, DST, Framing::Bare, &mut buf).unwrap();
+        assert_eq!(
+            &buf[..n],
+            &[
+                0x7E, 0x7F, 0x0D, 0x30, 0x02, 0x56, 0x68, 0x48, 0x00, 0x21, 0x06, 0x15, 0x03, 4, 0,
+                0
+            ]
+        );
+        let (h, body) = parse(&buf[..n]);
+        let back = PeCapabilities::read(&h, body).unwrap();
+        assert_eq!(
+            (back.simultaneous, back.major, back.minor),
+            (4, Some(0), Some(0))
+        );
+        // REQ-CI-PEF-006: the reader accepts every version value; the writer writes the values
+        // the caller gives (0x00 for None, above).
+        buf[14] = 5;
+        buf[15] = 7;
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(
+            PeCapabilities::read(&h, body),
+            Ok(PeCapabilities {
+                simultaneous: 4,
+                major: Some(5),
+                minor: Some(7)
+            })
+        );
+        let v = PeCapabilities {
+            simultaneous: 1,
+            major: Some(3),
+            minor: Some(4),
+        };
+        let n = v.write_inquiry(SRC, DST, Framing::Bare, &mut buf).unwrap();
+        assert_eq!(&buf[13..n], &[1, 3, 4]);
+        // Version 2 needs the two version bytes.
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(
+            PeCapabilities::read(&h, &body[..2]),
+            Err(ParseError::TooShort)
+        );
     }
 
     #[test]
@@ -537,20 +588,113 @@ mod tests {
         for (kind, sub) in kinds {
             assert_eq!(kind.sub_id2(), sub);
             assert_eq!(PeKind::from_sub_id2(sub), Some(kind));
+            // Tables 33 and 36: 0x34 and 0x37 are Chunk 1 of 1 with no Property Data.
+            let fixed = matches!(kind, PeKind::GetInquiry | PeKind::SetReply);
             let c = PeChunk {
                 request_id: 9,
                 header: b"{}",
-                total: 0,
+                total: if fixed { 1 } else { 0 },
                 number: 1,
-                data: b"x",
+                data: if fixed { b"" } else { b"x" },
             };
             let n = c.write(kind, SRC, DST, Framing::Bare, &mut buf).unwrap();
-            assert_eq!((buf[1], buf[3]), (0x7F, sub));
+            let mut want = std::vec![
+                0x7E, 0x7F, 0x0D, sub, 0x02, 0x56, 0x68, 0x48, 0x00, 0x21, 0x06, 0x15, 0x03,
+            ];
+            // Request ID, header length 2, "{}".
+            want.extend([9, 2, 0, b'{', b'}']);
+            if fixed {
+                want.extend([1, 0, 1, 0, 0, 0]);
+            } else {
+                want.extend([0, 0, 1, 0, 1, 0, b'x']);
+            }
+            assert_eq!(&buf[..n], &want[..], "{sub:#04x}");
             let (h, body) = parse(&buf[..n]);
             assert_eq!(PeChunk::read(&h, body), Ok(c));
         }
         assert_eq!(PeKind::from_sub_id2(0x30), None);
         assert_eq!(PeKind::from_sub_id2(0x3A), None);
+    }
+
+    #[test]
+    fn get_inquiry_and_set_reply_are_one_empty_chunk() {
+        // M2-101 Tables 33 and 36; REQ-CI-PEF-007, REQ-CI-PEF-010: Number of Chunks 01 00,
+        // Number of This Chunk 01 00, Length of Following Property Data 00 00.
+        let mut buf = [0u8; 64];
+        let reply = PeChunk {
+            request_id: 0x11,
+            header: br#"{"status":200}"#,
+            total: 1,
+            number: 1,
+            data: &[],
+        };
+        let n = reply
+            .write(PeKind::SetReply, SRC, DST, Framing::SysEx, &mut buf)
+            .unwrap();
+        let mut want = std::vec![
+            0xF0, 0x7E, 0x7F, 0x0D, 0x37, 0x02, 0x56, 0x68, 0x48, 0x00, 0x21, 0x06, 0x15, 0x03,
+            0x11, 14, 0,
+        ];
+        want.extend_from_slice(br#"{"status":200}"#);
+        want.extend([1, 0, 1, 0, 0, 0, 0xF7]);
+        assert_eq!(&buf[..n], &want[..]);
+        // Any other count or Property Data is an error, for both kinds.
+        for kind in [PeKind::GetInquiry, PeKind::SetReply] {
+            for (total, number, data) in [
+                (0u16, 1u16, &b""[..]),
+                (2, 1, b""),
+                (1, 0, b""),
+                (1, 1, b"x"),
+            ] {
+                let c = PeChunk {
+                    total,
+                    number,
+                    data,
+                    ..reply
+                };
+                assert_eq!(
+                    c.write(kind, SRC, DST, Framing::Bare, &mut buf),
+                    Err(WriteError::InvalidValue),
+                    "{kind:?} {total} {number}"
+                );
+            }
+            // Number of This Chunk 2 with no Header Data: also an error for these kinds.
+            let c = PeChunk {
+                header: &[],
+                total: 2,
+                number: 2,
+                ..reply
+            };
+            assert_eq!(
+                c.write(kind, SRC, DST, Framing::Bare, &mut buf),
+                Err(WriteError::InvalidValue)
+            );
+            // The other kinds take the same values.
+            let c = PeChunk {
+                total: 0,
+                data: b"x",
+                ..reply
+            };
+            assert!(c
+                .write(PeKind::SetInquiry, SRC, DST, Framing::Bare, &mut buf)
+                .is_ok());
+        }
+        // A ChunkWriter of an unknown total gives the fixed values only with a Complete end.
+        let mut w = ChunkWriter::new(
+            PeKind::GetInquiry,
+            2,
+            b"{}",
+            512,
+            None,
+            None,
+            SRC,
+            DST,
+            Framing::Bare,
+        )
+        .unwrap();
+        assert_eq!(w.write_next(&[], &mut buf), Err(WriteError::InvalidValue));
+        let n = w.finish(&[], ChunkEnd::Complete, &mut buf).unwrap();
+        assert_eq!(&buf[18..n], &[1, 0, 1, 0, 0, 0]);
     }
 
     #[test]
@@ -589,6 +733,16 @@ mod tests {
             PeChunk::read(&h, &body[..body.len() - 1]),
             Err(ParseError::TooShort)
         );
+        // Bytes after the Property Data are ignored; both data fields are slices.
+        let mut long = Vec::from(body);
+        long.extend([0x11, 0x22, 0x33]);
+        let back = PeChunk::read(&h, &long).unwrap();
+        assert_eq!(back, c);
+        assert_eq!(back.data, b"ab");
+        // A header length that the body does not hold.
+        let mut short = Vec::from(body);
+        short[1] = 0x7F;
+        assert_eq!(PeChunk::read(&h, &short), Err(ParseError::TooShort));
         let mut bad = Vec::from(body);
         bad[1] = 1; // header length 1 in Chunk 2
         bad.insert(3, b'x');
@@ -700,6 +854,17 @@ mod tests {
             Framing::Bare,
         )
         .unwrap();
+        // REQ-CI-PEF-021: a known total (5 Chunks of 2000 bytes at 512) ended early with complete
+        // data gives Number of Chunks = Number of This Chunk.
+        let mut early = w.clone();
+        let n = early.write_next(&[0; 10], &mut buf).unwrap();
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(PeChunk::read(&h, body).unwrap().total, 5);
+        let n = early.finish(&[0; 5], ChunkEnd::Complete, &mut buf).unwrap();
+        let (h, body) = parse(&buf[..n]);
+        let c = PeChunk::read(&h, body).unwrap();
+        assert_eq!((c.total, c.number, c.data.len()), (2, 2, 5));
+        assert_eq!(c.end(), ChunkEnd::Complete);
         let _ = w.write_next(&[0; 10], &mut buf).unwrap();
         let n = w.finish(&[0; 5], ChunkEnd::Incomplete, &mut buf).unwrap();
         let (h, body) = parse(&buf[..n]);
@@ -766,6 +931,17 @@ mod tests {
         t.close_peer(SRC);
         assert!(!t.is_active(SRC, 0, Direction::Responder));
         assert_eq!(t.allocate(DST), Some(0));
+        // REQ-CI-PEF-028: one Request ID is active with two peers at the same time.
+        let mut t = RequestTable::<4>::new();
+        assert_eq!(t.open(SRC, 5), Ok(()));
+        assert_eq!(t.open(DST, 5), Ok(()));
+        assert!(
+            t.is_active(SRC, 5, Direction::Responder) && t.is_active(DST, 5, Direction::Responder)
+        );
+        t.close(SRC, 5, Direction::Responder);
+        assert!(
+            !t.is_active(SRC, 5, Direction::Responder) && t.is_active(DST, 5, Direction::Responder)
+        );
     }
 
     #[test]

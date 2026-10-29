@@ -1248,10 +1248,7 @@ mod tests {
         assert!(!b.reason.is_defined());
         // Reader text: up to the first 0x00, or all of the field; not UTF-8 is given and
         // reported.
-        for (bytes, text) in [
-            (*b"Bye\0", Ok("Bye")),
-            (*b"abcd", Ok("abcd")),
-        ] {
+        for (bytes, text) in [(*b"Bye\0", Ok("Bye")), (*b"abcd", Ok("abcd"))] {
             let q = raw(&[0xF0, 1, 0x01, 0, bytes[0], bytes[1], bytes[2], bytes[3]]);
             let Command::Bye(b) = one(&q) else { panic!() };
             assert_eq!(b.text.to_str(), text);

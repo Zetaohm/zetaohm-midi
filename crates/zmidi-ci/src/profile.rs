@@ -1078,6 +1078,27 @@ mod tests {
         };
         assert_eq!(ProfileId::from_bytes(m3.to_bytes()), Ok(m3));
         assert_eq!(ProfileLevel::from_byte(0x05), Ok(ProfileLevel::Extended(5)));
+        // M2-102 2.2.1; REQ-CI-PRFR-001: each Level value, both ways.
+        for (b, level) in [
+            (0x00, ProfileLevel::Partial),
+            (0x01, ProfileLevel::Minimum),
+            (0x02, ProfileLevel::Extended(0x02)),
+            (0x7E, ProfileLevel::Extended(0x7E)),
+            (0x7F, ProfileLevel::Highest),
+        ] {
+            assert_eq!(ProfileLevel::from_byte(b), Ok(level));
+            assert_eq!(level.to_byte(), b);
+        }
+        assert_eq!(ProfileLevel::from_byte(0x80), Err(ParseError::InvalidByte));
+        assert_eq!(
+            ProfileId::from_bytes([0x7E, 0x21, 0, 1, 0x00]),
+            Ok(ProfileId::Standard {
+                bank: 0x21,
+                number: 0,
+                version: 1,
+                level: ProfileLevel::Partial
+            })
+        );
         assert_eq!(
             ProfileId::from_bytes([0x7E, 0x80, 0, 0, 0]),
             Err(ParseError::InvalidByte)
@@ -1120,6 +1141,16 @@ mod tests {
             ProfileInquiryReply::read(&h, &body[..8]),
             Err(ParseError::TooShort)
         );
+        assert_eq!(
+            ProfileInquiryReply::read(&h, &body[..body.len() - 1]),
+            Err(ParseError::TooShort)
+        );
+        // REQ-CI-PROF-004: bytes after the last Profile ID are ignored.
+        let mut long = body.to_vec();
+        long.extend([0x7E, 0x21, 0, 1, 0x7F, 0x33]);
+        let r = ProfileInquiryReply::read(&h, &long).unwrap();
+        assert_eq!(r.enabled().collect::<Vec<_>>(), [GM]);
+        assert_eq!(r.disabled().collect::<Vec<_>>(), [DRAW]);
     }
 
     #[test]
@@ -1196,7 +1227,18 @@ mod tests {
         let n = SetProfileOff { profile: GM }
             .write(DeviceId::FunctionBlock, SRC, DST, Framing::Bare, &mut buf)
             .unwrap();
+        // Table 21; REQ-CI-PROF-010: Profile ID and 2 reserved bytes 0x00 0x00.
         assert_eq!(n, 13 + 7);
+        assert_eq!(&buf[..4], &[0x7E, 0x7F, 0x0D, 0x23]);
+        assert_eq!(&buf[13..n], &[0x7E, 0x21, 0x00, 0x01, 0x7F, 0x00, 0x00]);
+        // The reader ignores the value of the reserved bytes.
+        buf[18] = 0x12;
+        buf[19] = 0x34;
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(
+            SetProfileOff::read(&h, body),
+            Ok(SetProfileOff { profile: GM })
+        );
         let n = ProfileEnabledReport {
             profile: GM,
             channels: 2,
@@ -1206,6 +1248,50 @@ mod tests {
         assert_eq!(&buf[9..13], &[0x7F; 4]);
         let (h, body) = parse(&buf[..n]);
         assert_eq!(ProfileEnabledReport::read(&h, body).unwrap().channels, 2);
+        // Tables 22, 23, 25; REQ-CI-PROF-006, -011, -012: Sub-ID#2, the Device ID, the Broadcast
+        // MUID, the Profile ID and, for Enabled and Disabled, the count (0 for 0x7E and 0x7F).
+        let src = [0x56, 0x68, 0x48, 0x00];
+        let id = [0x7E, 0x21, 0x00, 0x01, 0x7F];
+        for (d, b, count) in [
+            (DeviceId::Channel(1), 0x01, [3, 0]),
+            (DeviceId::Group, 0x7E, [0, 0]),
+            (DeviceId::FunctionBlock, 0x7F, [0, 0]),
+        ] {
+            for sub in [0x24u8, 0x25, 0x27] {
+                let n = match sub {
+                    0x24 => ProfileEnabledReport {
+                        profile: GM,
+                        channels: 3,
+                    }
+                    .write(d, SRC, Framing::Bare, &mut buf),
+                    0x25 => ProfileDisabledReport {
+                        profile: GM,
+                        channels: 3,
+                    }
+                    .write(d, SRC, Framing::Bare, &mut buf),
+                    _ => {
+                        ProfileRemovedReport { profile: GM }.write(d, SRC, Framing::Bare, &mut buf)
+                    }
+                }
+                .unwrap();
+                let mut want = std::vec![0x7E, b, 0x0D, sub, 0x02];
+                want.extend(src);
+                want.extend([0x7F; 4]);
+                want.extend(id);
+                if sub != 0x27 {
+                    want.extend(count);
+                }
+                assert_eq!(&buf[..n], &want[..], "{sub:#04x} {d:?}");
+                let (h, body) = parse(&buf[..n]);
+                let read = match sub {
+                    0x24 => ProfileEnabledReport::read(&h, body).map(|r| (r.profile, r.channels)),
+                    0x25 => ProfileDisabledReport::read(&h, body).map(|r| (r.profile, r.channels)),
+                    _ => ProfileRemovedReport::read(&h, body).map(|r| (r.profile, 0)),
+                };
+                let channels = if sub == 0x27 { 0 } else { u16::from(count[0]) };
+                assert_eq!(read, Ok((GM, channels)));
+            }
+        }
         let n = ProfileAddedReport { profile: DRAW }
             .write(DeviceId::Group, SRC, Framing::Bare, &mut buf)
             .unwrap();
@@ -1247,6 +1333,15 @@ mod tests {
         let n = r
             .write(DeviceId::Channel(0), SRC, DST, Framing::Bare, &mut buf)
             .unwrap();
+        // Table 27; REQ-CI-PROF-008, REQ-CI-PRFR-017: Profile ID, target 0, length 4 (LSB
+        // first), in use 2 and maximum 200 (0x48 0x01), LSB first.
+        assert_eq!(
+            &buf[3..n],
+            &[
+                0x29, 0x02, 0x56, 0x68, 0x48, 0x00, 0x21, 0x06, 0x15, 0x03, 0x7E, 0x21, 0x00, 0x01,
+                0x7F, 0x00, 0x04, 0x00, 2, 0, 0x48, 0x01
+            ]
+        );
         let (h, body) = parse(&buf[..n]);
         let back = ProfileDetailsReply::read(&h, body).unwrap();
         assert_eq!(
@@ -1257,6 +1352,35 @@ mod tests {
             })
         );
         assert_eq!(ChannelCounts::read(&data[..3]), Err(ParseError::TooShort));
+        // The reader ignores Inquiry Target Data bytes after the fourth.
+        assert_eq!(
+            ChannelCounts::read(&[2, 0, 0x48, 0x01, 0x11, 0x22]),
+            Ok(ChannelCounts {
+                in_use: 2,
+                maximum: 200
+            })
+        );
+        // REQ-CI-PROF-008: shorter than the length needs: rejected; later bytes: ignored.
+        assert_eq!(
+            ProfileDetailsReply::read(&h, &body[..body.len() - 1]),
+            Err(ParseError::TooShort)
+        );
+        let mut long = body.to_vec();
+        long.extend([0x55, 0x66]);
+        assert_eq!(ProfileDetailsReply::read(&h, &long), Ok(back));
+        // REQ-CI-PRFR-018: another target gives its data as raw bytes.
+        let other = ProfileDetailsReply {
+            profile: GM,
+            target: 0x40,
+            data: &[0x01, 0x7F, 0x00],
+        };
+        let n = other
+            .write(DeviceId::Group, SRC, DST, Framing::Bare, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[18..n], &[0x40, 0x03, 0x00, 0x01, 0x7F, 0x00]);
+        let (h, body) = parse(&buf[..n]);
+        let r = ProfileDetailsReply::read(&h, body).unwrap();
+        assert_eq!((r.target, r.data), (0x40, &[0x01, 0x7F, 0x00][..]));
 
         let big = [0x11u8; 500];
         let s = ProfileSpecificData {
@@ -1294,8 +1418,21 @@ mod tests {
                 &mut buf,
             )
             .unwrap();
+        // Table 28; REQ-CI-PROF-013: length 500 in 4 bytes, LSB first (0x74 0x03 0x00 0x00).
+        assert_eq!(
+            &buf[13..22],
+            &[0x7E, 0x21, 0x00, 0x01, 0x7F, 0x74, 0x03, 0x00, 0x00]
+        );
         let (h, body) = parse(&buf[..n]);
-        assert_eq!(ProfileSpecificData::read(&h, body).unwrap().data.len(), 500);
+        let back = ProfileSpecificData::read(&h, body).unwrap();
+        assert_eq!((back.profile, back.data), (GM, &big[..]));
+        assert_eq!(
+            ProfileSpecificData::read(&h, &body[..body.len() - 1]),
+            Err(ParseError::TooShort)
+        );
+        let mut long = body.to_vec();
+        long.extend([0x01, 0x02]);
+        assert_eq!(ProfileSpecificData::read(&h, &long), Ok(back));
     }
 
     fn entry(device_id: DeviceId, group: u8, profile: ProfileId, enabled: bool) -> ProfileEntry {
@@ -1317,11 +1454,59 @@ mod tests {
         assert_eq!(r, [ProfileReport::Added(e), ProfileReport::Enabled(e)]);
         assert!(t.add(e).is_err());
         let r = t.set_enabled(e.address, GM, false, 1).unwrap();
-        assert!(matches!(r, ProfileReport::Disabled(x) if x.channels == 1));
+        let off = ProfileEntry {
+            enabled: false,
+            channels: 1,
+            ..e
+        };
+        assert_eq!(r, ProfileReport::Disabled(off));
         assert!(!t.find(e.address, GM).unwrap().enabled);
+        assert_eq!(t.find(e.address, GM).unwrap().channels, 0);
+        // REQ-CI-PROF-029: Set Profile On that the application cannot do: the entry stays
+        // disabled and the Device sends a Disabled Report.
+        let r = t.set_enabled(e.address, GM, false, 1).unwrap();
+        assert_eq!(r, ProfileReport::Disabled(off));
+        assert!(!t.find(e.address, GM).unwrap().enabled);
+        // REQ-CI-PROF-027, REQ-CI-PRFR-024: Set Profile On that the application does: enabled,
+        // with an Enabled Report and its count.
+        let r = t.set_enabled(e.address, GM, true, 2).unwrap();
+        let on = ProfileEntry {
+            enabled: true,
+            channels: 2,
+            ..e
+        };
+        assert_eq!(r, ProfileReport::Enabled(on));
+        assert_eq!(t.find(e.address, GM), Some(&on));
+        // REQ-CI-PROF-032: Set Profile Off that the application cannot do: still enabled, with an
+        // Enabled Report.
+        let r = t.set_enabled(e.address, GM, true, 2).unwrap();
+        assert_eq!(r, ProfileReport::Enabled(on));
+        assert!(t.find(e.address, GM).unwrap().enabled);
+        // REQ-CI-PROF-022: removing an enabled Profile gives Disabled, then Removed.
         let r: Vec<_> = t.remove(e.address, GM).unwrap().collect();
-        assert_eq!(r.len(), 1);
-        assert!(matches!(r[0], ProfileReport::Removed(_)));
+        assert_eq!(r, [ProfileReport::Disabled(on), ProfileReport::Removed(on)]);
+        assert!(t.find(e.address, GM).is_none());
+        // A disabled Profile gives Removed only.
+        let _ = t.add(entry(DeviceId::Group, 0, DRAW, false)).unwrap();
+        let r: Vec<_> = t
+            .remove(
+                ProfileAddress {
+                    device_id: DeviceId::Group,
+                    group: 0,
+                },
+                DRAW,
+            )
+            .unwrap()
+            .collect();
+        assert_eq!(
+            r,
+            [ProfileReport::Removed(entry(
+                DeviceId::Group,
+                0,
+                DRAW,
+                false
+            ))]
+        );
         let mut full = ProfileTable::<1>::new();
         let _ = full.add(e).unwrap();
         assert_eq!(
@@ -1334,6 +1519,27 @@ mod tests {
             .unwrap();
         assert_eq!(g, 3);
         assert_eq!(&buf[n - 2..n], &[0, 0]);
+        // REQ-CI-PRFR-023: the Device ID of the Profile in Enabled and Disabled Reports.
+        for (d, b) in [
+            (DeviceId::Channel(4), 0x04),
+            (DeviceId::Channel(15), 0x0F),
+            (DeviceId::Group, 0x7E),
+            (DeviceId::FunctionBlock, 0x7F),
+        ] {
+            let e = ProfileEntry {
+                channels: 2,
+                ..entry(d, 1, DRAW, true)
+            };
+            for (r, sub) in [
+                (ProfileReport::Enabled(e), 0x24),
+                (ProfileReport::Disabled(e), 0x25),
+            ] {
+                let (g, n) = r.write(SRC, Framing::Bare, &mut buf).unwrap();
+                assert_eq!((g, buf[1], buf[3]), (1, b, sub));
+                let count = if b < 0x10 { 2 } else { 0 };
+                assert_eq!(&buf[n - 2..n], &[count, 0]);
+            }
+        }
     }
 
     #[test]

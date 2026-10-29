@@ -69,7 +69,17 @@ fn dev(m: u8, seed: &'static [u32]) -> Dev {
 
 /// Delivers `msg` on `group` and collects the event and the replies.
 fn deliver<'m>(d: &mut Dev, group: u8, msg: &'m [u8]) -> (Option<Event<'m>>, Vec<(u8, Vec<u8>)>) {
-    let mut r = d.receive(group, msg, 0, &mut rng(&[0x0123_4567, 0x0234_5678]));
+    deliver_at(d, group, msg, 0)
+}
+
+/// [`deliver`] at the time `now_us`.
+fn deliver_at<'m>(
+    d: &mut Dev,
+    group: u8,
+    msg: &'m [u8],
+    now_us: u64,
+) -> (Option<Event<'m>>, Vec<(u8, Vec<u8>)>) {
+    let mut r = d.receive(group, msg, now_us, &mut rng(&[0x0123_4567, 0x0234_5678]));
     let ev = r.event();
     let mut replies = Vec::new();
     let mut buf = [0u8; 512];
@@ -141,6 +151,23 @@ fn discovery_and_reply() {
         e => panic!("{e:?}"),
     }
     assert_eq!(a.peer(b.muid()).unwrap().max_sysex_size, 512);
+    // REQ-CI-DISC-003: an Inquiry to the discovered Responder has its MUID as Destination.
+    let n = a.endpoint_info_inquiry(b.muid(), &mut buf).unwrap();
+    let h = header(&buf[..n]);
+    assert_eq!(
+        (h.sub_id2, h.source, h.destination),
+        (0x72, a.muid(), b.muid())
+    );
+    // REQ-CI-DISC-017: one connection: Output Path ID 0, the last byte of Discovery.
+    let n = a.discovery(0, 0, &mut buf).unwrap();
+    assert_eq!((n, buf[n - 1]), (30, 0));
+    // REQ-CI-DISC-014: no Function Block: 0x7F in the Reply to Discovery.
+    let mut c = config(0x43);
+    c.function_block = None;
+    let mut d: Dev = CiDevice::new(c, &mut rng(&[0x0444_4444])).unwrap();
+    let (_, r) = deliver(&mut d, 0, &buf[..n]);
+    let r = &r[0].1;
+    assert_eq!((sub(r), &r[r.len() - 2..]), (0x71, &[0u8, 0x7F][..]));
 }
 
 #[test]
@@ -166,6 +193,27 @@ fn discovery_window_three_seconds() {
     assert_eq!(a.poll(3_999_999), None);
     assert_eq!(a.poll(4_000_000), Some(Event::DiscoveryEnded));
     assert_eq!(a.poll(9_000_000), None);
+    // A Reply at t + 2.999999 s is in the window of its Discovery: it is accepted, and the same
+    // reply again in that window is a duplicate (REQ-CI-MUID-015). At t + 3 s the window is
+    // closed: the same reply is a new Discovered event.
+    let mut b = dev(0x42, &[0x0222_2222]);
+    for (late, dup) in [(2_999_999u64, true), (3_000_000, false)] {
+        let mut a = dev(0x41, &[0x0111_1111]);
+        let n = a.discovery(0, 1_000_000, &mut buf).unwrap();
+        let r = deliver(&mut b, 0, &buf[..n]).1[0].1.clone();
+        let (ev, _) = deliver_at(&mut a, 0, &r, 1_000_000 + late);
+        assert!(
+            matches!(ev, Some(Event::Discovered { muid, .. }) if muid == b.muid()),
+            "{late}"
+        );
+        let (ev, inv) = deliver_at(&mut a, 0, &r, 1_000_000 + late);
+        if dup {
+            assert_eq!(ev, Some(Event::PeerInvalidated { muid: b.muid() }));
+            assert_eq!(sub(&inv[0].1), 0x7E);
+        } else {
+            assert!(matches!(ev, Some(Event::Discovered { .. })) && inv.is_empty());
+        }
+    }
 }
 
 #[test]
@@ -416,6 +464,22 @@ fn entry(enabled: bool) -> ProfileEntry {
     }
 }
 
+/// The fields of a Profile report event: MUID, Device ID, Group, kind, Profile ID, count.
+#[cfg(feature = "profiles")]
+fn report_of(ev: Option<Event<'_>>) -> (Muid, DeviceId, u8, ReportKind, ProfileId, u16) {
+    match ev {
+        Some(Event::ProfileReport {
+            muid,
+            device_id,
+            group,
+            kind,
+            profile,
+            channels,
+        }) => (muid, device_id, group, kind, profile, channels),
+        e => panic!("{e:?}"),
+    }
+}
+
 #[cfg(feature = "profiles")]
 #[test]
 fn profile_configuration() {
@@ -434,13 +498,12 @@ fn profile_configuration() {
         (0, 0x26, Muid::BROADCAST)
     );
     let (ev, _) = deliver(&mut a, 0, &buf[..n]);
-    assert!(matches!(
-        ev,
-        Some(Event::ProfileReport {
-            kind: ReportKind::Added,
-            ..
-        })
-    ));
+    // REQ-CI-PRFR-010: the Responder MUID, the Device ID address and the Profile ID.
+    let ch0 = DeviceId::Channel(0);
+    assert_eq!(
+        report_of(ev),
+        (b.muid(), ch0, 0, ReportKind::Added, gm(), 0)
+    );
 
     // REQ-CI-GEN-003: Profile Inquiry before Set Profile On.
     assert_eq!(
@@ -486,19 +549,25 @@ fn profile_configuration() {
     let report = b.set_profile_state(address, gm(), true, 1).unwrap();
     let (_, n) = b.profile_report(&report, &mut buf).unwrap();
     let (ev, _) = deliver(&mut a, 0, &buf[..n]);
-    assert!(matches!(
-        ev,
-        Some(Event::ProfileReport {
-            kind: ReportKind::Enabled,
-            channels: 1,
-            ..
-        })
-    ));
+    // REQ-CI-PRFR-012.
+    assert_eq!(
+        report_of(ev),
+        (b.muid(), ch0, 0, ReportKind::Enabled, gm(), 1)
+    );
     let n = a
         .set_profile_off(b.muid(), DeviceId::Channel(0), gm(), &mut buf)
         .unwrap();
     let (ev, _) = deliver(&mut b, 0, &buf[..n]);
-    assert!(matches!(ev, Some(Event::SetProfile { on: false, .. })));
+    assert_eq!(
+        ev,
+        Some(Event::SetProfile {
+            muid: a.muid(),
+            address,
+            profile: gm(),
+            on: false,
+            channels: 0
+        })
+    );
     // Unknown Profile: NAK 0x04 with the Profile ID in the details.
     let other = ProfileId::Standard {
         bank: 0x22,
@@ -512,33 +581,69 @@ fn profile_configuration() {
     let (_, r) = deliver(&mut b, 0, &buf[..n]);
     let k = nak_of(&r[0].1);
     assert_eq!(
-        (k.status, k.details),
+        (k.status, k.original_sub_id2, k.details),
         (
             NakStatus::ProfileNotSupported,
+            0x22,
             Details::Profile(other.to_bytes())
         )
     );
-    // A local action disables it: Disabled Report (REQ-CI-PROF-028).
+    assert_eq!(r.len(), 1);
+    // REQ-CI-PRFR-027: Set Profile Off for an unknown Profile: NAK 0x04, and no event.
+    let n = a
+        .set_profile_off(b.muid(), DeviceId::Channel(0), other, &mut buf)
+        .unwrap();
+    let (ev, r) = deliver(&mut b, 0, &buf[..n]);
+    assert!(ev.is_none() && r.len() == 1);
+    let k = nak_of(&r[0].1);
+    assert_eq!(
+        (k.status, k.original_sub_id2, k.details),
+        (
+            NakStatus::ProfileNotSupported,
+            0x23,
+            Details::Profile(other.to_bytes())
+        )
+    );
+    assert_eq!(header(&r[0].1).destination, a.muid());
+    // A known Profile on another Channel is not supported there either.
+    let n = a
+        .set_profile_off(b.muid(), DeviceId::Channel(1), gm(), &mut buf)
+        .unwrap();
+    let (_, r) = deliver(&mut b, 0, &buf[..n]);
+    assert_eq!(nak_of(&r[0].1).status, NakStatus::ProfileNotSupported);
+    // A local action disables it: Disabled Report (REQ-CI-PROF-028, REQ-CI-PRFR-013).
     let report = b.set_profile_state(address, gm(), false, 1).unwrap();
     let (_, n) = b.profile_report(&report, &mut buf).unwrap();
     let (ev, _) = deliver(&mut a, 0, &buf[..n]);
-    assert!(matches!(
-        ev,
-        Some(Event::ProfileReport {
-            kind: ReportKind::Disabled,
-            ..
-        })
-    ));
+    assert_eq!(
+        report_of(ev),
+        (b.muid(), ch0, 0, ReportKind::Disabled, gm(), 1)
+    );
     let reports: Vec<_> = b.remove_profile(address, gm()).unwrap().collect();
+    assert_eq!(reports.len(), 1);
     let (_, n) = b.profile_report(&reports[0], &mut buf).unwrap();
     let (ev, _) = deliver(&mut a, 0, &buf[..n]);
-    assert!(matches!(
-        ev,
-        Some(Event::ProfileReport {
-            kind: ReportKind::Removed,
-            ..
-        })
-    ));
+    // REQ-CI-PRFR-011.
+    assert_eq!(
+        report_of(ev),
+        (b.muid(), ch0, 0, ReportKind::Removed, gm(), 0)
+    );
+    // A report on Group 1 to a Group Profile: the Group and the Device ID of the event.
+    let group_entry = ProfileEntry {
+        address: ProfileAddress {
+            device_id: DeviceId::Group,
+            group: 1,
+        },
+        ..entry(true)
+    };
+    let reports: Vec<_> = b.add_profile(group_entry).unwrap().collect();
+    let (g, n) = b.profile_report(&reports[1], &mut buf).unwrap();
+    assert_eq!(g, 1);
+    let (ev, _) = deliver(&mut a, g, &buf[..n]);
+    assert_eq!(
+        report_of(ev),
+        (b.muid(), DeviceId::Group, 1, ReportKind::Enabled, gm(), 0)
+    );
 }
 
 #[cfg(feature = "profiles")]
@@ -599,6 +704,267 @@ fn profile_details() {
     assert_eq!(nak_of(&r[0].1).status, NakStatus::ProfileNotSupported);
 }
 
+#[cfg(feature = "profiles")]
+#[test]
+fn profile_details_targets() {
+    // 7.6, M2-102 2.5; REQ-CI-PRFR-014, REQ-CI-PRFR-020, REQ-CI-PROF-023, REQ-CI-PROF-024.
+    let (mut a, mut b) = discovered();
+    let mut buf = [0u8; 512];
+    let _ = b.add_profile(entry(false)).unwrap().count();
+    let ch0 = DeviceId::Channel(0);
+    // No Profile Details Inquiry: no Reply to Profile Details Inquiry (REQ-CI-PRFR-020).
+    let n = a
+        .profile_inquiry(b.muid(), DeviceId::FunctionBlock, &mut buf)
+        .unwrap();
+    let (_, r) = deliver(&mut b, 0, &buf[..n]);
+    assert!(
+        r.iter().all(|(_, m)| sub(m) == 0x21),
+        "only Replies to Profile Inquiry"
+    );
+    // A target other than 0x00: an event with all fields, and no automatic reply.
+    let n = a
+        .profile_details_inquiry(b.muid(), ch0, gm(), 0x40, &mut buf)
+        .unwrap();
+    let (ev, r) = deliver(&mut b, 0, &buf[..n]);
+    assert!(r.is_empty(), "REQ-CI-PRFR-020: no reply with target 0x00");
+    let address = ProfileAddress {
+        device_id: ch0,
+        group: 0,
+    };
+    assert_eq!(
+        ev,
+        Some(Event::ProfileDetailsInquiry {
+            muid: a.muid(),
+            address,
+            profile: gm(),
+            target: 0x40
+        })
+    );
+    // The application gives the Inquiry Target Data of that target (REQ-CI-PRFR-014), with the
+    // Inquiry Target of the inquiry (REQ-CI-PROF-024).
+    let data = [0x01, 0x02, 0x7F];
+    let reply = zmidi_ci::ProfileDetailsReply {
+        profile: gm(),
+        target: 0x40,
+        data: &data,
+    };
+    let n = b
+        .profile_details_reply(a.muid(), ch0, &reply, &mut buf)
+        .unwrap();
+    let h = header(&buf[..n]);
+    assert_eq!(
+        (h.device_id, h.sub_id2, h.source, h.destination),
+        (ch0, 0x29, b.muid(), a.muid())
+    );
+    assert_eq!(&buf[18..n], &[0x40, 0x03, 0x00, 0x01, 0x02, 0x7F]);
+    match deliver(&mut a, 0, &buf[..n]).0 {
+        Some(Event::ProfileDetailsReply {
+            muid,
+            device_id,
+            reply,
+            notification,
+            ..
+        }) => {
+            assert_eq!((muid, device_id, notification), (b.muid(), ch0, false));
+            assert_eq!(
+                (reply.profile, reply.target, reply.data),
+                (gm(), 0x40, &data[..])
+            );
+        }
+        e => panic!("{e:?}"),
+    }
+    // A target that the application does not support: it sends NAK 0x04 with the Profile ID.
+    let n = a
+        .profile_details_inquiry(b.muid(), ch0, gm(), 0x41, &mut buf)
+        .unwrap();
+    let (ev, r) = deliver(&mut b, 0, &buf[..n]);
+    assert!(matches!(ev, Some(Event::ProfileDetailsInquiry { target: 0x41, .. })) && r.is_empty());
+    let k = Nak {
+        original_sub_id2: 0x28,
+        status: NakStatus::ProfileNotSupported,
+        details: Details::Profile(gm().to_bytes()),
+        text: &[],
+    };
+    let n = b.nak(a.muid(), ch0, &k, "", &mut buf).unwrap();
+    let got = nak_of(&buf[..n]);
+    assert_eq!(
+        (got.status, got.original_sub_id2, got.details),
+        (k.status, 0x28, k.details)
+    );
+    // Target 0x00, disabled and enabled (REQ-CI-PROF-023): the reply has target 0x00 and the
+    // counts.
+    for (on, in_use) in [(false, 0), (true, 2)] {
+        if on {
+            let _ = b.set_profile_state(address, gm(), true, 2).unwrap();
+        }
+        let n = a
+            .profile_details_inquiry(b.muid(), ch0, gm(), 0x00, &mut buf)
+            .unwrap();
+        let (ev, r) = deliver(&mut b, 0, &buf[..n]);
+        assert!(ev.is_none());
+        assert_eq!(r.len(), 1);
+        let m = &r[0].1;
+        assert_eq!(
+            (sub(m), header(m).device_id, header(m).destination),
+            (0x29, ch0, a.muid())
+        );
+        // Profile ID (Level of the table entry), target 0x00, length 4, in use, maximum 4.
+        assert_eq!(
+            &m[13..],
+            &[0x7E, 0x21, 0x00, 0x01, 0x01, 0x00, 0x04, 0x00, in_use, 0x00, 0x04, 0x00]
+        );
+    }
+}
+
+#[cfg(feature = "profiles")]
+#[test]
+fn multi_channel_profile_uses_the_manager_channel() {
+    // REQ-CI-PRFR-022: a Multi-Channel Profile on Manager Channel 3 (of 4 Channels): every
+    // message about it has Device ID 0x03.
+    let (mut a, mut b) = discovered();
+    let mut buf = [0u8; 512];
+    let mpe = ProfileId::Standard {
+        bank: 0x31,
+        number: 0x01,
+        version: 0x01,
+        level: ProfileLevel::Minimum,
+    };
+    let manager = ProfileAddress {
+        device_id: DeviceId::Channel(3),
+        group: 0,
+    };
+    let _ = b
+        .add_profile(ProfileEntry {
+            address: manager,
+            profile: mpe,
+            enabled: false,
+            channels: 0,
+            max_channels: 16,
+        })
+        .unwrap()
+        .count();
+    let n = a
+        .profile_inquiry(b.muid(), DeviceId::FunctionBlock, &mut buf)
+        .unwrap();
+    let (_, r) = deliver(&mut b, 0, &buf[..n]);
+    assert_eq!(r.len(), 2);
+    assert_eq!(header(&r[0].1).device_id, DeviceId::Channel(3));
+    // The initiator to the desired Manager Channel, with the count.
+    let n = a
+        .set_profile_on(b.muid(), DeviceId::Channel(3), mpe, 4, Some(16), &mut buf)
+        .unwrap();
+    assert_eq!(
+        (buf[1], buf[3], &buf[n - 2..n]),
+        (0x03, 0x22, &[4u8, 0][..])
+    );
+    let (ev, r) = deliver(&mut b, 0, &buf[..n]);
+    assert!(r.is_empty());
+    assert_eq!(
+        ev,
+        Some(Event::SetProfile {
+            muid: a.muid(),
+            address: manager,
+            // Set Profile On carries Level 0x7F (REQ-CI-PRFR-002).
+            profile: ProfileId::Standard {
+                bank: 0x31,
+                number: 0x01,
+                version: 0x01,
+                level: ProfileLevel::Highest,
+            },
+            on: true,
+            channels: 4
+        })
+    );
+    // The responder to the requested Manager Channel.
+    let report = b.set_profile_state(manager, mpe, true, 4).unwrap();
+    let (_, n) = b.profile_report(&report, &mut buf).unwrap();
+    assert_eq!(
+        (buf[1], buf[3], &buf[n - 2..n]),
+        (0x03, 0x24, &[4u8, 0][..])
+    );
+    let (ev, _) = deliver(&mut a, 0, &buf[..n]);
+    assert_eq!(
+        report_of(ev),
+        (
+            b.muid(),
+            DeviceId::Channel(3),
+            0,
+            ReportKind::Enabled,
+            mpe,
+            4
+        )
+    );
+    let n = a
+        .profile_details_inquiry(b.muid(), DeviceId::Channel(3), mpe, 0, &mut buf)
+        .unwrap();
+    let (_, r) = deliver(&mut b, 0, &buf[..n]);
+    let m = &r[0].1;
+    assert_eq!((m[1], m[3]), (0x03, 0x29));
+    assert_eq!(&m[m.len() - 4..], &[4, 0, 16, 0]);
+    let n = a
+        .set_profile_off(b.muid(), DeviceId::Channel(3), mpe, &mut buf)
+        .unwrap();
+    assert_eq!(buf[1], 0x03);
+    let (ev, _) = deliver(&mut b, 0, &buf[..n]);
+    assert!(matches!(ev, Some(Event::SetProfile { address, on: false, .. }) if address == manager));
+}
+
+#[cfg(feature = "profiles")]
+#[test]
+fn profile_inquiry_to_each_address() {
+    // REQ-CI-PRFR-006: a Profile Inquiry to a Channel, to the Group or to the Function Block gets
+    // a Reply to Profile Inquiry with that Device ID.
+    let (mut a, mut b) = discovered();
+    let mut buf = [0u8; 512];
+    let group = ProfileEntry {
+        address: ProfileAddress {
+            device_id: DeviceId::Group,
+            group: 0,
+        },
+        ..entry(true)
+    };
+    let _ = b.add_profile(group).unwrap().count();
+    let _ = b.add_profile(entry(false)).unwrap().count();
+    let gm_bytes = gm().to_bytes();
+    for (d, want) in [
+        (DeviceId::Channel(0), [0u8, 0, 1, 0]),
+        (DeviceId::Group, [1, 0, 0, 0]),
+        (DeviceId::Channel(7), [0, 0, 0, 0]),
+    ] {
+        let n = a.profile_inquiry(b.muid(), d, &mut buf).unwrap();
+        let (ev, r) = deliver(&mut b, 0, &buf[..n]);
+        assert!(ev.is_none());
+        assert_eq!(r.len(), 1, "{d:?}");
+        let m = &r[0].1;
+        let h = header(m);
+        assert_eq!((h.device_id, h.sub_id2, h.destination), (d, 0x21, a.muid()));
+        // Counts and Profile IDs: enabled list, then disabled list.
+        let mut body = vec![want[0], want[1]];
+        if want[0] == 1 {
+            body.extend(gm_bytes);
+        }
+        body.extend([want[2], want[3]]);
+        if want[2] == 1 {
+            body.extend(gm_bytes);
+        }
+        assert_eq!(&m[13..], &body[..], "{d:?}");
+    }
+    // The Function Block: the Channel reply, the Group reply, then the 0x7F reply.
+    let n = a
+        .profile_inquiry(b.muid(), DeviceId::FunctionBlock, &mut buf)
+        .unwrap();
+    let (_, r) = deliver(&mut b, 0, &buf[..n]);
+    let ids: Vec<_> = r.iter().map(|(_, m)| header(m).device_id).collect();
+    assert_eq!(
+        ids,
+        [
+            DeviceId::Channel(0),
+            DeviceId::Group,
+            DeviceId::FunctionBlock
+        ]
+    );
+}
+
 #[cfg(feature = "property-exchange")]
 #[test]
 fn property_exchange_framing() {
@@ -611,6 +977,10 @@ fn property_exchange_framing() {
         Some(DeviceError::NotInquired)
     );
     let n = a.pe_capabilities_inquiry(b.muid(), &mut buf).unwrap();
+    // REQ-CI-PEF-006: the Device writes PE version 0x00 0x00 in its Inquiry and its Reply.
+    let mut want = head(0x7F, 0x30, a.muid(), b.muid());
+    want.extend([2, 0, 0]);
+    assert_eq!(&buf[..n], &want[..]);
     let (_, r) = deliver(&mut b, 0, &buf[..n]);
     assert_eq!(
         &r[0].1[13..16],
@@ -750,11 +1120,28 @@ fn process_inquiry() {
     let (mut a, mut b) = discovered();
     let mut buf = [0u8; 512];
     let n = a.pi_capabilities_inquiry(b.muid(), &mut buf).unwrap();
-    let (_, r) = deliver(&mut b, 0, &buf[..n]);
+    let inquiry = buf[..n].to_vec();
+    let (_, r) = deliver(&mut b, 0, &inquiry);
+    let mut want = head(0x7F, 0x41, b.muid(), a.muid());
+    want.push(0x01);
+    assert_eq!(r[0].1, want, "Table 41: D0 MIDI Message Report");
     let (ev, _) = deliver(&mut a, 0, &r[0].1);
     assert!(
-        matches!(ev, Some(Event::PiCapabilities { capabilities, .. }) if capabilities.midi_message_report)
+        matches!(ev, Some(Event::PiCapabilities { muid, capabilities }) if muid == b.muid() && capabilities.midi_message_report)
     );
+    // REQ-CI-PI-001: any other Device ID gets NAK 0x03, and no reply.
+    for d in [0x7Eu8, 0x00, 0x0F] {
+        let mut m = inquiry.clone();
+        m[1] = d;
+        let (ev, r) = deliver(&mut b, 0, &m);
+        assert!(ev.is_none() && r.len() == 1);
+        let k = nak_of(&r[0].1);
+        assert_eq!(
+            (k.status, k.original_sub_id2),
+            (NakStatus::NotInUse, 0x40),
+            "{d:#04x}"
+        );
+    }
 
     let q = MessageReportInquiry {
         data_control: DataControl::Full,
@@ -1181,18 +1568,24 @@ fn disabled_report_answers_set_profile_on_for_another_profile() {
     let Some(Event::SetProfile { address, .. }) = deliver(&mut b, 0, &buf[..n]).0 else {
         panic!()
     };
+    // The application cannot enable both: it disables A, then enables B; the Device gives the
+    // two reports in that order and keeps the state.
+    let mut seen = Vec::new();
     for (p, on) in [(gm(), false), (other, true)] {
         let r = b.set_profile_state(address, p, on, 1).unwrap();
         let (_, n) = b.profile_report(&r, &mut buf).unwrap();
-        let kind = if on {
-            ReportKind::Enabled
-        } else {
-            ReportKind::Disabled
-        };
-        assert!(
-            matches!(deliver(&mut a, 0, &buf[..n]).0, Some(Event::ProfileReport { kind: k, .. }) if k == kind)
-        );
+        seen.push(report_of(deliver(&mut a, 0, &buf[..n]).0));
     }
+    let ch0 = DeviceId::Channel(0);
+    assert_eq!(
+        seen,
+        [
+            (b.muid(), ch0, 0, ReportKind::Disabled, gm(), 1),
+            (b.muid(), ch0, 0, ReportKind::Enabled, other, 1),
+        ]
+    );
+    assert!(!b.profiles().find(address, gm()).unwrap().enabled);
+    assert!(b.profiles().find(address, other).unwrap().enabled);
 }
 
 #[test]
@@ -1307,6 +1700,65 @@ fn local_profile_calls_need_the_profile_category_of_the_configuration() {
         d.profile_report(&report, &mut buf),
         Err(DeviceError::NotSupported)
     );
+    let reply = zmidi_ci::ProfileDetailsReply {
+        profile: gm(),
+        target: 0,
+        data: &[0, 0, 1, 0],
+    };
+    assert_eq!(
+        d.profile_details_reply(
+            Muid::new(5).unwrap(),
+            DeviceId::Channel(0),
+            &reply,
+            &mut buf
+        ),
+        Err(DeviceError::NotSupported)
+    );
+    assert!(d.profiles().entries().next().is_none());
+    // Its Profile messages get NAK 0x01 and nothing else.
+    let mut a = dev(0x41, &[0x0111_1111]);
+    let n = a.discovery(0, 0, &mut buf).unwrap();
+    let r = deliver(&mut d, 0, &buf[..n]).1[0].1.clone();
+    assert_eq!(buf_categories(&r) & 0x04, 0, "no Profile bit");
+    let _ = deliver(&mut a, 0, &r);
+    let n = a
+        .profile_inquiry(d.muid(), DeviceId::FunctionBlock, &mut buf)
+        .unwrap();
+    let msgs = [
+        buf[..n].to_vec(),
+        {
+            let n = a
+                .set_profile_on(d.muid(), DeviceId::Channel(0), gm(), 1, None, &mut buf)
+                .unwrap();
+            buf[..n].to_vec()
+        },
+        {
+            let n = a
+                .profile_details_inquiry(d.muid(), DeviceId::Channel(0), gm(), 0, &mut buf)
+                .unwrap();
+            buf[..n].to_vec()
+        },
+    ];
+    for m in &msgs {
+        let (ev, r) = deliver(&mut d, 0, m);
+        assert!(ev.is_none());
+        assert_eq!(r.len(), 1, "{:#04x}", m[3]);
+        let k = nak_of(&r[0].1);
+        assert_eq!(
+            (k.status, k.original_sub_id2),
+            (NakStatus::NotSupported, m[3])
+        );
+    }
+}
+
+/// Capability Inquiry Category Supported byte of a Reply to Discovery (Table 8).
+#[cfg_attr(not(feature = "full"), allow(dead_code))]
+fn buf_categories(reply: &[u8]) -> u8 {
+    let (h, body) = Header::parse(reply).unwrap();
+    zmidi_ci::management::DiscoveryReply::read(&h, body)
+        .unwrap()
+        .categories
+        .to_byte()
 }
 
 #[test]
@@ -1351,4 +1803,602 @@ fn calls_of_categories_that_are_off_give_not_supported() {
     if !pi {
         assert!(!a.report_open(p));
     }
+}
+
+/// `a` sends Inquiry: PE Capabilities to `b` and reads the reply.
+#[cfg(feature = "property-exchange")]
+fn pe_inquire(a: &mut Dev, b: &mut Dev) {
+    let mut buf = [0u8; 64];
+    let n = a.pe_capabilities_inquiry(b.muid(), &mut buf).unwrap();
+    let r = deliver(b, 0, &buf[..n]).1[0].1.clone();
+    let (ev, _) = deliver(a, 0, &r);
+    assert!(matches!(ev, Some(Event::PeCapabilities { .. })));
+}
+
+/// The 13 header bytes of a message from `src` to `dst` (Table 5).
+#[cfg_attr(not(feature = "full"), allow(dead_code))]
+fn head(device_id: u8, sub_id2: u8, src: Muid, dst: Muid) -> Vec<u8> {
+    let mut v = vec![0x7E, device_id, 0x0D, sub_id2, 0x02];
+    v.extend(src.to_bytes());
+    v.extend(dst.to_bytes());
+    v
+}
+
+#[cfg(feature = "property-exchange")]
+#[test]
+fn set_and_subscription_replies() {
+    // 8.9 to 8.12, Tables 35 to 38; REQ-CI-PEF-037, REQ-CI-PEF-041: the crate frames the reply,
+    // the application gives the Header Data and Property Data.
+    let (mut a, mut b) = discovered();
+    let mut buf = [0u8; 512];
+    pe_inquire(&mut a, &mut b);
+    let status = br#"{"status":200}"#;
+    for (inquiry, reply, sub) in [
+        (PeKind::SetInquiry, PeKind::SetReply, 0x37u8),
+        (PeKind::Subscription, PeKind::SubscriptionReply, 0x39),
+    ] {
+        let header_json = br#"{"resource":"X-Mode"}"#;
+        let (id, mut w) = a
+            .pe_request(b.muid(), inquiry, header_json, Some(3), None)
+            .unwrap();
+        let n = w.write_next(b"abc", &mut buf).unwrap();
+        let (ev, r) = deliver(&mut b, 0, &buf[..n]);
+        assert!(r.is_empty(), "the reply is the application's");
+        let chunk = zmidi_ci::PeChunk {
+            request_id: id,
+            header: header_json,
+            total: 1,
+            number: 1,
+            data: b"abc",
+        };
+        assert_eq!(
+            ev,
+            Some(Event::PeChunk {
+                muid: a.muid(),
+                kind: inquiry,
+                chunk
+            })
+        );
+        let mut w = b
+            .pe_reply(a.muid(), reply, id, status, Some(0), None)
+            .unwrap();
+        let n = w.write_next(&[], &mut buf).unwrap();
+        let mut want = head(0x7F, sub, b.muid(), a.muid());
+        want.extend([id, 14, 0]);
+        want.extend_from_slice(status);
+        want.extend([1, 0, 1, 0, 0, 0]);
+        assert_eq!(&buf[..n], &want[..]);
+        let (ev, r) = deliver(&mut a, 0, &buf[..n]);
+        assert!(r.is_empty());
+        assert_eq!(
+            ev,
+            Some(Event::PeChunk {
+                muid: b.muid(),
+                kind: reply,
+                chunk: zmidi_ci::PeChunk {
+                    request_id: id,
+                    header: status,
+                    total: 1,
+                    number: 1,
+                    data: &[],
+                }
+            })
+        );
+        b.pe_end(a.muid(), id, Direction::Responder);
+        a.pe_end(b.muid(), id, Direction::Initiator);
+    }
+    // A Reply to Set Property Data has no Property Data (Table 36).
+    let mut w = b
+        .pe_reply(a.muid(), PeKind::SetReply, 1, status, Some(1), None)
+        .unwrap();
+    assert_eq!(
+        w.write_next(b"x", &mut buf).err(),
+        Some(zmidi_ci::WriteError::InvalidValue)
+    );
+}
+
+#[cfg(feature = "property-exchange")]
+#[test]
+fn interleaved_chunks_of_two_peers() {
+    // 8.4; REQ-CI-PEF-028: two Set inquiries with the same Request ID from two peers, their
+    // Chunks interleaved. Each event has the Source MUID and the Request ID of its message, and the
+    // Device opens both Requests.
+    let (mut a, mut b) = discovered();
+    let mut c = dev(0x43, &[0x0333_3333]);
+    let mut buf = [0u8; 512];
+    let n = c.discovery(0, 0, &mut buf).unwrap();
+    let r = deliver(&mut b, 0, &buf[..n]).1[0].1.clone();
+    let _ = deliver(&mut c, 0, &r);
+    pe_inquire(&mut a, &mut b);
+    pe_inquire(&mut c, &mut b);
+    // Chunk size 30: 6 bytes in Chunk 1 (with "{}"), 4 bytes in Chunk 2.
+    let data_a = [1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+    let data_c = [11u8, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    let (ia, mut wa) = a
+        .pe_request(b.muid(), PeKind::SetInquiry, b"{}", Some(10), Some(30))
+        .unwrap();
+    let (ic, mut wc) = c
+        .pe_request(b.muid(), PeKind::SetInquiry, b"{}", Some(10), Some(30))
+        .unwrap();
+    assert_eq!(ia, ic, "the same Request ID between two pairs of MUIDs");
+    let mut msgs = Vec::new();
+    for (from_a, at) in [(true, 0..6), (false, 0..6), (true, 6..10), (false, 6..10)] {
+        let n = if from_a {
+            wa.write_next(&data_a[at], &mut buf)
+        } else {
+            wc.write_next(&data_c[at], &mut buf)
+        }
+        .unwrap();
+        msgs.push(buf[..n].to_vec());
+    }
+    let mut got = Vec::new();
+    for m in &msgs {
+        let (ev, r) = deliver(&mut b, 0, m);
+        assert!(r.is_empty(), "no NAK");
+        let Some(Event::PeChunk {
+            muid,
+            kind: PeKind::SetInquiry,
+            chunk,
+        }) = ev
+        else {
+            panic!("{ev:?}")
+        };
+        got.push((
+            muid,
+            chunk.request_id,
+            chunk.total,
+            chunk.number,
+            chunk.data.to_vec(),
+        ));
+    }
+    assert_eq!(
+        got,
+        [
+            (a.muid(), ia, 2, 1, data_a[..6].to_vec()),
+            (c.muid(), ia, 2, 1, data_c[..6].to_vec()),
+            (a.muid(), ia, 2, 2, data_a[6..].to_vec()),
+            (c.muid(), ia, 2, 2, data_c[6..].to_vec()),
+        ]
+    );
+}
+
+#[cfg(feature = "property-exchange")]
+#[test]
+fn responder_keeps_pe_capabilities_and_sends_subscriptions() {
+    // REQ-CI-PEF-044, REQ-CI-PEF-045 with the Initiator role on: B gets the PE Capabilities of A
+    // from the Inquiry of A, keeps them until A's MUID is invalidated, and sends A Subscription
+    // messages.
+    let (mut a, mut b) = discovered();
+    let mut buf = [0u8; 512];
+    let sub_header = br#"{"command":"full","subscribeId":"1"}"#;
+    assert_eq!(
+        b.pe_request(a.muid(), PeKind::Subscription, sub_header, Some(1), None)
+            .err(),
+        Some(DeviceError::NotInquired)
+    );
+    let caps = zmidi_ci::PeCapabilities {
+        simultaneous: 3,
+        major: Some(1),
+        minor: Some(2),
+    };
+    let n = caps
+        .write_inquiry(a.muid(), b.muid(), Framing::Bare, &mut buf)
+        .unwrap();
+    let (ev, r) = deliver(&mut b, 0, &buf[..n]);
+    assert!(ev.is_none());
+    let mut want = head(0x7F, 0x31, b.muid(), a.muid());
+    want.extend([2, 0, 0]);
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].1, want, "the Reply with B's own values");
+    assert_eq!(b.peer(a.muid()).unwrap().pe_capabilities, Some(caps));
+    // Kept over a new Discovery of A.
+    let n = a.discovery(0, 0, &mut buf).unwrap();
+    let _ = deliver(&mut b, 0, &buf[..n]);
+    assert_eq!(b.peer(a.muid()).unwrap().pe_capabilities, Some(caps));
+    // B, the Responder, sends a Subscription message to A.
+    let (id, mut w) = b
+        .pe_request(a.muid(), PeKind::Subscription, sub_header, Some(1), None)
+        .unwrap();
+    let n = w.write_next(b"x", &mut buf).unwrap();
+    let h = header(&buf[..n]);
+    assert_eq!(
+        (h.sub_id2, h.source, h.destination),
+        (0x38, b.muid(), a.muid())
+    );
+    let (ev, _) = deliver(&mut a, 0, &buf[..n]);
+    assert!(matches!(
+        ev,
+        Some(Event::PeChunk { muid, kind: PeKind::Subscription, chunk })
+            if muid == b.muid() && chunk.request_id == id && chunk.data == b"x"
+    ));
+    // Until the MUID of A is invalidated.
+    let old = a.muid();
+    let n = a.invalidate(&mut rng(&[0x0666_6666]), &mut buf).unwrap();
+    let _ = deliver(&mut b, 0, &buf[..n]);
+    assert!(b.peer(old).is_none());
+    let n = a.discovery(0, 0, &mut buf).unwrap();
+    let _ = deliver(&mut b, 0, &buf[..n]);
+    assert_eq!(b.peer(a.muid()).unwrap().pe_capabilities, None);
+    assert_eq!(
+        b.pe_request(a.muid(), PeKind::Subscription, sub_header, Some(1), None)
+            .err(),
+        Some(DeviceError::NotInquired)
+    );
+}
+
+#[cfg(all(feature = "property-exchange", feature = "process-inquiry"))]
+#[test]
+fn invalidate_ends_the_transactions_of_the_peer() {
+    // 5.9; REQ-CI-INV-006: an Invalidate MUID of a peer ends its PE Requests (inquiry and reply)
+    // and its MIDI Message Report.
+    let (mut a, mut b) = discovered();
+    let mut buf = [0u8; 512];
+    pe_inquire(&mut a, &mut b);
+    pe_inquire(&mut b, &mut a);
+    // B's two Request slots: one Request of B (inquiry), one of A (B replies).
+    let _ = b
+        .pe_request(a.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+        .unwrap();
+    let (_, mut w) = a
+        .pe_request(b.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+        .unwrap();
+    let n = w.write_next(&[], &mut buf).unwrap();
+    let (ev, r) = deliver(&mut b, 0, &buf[..n]);
+    assert!(matches!(ev, Some(Event::PeChunk { .. })) && r.is_empty());
+    assert_eq!(
+        b.pe_request(a.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+            .err(),
+        Some(DeviceError::Busy)
+    );
+    // Full: one more inquiry of A gets NAK 0x40 with its Request ID.
+    let (id2, mut w) = a
+        .pe_request(b.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+        .unwrap();
+    let n = w.write_next(&[], &mut buf).unwrap();
+    let (_, r) = deliver(&mut b, 0, &buf[..n]);
+    let k = nak_of(&r[0].1);
+    assert_eq!(
+        (k.status, k.details),
+        (
+            NakStatus::Error,
+            Details::PropertyExchange {
+                request_id: id2,
+                chunk: 1
+            }
+        )
+    );
+    let q = MessageReportInquiry {
+        data_control: DataControl::Full,
+        system: Default::default(),
+        channel: ChannelBits {
+            pitch_bend: true,
+            ..Default::default()
+        },
+        note: Default::default(),
+    };
+    b.message_report_inquiry(a.muid(), DeviceId::Group, &q, &mut buf)
+        .unwrap();
+    assert!(b.report_open(a.muid()));
+    let old_a = a.muid();
+    let n = a.invalidate(&mut rng(&[0x0666_6666]), &mut buf).unwrap();
+    let (ev, r) = deliver(&mut b, 0, &buf[..n]);
+    assert_eq!(ev, Some(Event::PeerInvalidated { muid: old_a }));
+    assert!(r.is_empty());
+    assert!(!b.report_open(old_a));
+    // A with its new MUID: both slots are free again.
+    let n = a.discovery(0, 0, &mut buf).unwrap();
+    let r = deliver(&mut b, 0, &buf[..n]).1[0].1.clone();
+    let _ = deliver(&mut a, 0, &r);
+    pe_inquire(&mut b, &mut a);
+    for _ in 0..2 {
+        assert!(b
+            .pe_request(a.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+            .is_ok());
+    }
+}
+
+#[cfg(all(feature = "property-exchange", feature = "process-inquiry"))]
+#[test]
+fn invalidate_of_the_local_muid_ends_its_transactions() {
+    // 5.9; REQ-CI-INV-005: an Invalidate MUID with B's MUID as Target ends B's PE Requests and
+    // its MIDI Message Report, and B takes a new MUID from the caller's random number.
+    let (mut a, mut b) = discovered();
+    let mut buf = [0u8; 512];
+    pe_inquire(&mut a, &mut b);
+    pe_inquire(&mut b, &mut a);
+    let _ = b
+        .pe_request(a.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+        .unwrap();
+    let (_, mut w) = a
+        .pe_request(b.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+        .unwrap();
+    let n = w.write_next(&[], &mut buf).unwrap();
+    let _ = deliver(&mut b, 0, &buf[..n]);
+    assert_eq!(
+        b.pe_request(a.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+            .err(),
+        Some(DeviceError::Busy)
+    );
+    let q = MessageReportInquiry {
+        data_control: DataControl::Full,
+        system: Default::default(),
+        channel: ChannelBits {
+            pitch_bend: true,
+            ..Default::default()
+        },
+        note: Default::default(),
+    };
+    b.message_report_inquiry(a.muid(), DeviceId::Group, &q, &mut buf)
+        .unwrap();
+    let old_b = b.muid();
+    let n = zmidi_ci::InvalidateMuid { target: old_b }
+        .write(a.muid(), Framing::Bare, &mut buf)
+        .unwrap();
+    let msg = buf[..n].to_vec();
+    let mut r = b.receive(0, &msg, 0, &mut rng(&[0x0BBB_BBBB]));
+    assert_eq!(
+        r.event(),
+        Some(Event::MuidChanged {
+            old: old_b,
+            new: Muid::new(0x0BBB_BBBB).unwrap()
+        })
+    );
+    assert!(r.write_next(&mut buf).is_none());
+    assert_eq!(b.muid().value(), 0x0BBB_BBBB);
+    assert!(!b.report_open(a.muid()));
+    // The PE Capabilities are inquired again (REQ-CI-INV-007), then both slots are free.
+    assert_eq!(
+        b.pe_request(a.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+            .err(),
+        Some(DeviceError::NotInquired)
+    );
+    pe_inquire(&mut b, &mut a);
+    for _ in 0..2 {
+        assert!(b
+            .pe_request(a.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+            .is_ok());
+    }
+}
+
+#[cfg(feature = "property-exchange")]
+#[test]
+fn receives_128_and_512_byte_messages() {
+    // REQ-CI-LEN-001, REQ-CI-LEN-002: messages of 128 and 512 bytes, collected from UMP SysEx7
+    // packets in a 512-byte buffer, reach the Device whole.
+    let (a, mut b) = discovered();
+    let g = Group::new(0).unwrap();
+    for size in [128usize, 512] {
+        let data = vec![0x33u8; size - 13 - 9 - 2];
+        let c = zmidi_ci::PeChunk {
+            request_id: 1,
+            header: b"{}",
+            total: 1,
+            number: 1,
+            data: &data,
+        };
+        let mut buf = [0u8; 512];
+        let n = c
+            .write(
+                PeKind::GetReply,
+                a.muid(),
+                b.muid(),
+                Framing::Bare,
+                &mut buf,
+            )
+            .unwrap();
+        assert_eq!(n, size);
+        let mut rx = SysEx7Reassembler::<512>::new(g);
+        let mut done = None;
+        for p in SysEx7Packets::try_new(g, &buf[..n]).unwrap() {
+            let mut words = [0u32; 2];
+            p.to_words(&mut words).unwrap();
+            if let Some(SysEx7Event::Complete(m)) = rx.push(&words) {
+                done = Some(m.to_vec());
+            }
+        }
+        let msg = done.unwrap();
+        assert_eq!(msg.len(), size);
+        let (ev, r) = deliver(&mut b, 0, &msg);
+        assert!(r.is_empty());
+        match ev {
+            Some(Event::PeChunk {
+                muid,
+                kind: PeKind::GetReply,
+                chunk,
+            }) => assert_eq!((muid, chunk.data), (a.muid(), &data[..])),
+            e => panic!("{size}: {e:?}"),
+        }
+    }
+}
+
+#[test]
+fn ack_and_nak_fit_the_peer_size() {
+    // REQ-CI-ACK-005, REQ-CI-NAK-005: the size that the peer reported in Discovery, or 128.
+    let mut a = dev(0x41, &[0x0111_1111]);
+    let mut c = config(0x46);
+    c.categories = Categories::default();
+    c.max_sysex_size = 200;
+    let mut small: Dev = CiDevice::new(c, &mut rng(&[0x0555_5555])).unwrap();
+    let mut buf = [0u8; 512];
+    let n = small.discovery(0, 0, &mut buf).unwrap();
+    let _ = deliver(&mut a, 0, &buf[..n]);
+    assert_eq!(a.peer(small.muid()).unwrap().max_sysex_size, 200);
+    let ack = zmidi_ci::Ack {
+        original_sub_id2: 0x34,
+        status: AckStatus::Ack,
+        details: Details::Reserved,
+        text: &[],
+    };
+    let k = Nak {
+        original_sub_id2: 0x34,
+        status: NakStatus::Nak,
+        details: Details::Reserved,
+        text: &[],
+    };
+    let long = "x".repeat(300);
+    let fb = DeviceId::FunctionBlock;
+    let unknown = Muid::new(5).unwrap();
+    for (peer, size) in [(small.muid(), 200), (unknown, 128)] {
+        let n = a.ack(peer, fb, &ack, &long, &mut buf).unwrap();
+        assert_eq!(n, size);
+        let n = a.nak(peer, fb, &k, &long, &mut buf).unwrap();
+        assert_eq!(n, size);
+        let got = nak_of(&buf[..n]);
+        assert_eq!(got.text.len(), size - 23);
+        // Shortened at a character boundary: whole 6-byte escapes.
+        let n = a.nak(peer, fb, &k, &"é".repeat(40), &mut buf).unwrap();
+        assert_eq!(n, 23 + (size - 23) / 6 * 6);
+    }
+    // A text that fits is not shortened.
+    let n = a.ack(small.muid(), fb, &ack, "ok", &mut buf).unwrap();
+    assert_eq!(n, 25);
+}
+
+/// Checks the Destination MUID of a message that a Device wrote (REQ-CI-MUID-010): the Broadcast
+/// MUID only in Discovery, Invalidate MUID and the four Profile reports, else `peer`.
+#[cfg(feature = "full")]
+fn check_destination(msg: &[u8], peer: Muid) {
+    let h = header(msg);
+    if matches!(h.sub_id2, 0x70 | 0x7E | 0x24..=0x27) {
+        assert_eq!(h.destination, Muid::BROADCAST, "{:#04x}", h.sub_id2);
+    } else {
+        assert_eq!(h.destination, peer, "{:#04x}", h.sub_id2);
+    }
+}
+
+#[cfg(feature = "full")]
+#[test]
+fn broadcast_destination_only_where_allowed() {
+    // REQ-CI-MUID-010: each message type that a Device writes, with its Destination MUID.
+    let mut a = dev(0x41, &[0x0111_1111]);
+    let mut b = dev(0x42, &[0x0222_2222]);
+    let mut buf = [0u8; 512];
+    let mut sent = Vec::new();
+    // Each message from A goes to B (and each reply of B to A).
+    macro_rules! a_to_b {
+        ($n:expr) => {{
+            let n = $n;
+            let m = buf[..n].to_vec();
+            check_destination(&m, b.muid());
+            sent.push(m[3]);
+            let (ev, r) = deliver(&mut b, 0, &m);
+            for (_, x) in &r {
+                check_destination(x, a.muid());
+                sent.push(x[3]);
+                let _ = deliver(&mut a, 0, x);
+            }
+            ev.map(|e| format!("{e:?}"))
+        }};
+    }
+    macro_rules! b_to_a {
+        ($n:expr) => {{
+            let n = $n;
+            let m = buf[..n].to_vec();
+            check_destination(&m, a.muid());
+            sent.push(m[3]);
+            let _ = deliver(&mut a, 0, &m);
+        }};
+    }
+    a_to_b!(a.discovery(0, 0, &mut buf).unwrap());
+    a_to_b!(a.endpoint_info_inquiry(b.muid(), &mut buf).unwrap());
+    let reports: Vec<_> = b.add_profile(entry(false)).unwrap().collect();
+    b_to_a!(b.profile_report(&reports[0], &mut buf).unwrap().1);
+    a_to_b!(a
+        .profile_inquiry(b.muid(), DeviceId::FunctionBlock, &mut buf)
+        .unwrap());
+    a_to_b!(a
+        .set_profile_on(b.muid(), DeviceId::Channel(0), gm(), 1, None, &mut buf)
+        .unwrap());
+    let address = entry(false).address;
+    let r = b.set_profile_state(address, gm(), true, 1).unwrap();
+    b_to_a!(b.profile_report(&r, &mut buf).unwrap().1);
+    a_to_b!(a
+        .set_profile_off(b.muid(), DeviceId::Channel(0), gm(), &mut buf)
+        .unwrap());
+    let r = b.set_profile_state(address, gm(), false, 1).unwrap();
+    b_to_a!(b.profile_report(&r, &mut buf).unwrap().1);
+    a_to_b!(a
+        .profile_details_inquiry(b.muid(), DeviceId::Channel(0), gm(), 0, &mut buf)
+        .unwrap());
+    let reply = zmidi_ci::ProfileDetailsReply {
+        profile: gm(),
+        target: 0x40,
+        data: &[],
+    };
+    b_to_a!(b
+        .profile_details_reply(a.muid(), DeviceId::Channel(0), &reply, &mut buf)
+        .unwrap());
+    a_to_b!(a.pe_capabilities_inquiry(b.muid(), &mut buf).unwrap());
+    let (id, mut w) = a
+        .pe_request(b.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
+        .unwrap();
+    a_to_b!(w.write_next(&[], &mut buf).unwrap());
+    let mut w = b
+        .pe_reply(a.muid(), PeKind::GetReply, id, b"{}", Some(1), None)
+        .unwrap();
+    b_to_a!(w.write_next(b"x", &mut buf).unwrap());
+    a_to_b!(a.pi_capabilities_inquiry(b.muid(), &mut buf).unwrap());
+    let q = MessageReportInquiry {
+        data_control: DataControl::Full,
+        system: Default::default(),
+        channel: ChannelBits {
+            pitch_bend: true,
+            ..Default::default()
+        },
+        note: Default::default(),
+    };
+    a_to_b!(a
+        .message_report_inquiry(b.muid(), DeviceId::Group, &q, &mut buf)
+        .unwrap());
+    let supported = MessageReportReply::default();
+    b_to_a!(
+        b.message_report(
+            a.muid(),
+            DeviceId::Group,
+            0,
+            &q,
+            &supported,
+            Protocol::Midi1,
+            &Values,
+            &mut buf
+        )
+        .unwrap()
+        .0
+    );
+    b_to_a!(b
+        .message_report_end(a.muid(), DeviceId::Group, &mut buf)
+        .unwrap());
+    b_to_a!(b
+        .abort_report(a.muid(), DeviceId::Group, false, &mut buf)
+        .unwrap());
+    let ack = zmidi_ci::Ack {
+        original_sub_id2: 0x34,
+        status: AckStatus::Ack,
+        details: Details::Reserved,
+        text: &[],
+    };
+    b_to_a!(b
+        .ack(a.muid(), DeviceId::FunctionBlock, &ack, "", &mut buf)
+        .unwrap());
+    // An automatic NAK: an unknown Sub-ID#2.
+    let mut m = head(0x7F, 0x2A, a.muid(), b.muid());
+    m.push(0);
+    let n = m.len();
+    buf[..n].copy_from_slice(&m);
+    let ev = a_to_b!(n);
+    assert!(ev.is_none());
+    let reports: Vec<_> = b.remove_profile(address, gm()).unwrap().collect();
+    b_to_a!(b.profile_report(&reports[0], &mut buf).unwrap().1);
+    a_to_b!(a.invalidate(&mut rng(&[0x0666_6666]), &mut buf).unwrap());
+    let mut kinds = sent.clone();
+    kinds.sort_unstable();
+    kinds.dedup();
+    // Every message type of a Device (0x2A: the message of the test that got the NAK).
+    assert_eq!(
+        kinds,
+        [
+            0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28, 0x29, 0x2A, 0x30, 0x31, 0x34,
+            0x35, 0x40, 0x41, 0x42, 0x43, 0x44, 0x70, 0x71, 0x72, 0x73, 0x7D, 0x7E, 0x7F
+        ]
+    );
 }

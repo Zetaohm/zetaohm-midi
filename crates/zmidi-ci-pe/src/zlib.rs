@@ -554,6 +554,36 @@ mod tests {
     }
 
     #[test]
+    fn json_escape_comes_before_the_compression() {
+        // REQ-PE-DATA-002: JSON data is escaped (6.1.1), then compressed (here one stored block of
+        // the 14 escaped bytes), then Mcoded7; the reader gives the escaped text back.
+        let mut text = [0u8; 32];
+        let mut w = crate::json::JsonWriter::new(&mut text);
+        w.begin_object().unwrap();
+        w.name("t", 20).unwrap();
+        w.string("\u{266a}").unwrap();
+        w.end_object().unwrap();
+        let n = w.finish().unwrap();
+        let text = &text[..n];
+        assert_eq!(text, br#"{"t":"\u266a"}"#);
+        let mut e = ZlibMcoded7Encoder::new();
+        let mut out = [0u8; 64];
+        let mut k = e.encode(text, &mut out).unwrap();
+        k += e.finish(&mut out[k..]).unwrap();
+        // Python: zlib.decompress of these bytes gives the escaped text.
+        let mut zlib = std::vec![0x78, 0x01, 0x00, 0x0E, 0x00, 0xF1, 0xFF];
+        zlib.extend_from_slice(text);
+        zlib.extend_from_slice(&[0x01, 0x00, 0x00, 0xFF, 0xFF, 0x1D, 0xE7, 0x03, 0xFF]);
+        assert_eq!(&out[..k], mcoded7(&zlib).as_slice());
+        let mut window = [0u8; MAX_WINDOW];
+        let mut d = ZlibMcoded7Decoder::new(&mut window);
+        let mut back = [0u8; 32];
+        let r = d.decode(&out[..k], &mut back).unwrap();
+        d.finish().unwrap();
+        assert_eq!(&back[..r.written], text);
+    }
+
+    #[test]
     fn reset_decodes_the_next_data_set_with_the_same_decoder() {
         // OPT-010: one decoder, reset between Data Sets: after a whole stream, in the middle of a
         // stream, and after a bad stream, the next stream decodes as with a new decoder.

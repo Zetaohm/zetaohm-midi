@@ -259,6 +259,10 @@ impl<'a> Link<'a> {
         {
             return Err(LinkError::Invalid("actionResource"));
         }
+        // REQ-PE-LINK-007 (Table 72): "selectedProperty" has at least 1 character.
+        if self.selected_property.as_ref().and_then(text) == Some(0) {
+            return Err(LinkError::Invalid("selectedProperty"));
+        }
         if matches!(self.role, LinkRole::Other(r) if text(&r).is_some_and(|n| n > MAX_ROLE)) {
             return Err(LinkError::Invalid("role"));
         }
@@ -463,6 +467,253 @@ mod tests {
             base.write(&mut small),
             Err(LinkError::Json(JsonError::Overflow))
         );
+    }
+
+    #[test]
+    fn link_reader_limits_and_values() {
+        // REQ-PE-LINK-001, -004, -005, -006, -007: the exact error of each refused value; the
+        // reader accepts any characters and gives unknown "confirmType" and "confirmIcon" values.
+        let r37 = "r".repeat(37);
+        let deep = std::format!("{}{}", "[".repeat(65), "]".repeat(65));
+        let cases: [(String, LinkError); 8] = [
+            (
+                std::format!(r#"{{"resource":"A","resId":"{r37}"}}"#),
+                LinkError::Invalid("resId"),
+            ),
+            (
+                std::format!(
+                    r#"{{"resource":"A","role":"simpleAction","propData":{{}},"resId":"{r37}"}}"#
+                ),
+                LinkError::Invalid("resId"),
+            ),
+            (
+                std::format!(
+                    r#"{{"resource":"A","role":"selectorAction","actionResource":"B","selectedProperty":"p","actionResId":"{r37}"}}"#
+                ),
+                LinkError::Invalid("actionResId"),
+            ),
+            (
+                std::format!(
+                    r#"{{"resource":"A","role":"selectorAction","actionResource":"{r37}","selectedProperty":"p"}}"#
+                ),
+                LinkError::Invalid("actionResource"),
+            ),
+            (
+                r#"{"resource":"A","role":"selectorAction","actionResource":"B","selectedProperty":""}"#
+                    .into(),
+                LinkError::Invalid("selectedProperty"),
+            ),
+            (
+                r#"{"resource":"A","role":"selectorAction","actionResource":"","selectedProperty":"p"}"#
+                    .into(),
+                LinkError::Invalid("actionResource"),
+            ),
+            (
+                std::format!(r#"{{"resource":"A","role":"simpleAction","propData":{deep}}}"#),
+                LinkError::Json(JsonError::Depth),
+            ),
+            (
+                r#"{"resource":"A","role":"simpleAction","propData":[1,]}"#.into(),
+                LinkError::Json(JsonError::Syntax),
+            ),
+        ];
+        for (text, want) in &cases {
+            assert_eq!(Link::parse(text.as_bytes()), Err(*want), "{text}");
+        }
+        let r36 = "\u{e9}".repeat(35) + "-";
+        let ok = std::format!(
+            r#"{{"resource":"A","role":"selectorAction","resId":"{r36}","actionResource":"B","actionResId":"Ab-é","selectedProperty":"p","confirmType":"okcancel","confirmIcon":"exclamation"}}"#
+        );
+        let l = Link::parse(ok.as_bytes()).unwrap();
+        assert_eq!(
+            (s(l.res_id), s(l.action_res_id)),
+            (r36.clone(), String::from("Ab-\u{e9}"))
+        );
+        assert_eq!(
+            (l.confirm_type, l.confirm_icon),
+            (Some(ConfirmType::OkCancel), Some(ConfirmIcon::Exclamation))
+        );
+        let ok = std::format!(
+            r#"{{"resource":"A","role":"simpleAction","propData":{}{}}}"#,
+            "[".repeat(10),
+            "]".repeat(10)
+        );
+        assert!(Link::parse(ok.as_bytes()).is_ok());
+        for (text, icon) in [
+            ("information", ConfirmIcon::Information),
+            ("question", ConfirmIcon::Question),
+            ("warning", ConfirmIcon::Warning),
+        ] {
+            let t = std::format!(r#"{{"resource":"A","confirmIcon":"{text}"}}"#);
+            assert_eq!(Link::parse(t.as_bytes()).unwrap().confirm_icon, Some(icon));
+        }
+        let l = Link::parse(br#"{"resource":"A","confirmType":"OkCancel"}"#).unwrap();
+        assert!(
+            matches!(l.confirm_type, Some(ConfirmType::Unknown(v)) if v.eq_str("OkCancel")),
+            "unknown value, no error"
+        );
+    }
+
+    #[test]
+    fn long_title_and_confirm_msg_are_cut_at_a_character_boundary() {
+        // REQ-PE-LINK-002: "é" (2 bytes) crosses the end of the caller buffer: the cut is before
+        // it, marked; the other Properties are kept.
+        let l = Link::parse(
+            r#"{"resource":"A","role":"simpleAction","propData":{},"title":"abc\u00e9","confirmMsg":"Sure\u00e9?","confirmType":"yesno"}"#
+                .as_bytes(),
+        )
+        .unwrap();
+        let mut buf = [0u8; 4];
+        assert_eq!(l.title.unwrap().decode_into(&mut buf), ("abc", true));
+        let mut buf = [0u8; 5];
+        assert_eq!(l.confirm_msg.unwrap().decode_into(&mut buf), ("Sure", true));
+        let mut buf = [0u8; 7];
+        assert_eq!(
+            l.confirm_msg.unwrap().decode_into(&mut buf),
+            ("Sure\u{e9}?", false)
+        );
+        assert_eq!(s(Some(l.resource)), "A");
+        assert_eq!(l.confirm_type, Some(ConfirmType::YesNo));
+    }
+
+    #[test]
+    fn link_writer_limits_and_selector() {
+        // REQ-PE-LINK-001, -003, -004, -006, -007: the exact error of each refused value, and the
+        // bytes of a selectorAction Link.
+        let sel = Link {
+            resource: HeaderStr::Text("ProgramList"),
+            res_id: None,
+            title: None,
+            role: LinkRole::SelectorAction,
+            prop_data: None,
+            confirm_msg: None,
+            confirm_type: None,
+            confirm_icon: None,
+            action_resource: Some(HeaderStr::Text("CurrentProgram")),
+            action_res_id: Some(HeaderStr::Text("p_1")),
+            selected_property: Some(HeaderStr::Text("bankPC")),
+        };
+        let mut buf = [0u8; 200];
+        let n = sel.write(&mut buf).unwrap();
+        assert_eq!(
+            &buf[..n],
+            br#"{"resource":"ProgramList","role":"selectorAction","actionResource":"CurrentProgram","actionResId":"p_1","selectedProperty":"bankPC"}"#
+        );
+        let plain = Link {
+            role: LinkRole::Plain,
+            action_resource: None,
+            action_res_id: None,
+            selected_property: None,
+            ..sel
+        };
+        let a36 = "a".repeat(36);
+        let a37 = "a".repeat(37);
+        let r33 = "r".repeat(33);
+        let r32 = "r".repeat(32);
+        let refused: [(Link<'_>, LinkError); 11] = [
+            (
+                Link {
+                    resource: HeaderStr::Text(""),
+                    ..plain
+                },
+                LinkError::Invalid("resource"),
+            ),
+            (
+                Link {
+                    resource: HeaderStr::Text(&a37),
+                    ..plain
+                },
+                LinkError::Invalid("resource"),
+            ),
+            (
+                Link {
+                    res_id: Some(HeaderStr::Text(&a37)),
+                    ..plain
+                },
+                LinkError::Invalid("resId"),
+            ),
+            (
+                Link {
+                    role: LinkRole::Other(HeaderStr::Text(&r33)),
+                    ..plain
+                },
+                LinkError::Invalid("role"),
+            ),
+            (
+                Link {
+                    res_id: Some(HeaderStr::Text("a-b")),
+                    ..sel
+                },
+                LinkError::Invalid("resId"),
+            ),
+            (
+                Link {
+                    action_res_id: Some(HeaderStr::Text(&a37)),
+                    ..sel
+                },
+                LinkError::Invalid("actionResId"),
+            ),
+            (
+                Link {
+                    action_res_id: Some(HeaderStr::Text("P1")),
+                    ..sel
+                },
+                LinkError::Invalid("actionResId"),
+            ),
+            (
+                Link {
+                    action_resource: Some(HeaderStr::Text(&a37)),
+                    ..sel
+                },
+                LinkError::Invalid("actionResource"),
+            ),
+            (
+                Link {
+                    selected_property: Some(HeaderStr::Text("")),
+                    ..sel
+                },
+                LinkError::Invalid("selectedProperty"),
+            ),
+            (
+                Link {
+                    confirm_icon: Some(ConfirmIcon::Unknown(HeaderStr::Text("stop"))),
+                    ..plain
+                },
+                LinkError::Invalid("confirmIcon"),
+            ),
+            (
+                Link {
+                    selected_property: None,
+                    ..sel
+                },
+                LinkError::Missing("selectedProperty"),
+            ),
+        ];
+        for (i, (l, want)) in refused.iter().enumerate() {
+            assert_eq!(l.write(&mut buf), Err(*want), "case {i}");
+        }
+        // The limits are written; a plain Link "resId" has the rules of REQ-PE-HDR-007 only.
+        let ok = Link {
+            resource: HeaderStr::Text(&a36),
+            res_id: Some(HeaderStr::Text("A-1")),
+            role: LinkRole::Other(HeaderStr::Text(&r32)),
+            confirm_icon: Some(ConfirmIcon::Information),
+            ..plain
+        };
+        let n = ok.write(&mut buf).unwrap();
+        assert_eq!(
+            &buf[..n],
+            std::format!(
+                r#"{{"resource":"{a36}","resId":"A-1","role":"{r32}","confirmIcon":"information"}}"#
+            )
+            .as_bytes()
+        );
+        let ok = Link {
+            action_res_id: Some(HeaderStr::Text(&a36)),
+            action_resource: Some(HeaderStr::Text(&a36)),
+            ..sel
+        };
+        assert!(ok.write(&mut buf).is_ok());
     }
 
     #[test]

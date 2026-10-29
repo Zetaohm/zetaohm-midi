@@ -1459,6 +1459,15 @@ mod tests {
         let t = read(&mut r, &[r#"{"Resource":"abcdefghijé"}"#.as_bytes()]).unwrap();
         assert_eq!(t[1], T::N(s("Resource"), false));
         assert_eq!(t[2], T::S(s("abcdefgh"), true));
+        // The header parser: "Resource" is not "resource", so the Inquiry has no "resource";
+        // "RESID" is skipped as an unknown Property.
+        use crate::header::{Header, HeaderError, HeaderKind};
+        assert_eq!(
+            Header::parse(HeaderKind::Inquiry, br#"{"Resource":"A"}"#),
+            Err(HeaderError::Missing("resource"))
+        );
+        let h = Header::parse(HeaderKind::Inquiry, br#"{"resource":"A","RESID":"x"}"#).unwrap();
+        assert_eq!(h.res_id, None);
         let mut r = JsonReader::<10>::new();
         let t = read(&mut r, &[r#"["abcdefghijé"]"#.as_bytes()]).unwrap();
         assert_eq!(

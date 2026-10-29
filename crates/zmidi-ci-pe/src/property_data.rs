@@ -508,6 +508,8 @@ mod tests {
         );
         assert_eq!(read_simple(&[b"12", b"7"]), Ok(V::N(String::from("127"))));
         assert_eq!(read_simple(&[b"{}"]), Err(PropertyDataError::InvalidValue));
+        assert_eq!(read_simple(&[b"[1]"]), Err(PropertyDataError::InvalidValue));
+        assert_eq!(read_simple(&[b"[]"]), Err(PropertyDataError::InvalidValue));
         assert_eq!(
             read_simple(&[b"null"]),
             Err(PropertyDataError::InvalidValue)

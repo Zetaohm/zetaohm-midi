@@ -105,6 +105,16 @@ impl Categories {
     }
 }
 
+/// Smallest Receivable Maximum SysEx Message Size for `categories` (5.5.3, Appendix F item 1;
+/// REQ-CI-LEN-003): 512 with Profile Configuration or Property Exchange, else 128.
+const fn min_sysex_size(categories: Categories) -> u32 {
+    if categories.profile_configuration || categories.property_exchange {
+        512
+    } else {
+        128
+    }
+}
+
 const IDENTITY_LEN: usize = 11;
 /// Identity, categories and maximum SysEx size.
 const DISCOVERY_V1_LEN: usize = IDENTITY_LEN + 1 + 4;
@@ -140,14 +150,16 @@ impl Discovery {
         })
     }
 
-    /// Writes Discovery: Device ID 0x7F, Destination Broadcast; Output Path ID 0 when `None`.
+    /// Writes Discovery: Device ID 0x7F, Destination Broadcast; Output Path ID 0 when `None`. A
+    /// Receivable Maximum SysEx Message Size below 128, or below 512 with Profile Configuration or
+    /// Property Exchange, is an InvalidValue error (REQ-CI-LEN-003).
     pub fn write(
         &self,
         source: Muid,
         framing: Framing,
         out: &mut [u8],
     ) -> Result<usize, WriteError> {
-        if self.max_sysex_size < 128 {
+        if self.max_sysex_size < min_sysex_size(self.categories) {
             return Err(WriteError::InvalidValue);
         }
         let mut w = start(
@@ -201,7 +213,7 @@ impl DiscoveryReply {
         })
     }
 
-    /// Writes Reply to Discovery (Device ID 0x7F).
+    /// Writes Reply to Discovery (Device ID 0x7F), with the size rule of [`Discovery::write`].
     pub fn write(
         &self,
         source: Muid,
@@ -209,7 +221,7 @@ impl DiscoveryReply {
         framing: Framing,
         out: &mut [u8],
     ) -> Result<usize, WriteError> {
-        if self.max_sysex_size < 128 {
+        if self.max_sysex_size < min_sysex_size(self.categories) {
             return Err(WriteError::InvalidValue);
         }
         let mut w = start(
@@ -849,25 +861,103 @@ mod tests {
         );
         let (h, body) = parse(&buf[..n]);
         assert_eq!(Discovery::read(&h, body), Ok(d));
-        let mut small = Discovery {
-            max_sysex_size: 127,
+        // REQ-CI-LEN-003: 512 or more with D2 or D3, 128 or more without them.
+        for (categories, min) in [
+            (d.categories, 512),
+            (Categories::from_byte(0x04), 512),
+            (Categories::from_byte(0x08), 512),
+            (Categories::from_byte(0x10), 128),
+            (Categories::default(), 128),
+        ] {
+            let low = Discovery {
+                categories,
+                max_sysex_size: min - 1,
+                ..d
+            };
+            assert_eq!(
+                low.write(SRC, Framing::Bare, &mut buf),
+                Err(WriteError::InvalidValue),
+                "{categories:?}"
+            );
+            let ok = Discovery {
+                max_sysex_size: min,
+                ..low
+            };
+            let n = ok.write(SRC, Framing::Bare, &mut buf).unwrap();
+            assert_eq!(buf[n - 5..n - 1], le28(min));
+        }
+        // Version 1: no Output Path ID (REQ-CI-MSG-014).
+        let small = Discovery {
+            categories: Categories::default(),
+            max_sysex_size: 128,
             ..d
         };
-        assert_eq!(
-            small.write(SRC, Framing::Bare, &mut buf),
-            Err(WriteError::InvalidValue)
-        );
-        // Version 1: no Output Path ID.
-        small.max_sysex_size = 128;
         let n = small.write(SRC, Framing::Bare, &mut buf).unwrap();
         buf[4] = 0x01;
         let (h, body) = parse(&buf[..n - 1]);
         assert_eq!(Discovery::read(&h, body).unwrap().output_path_id, None);
+        // Version 2 needs the Output Path ID.
+        buf[4] = 0x02;
+        let (h, body) = parse(&buf[..n - 1]);
+        assert_eq!(Discovery::read(&h, body), Err(ParseError::TooShort));
+    }
+
+    fn le28(v: u32) -> [u8; 4] {
+        [
+            (v & 0x7F) as u8,
+            (v >> 7 & 0x7F) as u8,
+            (v >> 14 & 0x7F) as u8,
+            (v >> 21 & 0x7F) as u8,
+        ]
     }
 
     #[test]
     fn categories_reserved_bits() {
+        // Table 7; REQ-CI-DISC-009: one bit for each Category, reserved bits D0, D5, D6 ignored
+        // and written as 0.
         assert_eq!(Categories::from_byte(0x7F).to_byte(), 0x1E);
+        let one = |b: u8| Categories::from_byte(b);
+        assert_eq!(
+            one(0x02),
+            Categories {
+                protocol_negotiation: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            one(0x04),
+            Categories {
+                profile_configuration: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            one(0x08),
+            Categories {
+                property_exchange: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(
+            one(0x10),
+            Categories {
+                process_inquiry: true,
+                ..Default::default()
+            }
+        );
+        assert_eq!(one(0x61), Categories::default());
+        // The writer puts each Category in its own bit of the Discovery message.
+        let mut buf = [0u8; 64];
+        for bit in [0x02u8, 0x04, 0x08, 0x10] {
+            let d = Discovery {
+                identity: identity(),
+                categories: one(bit),
+                max_sysex_size: 512,
+                output_path_id: Some(0),
+            };
+            let n = d.write(SRC, Framing::Bare, &mut buf).unwrap();
+            assert_eq!((buf[24], n), (bit, 30));
+        }
     }
 
     #[test]
@@ -885,7 +975,16 @@ mod tests {
         };
         let mut buf = [0u8; 64];
         let n = r.write(SRC, DST, Framing::SysEx, &mut buf).unwrap();
-        assert_eq!(buf[n - 2], 0x7F);
+        // F0, header with Sub-ID#2 0x71, identity with a three-byte manufacturer, categories,
+        // size 128, Output Path ID 0, no Function Block 0x7F, F7.
+        assert_eq!(
+            &buf[..n],
+            &[
+                0xF0, 0x7E, 0x7F, 0x0D, 0x71, 0x02, 0x67, 0x0A, 0x0D, 0x09, 0x21, 0x06, 0x15, 0x3B,
+                0x00, 0x21, 0x09, 0x34, 0x24, 0x01, 0x04, 1, 2, 3, 4, 0x00, 0x00, 0x01, 0x00, 0x00,
+                0x00, 0x7F, 0xF7
+            ]
+        );
         let (h, body) = parse(&buf[..n]);
         assert_eq!(DiscoveryReply::read(&h, body), Ok(r));
         let r2 = DiscoveryReply {
@@ -895,6 +994,43 @@ mod tests {
         let n = r2.write(SRC, DST, Framing::Bare, &mut buf).unwrap();
         let (h, body) = parse(&buf[..n]);
         assert_eq!(DiscoveryReply::read(&h, body), Ok(r2));
+        // Version 2 needs both fields; a version 1 reply has neither.
+        assert_eq!(
+            DiscoveryReply::read(&h, &body[..body.len() - 1]),
+            Err(ParseError::TooShort)
+        );
+        buf[4] = 0x01;
+        let (h, body) = parse(&buf[..n - 2]);
+        assert_eq!(
+            DiscoveryReply::read(&h, body),
+            Ok(DiscoveryReply {
+                output_path_id: None,
+                function_block: None,
+                ..r2
+            })
+        );
+        // REQ-CI-LEN-003: 512 or more with Profile Configuration or Property Exchange.
+        let pe = DiscoveryReply {
+            categories: Categories::from_byte(0x08),
+            ..r
+        };
+        assert_eq!(
+            pe.write(SRC, DST, Framing::Bare, &mut buf),
+            Err(WriteError::InvalidValue)
+        );
+        let pe = DiscoveryReply {
+            max_sysex_size: 512,
+            ..pe
+        };
+        assert!(pe.write(SRC, DST, Framing::Bare, &mut buf).is_ok());
+        let low = DiscoveryReply {
+            max_sysex_size: 127,
+            ..r
+        };
+        assert_eq!(
+            low.write(SRC, DST, Framing::Bare, &mut buf),
+            Err(WriteError::InvalidValue)
+        );
     }
 
     #[test]
@@ -905,8 +1041,19 @@ mod tests {
             status: EndpointInfoStatus::ProductInstanceId,
         };
         let n = q.write(SRC, DST, Framing::Bare, &mut buf).unwrap();
+        // Table 9: Device ID 0x7F, Sub-ID#2 0x72, Status 0x00 (REQ-CI-EPI-002).
+        assert_eq!(
+            &buf[..n],
+            &[0x7E, 0x7F, 0x0D, 0x72, 0x02, 0x67, 0x0A, 0x0D, 0x09, 0x21, 0x06, 0x15, 0x3B, 0x00]
+        );
         let (h, body) = parse(&buf[..n]);
         assert_eq!(EndpointInfoInquiry::read(&h, body), Ok(q));
+        assert_eq!(
+            EndpointInfoInquiry::read(&h, &[0x05]),
+            Ok(EndpointInfoInquiry {
+                status: EndpointInfoStatus::Reserved(5)
+            })
+        );
         let bad = EndpointInfoInquiry {
             status: EndpointInfoStatus::Reserved(1),
         };
@@ -923,13 +1070,52 @@ mod tests {
         assert_eq!(&buf[13..16], &[0x00, 0x07, 0x00]);
         let (h, body) = parse(&buf[..n]);
         assert_eq!(EndpointInfoReply::read(&h, body), Ok(r));
+        assert_eq!(&buf[3..4], &[0x73]);
         assert_eq!(
-            EndpointInfoReply::read(&h, &body[..5]),
+            EndpointInfoReply::read(&h, &body[..body.len() - 1]),
             Err(ParseError::TooShort)
         );
+        // REQ-CI-EPI-005: bytes after the Information Data are ignored.
+        let mut long = body.to_vec();
+        long.extend([0x41, 0x42]);
+        assert_eq!(EndpointInfoReply::read(&h, &long), Ok(r));
         assert!(!product_instance_id_check(&[b'a'; 43]));
         assert!(!product_instance_id_check(b"a\x1F"));
+        assert!(!product_instance_id_check(b"a\x7F"));
         assert!(product_instance_id_check(&[b'~'; 42]));
+        assert!(product_instance_id_check(b" "));
+        // REQ-CI-EPI-008: the writer gives an error for an ID that is too long or has a byte
+        // outside 32-126, and the reader rejects one.
+        for bad in [&b"a\x7F"[..], b"a\x1F", &[b'a'; 43]] {
+            let w = EndpointInfoReply {
+                status: EndpointInfoStatus::ProductInstanceId,
+                data: bad,
+            };
+            assert_eq!(
+                w.write(SRC, DST, Framing::Bare, &mut buf),
+                Err(WriteError::InvalidValue)
+            );
+            // The same bytes with a reserved Status are written, then read as Status 0x00.
+            let n = EndpointInfoReply {
+                status: EndpointInfoStatus::Reserved(1),
+                data: bad,
+            }
+            .write(SRC, DST, Framing::Bare, &mut buf)
+            .unwrap();
+            buf[13] = 0x00;
+            let (h, body) = parse(&buf[..n]);
+            assert_eq!(
+                EndpointInfoReply::read(&h, body),
+                Err(ParseError::InvalidValue)
+            );
+        }
+        let max = EndpointInfoReply {
+            status: EndpointInfoStatus::ProductInstanceId,
+            data: &[b' '; 42],
+        };
+        let n = max.write(SRC, DST, Framing::Bare, &mut buf).unwrap();
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(EndpointInfoReply::read(&h, body), Ok(max));
     }
 
     #[test]
@@ -967,11 +1153,24 @@ mod tests {
                 &mut buf,
             )
             .unwrap();
+        assert_eq!(&buf[..4], &[0x7E, 0x7F, 0x0D, 0x7D]);
         assert_eq!(&buf[13..23], &[0x34, 0x11, 0x00, 5, 0x2C, 2, 0, 0, 9, 0]);
         let (h, body) = parse(&buf[..n]);
         let back = Ack::read(&h, body).unwrap();
         assert_eq!(back.details, a.details);
         assert_eq!(back.text().collect::<String>(), "ok \u{266A}");
+        // REQ-CI-ACK-001: shorter than the Message Length needs: rejected; bytes after the
+        // Message Text: ignored.
+        assert_eq!(
+            Ack::read(&h, &body[..body.len() - 1]),
+            Err(ParseError::TooShort)
+        );
+        assert_eq!(Ack::read(&h, &body[..9]), Err(ParseError::TooShort));
+        let mut long = body.to_vec();
+        long.extend([0x41, 0x42]);
+        let more = Ack::read(&h, &long).unwrap();
+        assert_eq!(more, back);
+        assert_eq!(more.text().collect::<String>(), "ok \u{266A}");
         let p = Details::read(Category::ProfileConfiguration, [0x7E, 1, 2, 3, 4]);
         assert_eq!(p, Details::Profile([0x7E, 1, 2, 3, 4]));
         assert_eq!(
@@ -980,6 +1179,66 @@ mod tests {
         );
         assert_eq!(AckStatus::from_bytes(0x05, 0).range(), StatusRange::Success);
         assert_eq!(AckStatus::from_bytes(0x10, 7), AckStatus::TimeoutWait(7));
+    }
+
+    #[test]
+    fn ack_status_codes() {
+        // Table 14; REQ-CI-ACK-003.
+        assert_eq!(AckStatus::from_bytes(0x00, 0), AckStatus::Ack);
+        assert_eq!(
+            AckStatus::from_bytes(0x10, 0x7F),
+            AckStatus::TimeoutWait(0x7F)
+        );
+        assert_eq!(
+            AckStatus::from_bytes(0x11, 0),
+            AckStatus::FlowControlSendNext
+        );
+        assert_eq!(AckStatus::Ack.to_bytes(), (0x00, 0x00));
+        assert_eq!(AckStatus::TimeoutWait(3).to_bytes(), (0x10, 3));
+        assert_eq!(AckStatus::FlowControlSendNext.to_bytes(), (0x11, 0x00));
+        for code in 0u8..=0x7F {
+            let s = AckStatus::from_bytes(code, 0x05);
+            if !matches!(code, 0x00 | 0x10 | 0x11) {
+                assert_eq!(s, AckStatus::Unknown { code, data: 0x05 });
+                assert_eq!(s.to_bytes(), (code, 0x05));
+            }
+            let range = match code {
+                0x00..=0x0F => StatusRange::Success,
+                0x10..=0x1F => StatusRange::Notification,
+                _ => StatusRange::Other,
+            };
+            assert_eq!(s.range(), range, "{code:#04x}");
+        }
+        // The written bytes of ACK 0x00 and Timeout Wait.
+        let mut buf = [0u8; 64];
+        for (status, bytes) in [
+            (AckStatus::Ack, [0x00, 0x00]),
+            (AckStatus::TimeoutWait(0x0A), [0x10, 0x0A]),
+        ] {
+            let a = Ack {
+                original_sub_id2: 0x36,
+                status,
+                details: Details::Reserved,
+                text: &[],
+            };
+            let n = a
+                .write(
+                    "",
+                    DeviceId::FunctionBlock,
+                    SRC,
+                    DST,
+                    None,
+                    Framing::Bare,
+                    &mut buf,
+                )
+                .unwrap();
+            assert_eq!(
+                &buf[13..n],
+                &[0x36, bytes[0], bytes[1], 0, 0, 0, 0, 0, 0, 0]
+            );
+            let (h, body) = parse(&buf[..n]);
+            assert_eq!(Ack::read(&h, body).unwrap().status, status);
+        }
     }
 
     #[test]
@@ -1025,6 +1284,33 @@ mod tests {
         assert_eq!(n, 200);
         let (h, body) = parse(&buf[..n]);
         assert_eq!(Nak::read(&h, body).unwrap().text.len(), 200 - 23);
+        // An ACK with a reported size; a text that fits is not shortened.
+        let n = a
+            .write(
+                &long,
+                DeviceId::FunctionBlock,
+                SRC,
+                DST,
+                Some(200),
+                Framing::SysEx,
+                &mut buf,
+            )
+            .unwrap();
+        assert_eq!(n, 200);
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(Ack::read(&h, body).unwrap().text.len(), 200 - 25);
+        let n = a
+            .write(
+                "short",
+                DeviceId::FunctionBlock,
+                SRC,
+                DST,
+                Some(200),
+                Framing::Bare,
+                &mut buf,
+            )
+            .unwrap();
+        assert_eq!(n, 23 + 5);
         // A non-ASCII character is not split.
         let n = k
             .write(
@@ -1037,7 +1323,13 @@ mod tests {
                 &mut buf,
             )
             .unwrap();
-        assert_eq!((n - 23) % 6, 0);
+        // 128 - 23 = 105 bytes of text: 17 escapes of 6 bytes, not 105 bytes of a split escape.
+        assert_eq!(n, 23 + 17 * 6);
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(
+            Nak::read(&h, body).unwrap().text().collect::<String>(),
+            "é".repeat(17)
+        );
     }
 
     #[test]
@@ -1065,8 +1357,64 @@ mod tests {
             let s = NakStatus::from_bytes(code, 0);
             assert_eq!(s.to_bytes(), (code, 0));
         }
+        // Each named code of Table 16 with its Status Data.
+        {
+            use NakStatus::*;
+            for (code, data, named) in [
+                (0x00, 0, Nak),
+                (0x01, 0, NotSupported),
+                (0x02, 0, VersionNotSupported),
+                (0x03, 0, NotInUse),
+                (0x04, 0, ProfileNotSupported),
+                (0x12, 0, FlowControlResend),
+                (
+                    0x20,
+                    0,
+                    Terminate {
+                        by_initiator: false,
+                    },
+                ),
+                (0x20, 1, Terminate { by_initiator: true }),
+                (0x21, 0, ChunksOutOfSequence),
+                (0x40, 0, Error),
+                (0x41, 0, Malformed),
+                (0x42, 0, Timeout),
+                (0x43, 0x7F, Busy(0x7F)),
+            ] {
+                assert_eq!(NakStatus::from_bytes(code, data), named, "{code:#04x}");
+                assert_eq!(named.to_bytes(), (code, data));
+            }
+            // Other values are unknown codes with their range, reserved values included.
+            assert_eq!(
+                NakStatus::from_bytes(0x20, 2),
+                Unknown {
+                    code: 0x20,
+                    data: 2
+                }
+            );
+            for (code, range) in [
+                (0x05, StatusRange::FailNoRetry),
+                (0x30, StatusRange::Notification),
+                (0x50, StatusRange::FailRetry),
+                (0x7F, StatusRange::Reserved),
+            ] {
+                let s = NakStatus::from_bytes(code, 9);
+                assert_eq!((s, s.range()), (Unknown { code, data: 9 }, range));
+            }
+        }
+        // REQ-CI-MSG-012, -014: the version selects the fields; version 1 has no NAK data.
         let v1 = [0x7E, 0x05, 0x0D, 0x7F, 0x01, 1, 0, 0, 0, 2, 0, 0, 0];
         let (h, body) = parse(&v1);
+        assert_eq!(h.version.minor(), 1);
+        assert_eq!(Nak::read(&h, body).unwrap().status, NakStatus::Nak);
+        let mut v2 = v1;
+        v2[4] = 0x02;
+        let (h, body) = parse(&v2);
+        assert_eq!(Nak::read(&h, body), Err(ParseError::TooShort));
+        // Version 0x00 is version 1.
+        let mut v0 = v1;
+        v0[4] = 0x00;
+        let (h, body) = parse(&v0);
         assert_eq!(Nak::read(&h, body).unwrap().status, NakStatus::Nak);
     }
 

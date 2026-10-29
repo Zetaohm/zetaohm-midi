@@ -16,11 +16,22 @@ change the API. All crates and packages have the same version.
 
 ### Changed
 
+- `zmidi-ci`: `Discovery::write` and `DiscoveryReply::write` refuse a Receivable Maximum SysEx Message
+  Size below 512 when the categories have Profile Configuration or Property Exchange (M2-101 5.5.3,
+  Appendix F).
+- `zmidi-ci`: `PeChunk::write` refuses an Inquiry: Get Property Data or a Reply to Set Property Data
+  that is not Chunk 1 of 1 with no Property Data (M2-101 Tables 33, 36).
+- `zmidi-ci`: `ReportWriter` leaves out the inactive notes for Message Data Control 0x01 (M2-101
+  Table 44); the application still gives only the non-default controller values.
 - `zmidi-file`: `SmfWriter::escape` refuses a channel status byte (0x80 to 0xEF) with `BadValue`. Channel
   messages are MIDI events in a Standard MIDI File (RP-001).
 
 ### Fixed
 
+- `zmidi-ci-pe`: `Link::write` refuses an empty "selectedProperty" (M2-103 Table 72), as the reader
+  does.
+- `zmidi-ci-pe`: the ResourceList reader marks a Column "title" as truncated only when it was cut, not
+  when it fills the buffer exactly.
 - `zmidi-usb`: after a USB reset or a configuration change, `MidiLink` writes packets of the
   wMaxPacketSize of Alternate Setting 0 again, not of the last USB MIDI 2.0 setting.
 - `zmidi-ffi`: `zmidi_usb_link_read` counts the ignored last 1 to 3 bytes of a transfer as an error, as

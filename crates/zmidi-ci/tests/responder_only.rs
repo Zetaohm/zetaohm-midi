@@ -144,6 +144,26 @@ fn discovery_and_management_work() {
         .unwrap();
     let (ev, r) = deliver(&mut d, &buf[..n]);
     assert!(ev.is_some_and(|e| e.starts_with("Ack")) && r.is_empty());
+    // NAK too.
+    let nak = zmidi_ci::Nak {
+        original_sub_id2: 0x38,
+        status: zmidi_ci::NakStatus::Busy(3),
+        details: Details::Reserved,
+        text: &[],
+    };
+    let n = nak
+        .write(
+            "",
+            DeviceId::FunctionBlock,
+            PEER,
+            d.muid(),
+            None,
+            Framing::Bare,
+            &mut buf,
+        )
+        .unwrap();
+    let (ev, r) = deliver(&mut d, &buf[..n]);
+    assert!(ev.is_some_and(|e| e.starts_with("Nak")) && r.is_empty());
     // Invalidate MUID of the peer: the peer is removed.
     let n = InvalidateMuid { target: PEER }
         .write(Muid::new(0x0444_4444).unwrap(), Framing::Bare, &mut buf)
@@ -262,21 +282,19 @@ fn responder_sends_subscription_messages() {
         Some(DeviceError::NotInquired)
     );
     let mut buf = [0u8; 64];
-    let n = zmidi_ci::PeCapabilities {
+    let caps = zmidi_ci::PeCapabilities {
         simultaneous: 3,
-        major: None,
-        minor: None,
-    }
-    .write_inquiry(PEER, d.muid(), Framing::Bare, &mut buf)
-    .unwrap();
+        major: Some(1),
+        minor: Some(2),
+    };
+    let n = caps
+        .write_inquiry(PEER, d.muid(), Framing::Bare, &mut buf)
+        .unwrap();
     let (_, out) = deliver(&mut d, &buf[..n]);
     assert_eq!(out.len(), 1, "the Reply to Inquiry: PE Capabilities");
-    assert_eq!(
-        d.peer(PEER)
-            .and_then(|p| p.pe_capabilities)
-            .map(|c| c.simultaneous),
-        Some(3)
-    );
+    assert_eq!(out[0][3], 0x31);
+    // The number and the PE version of the peer (REQ-CI-PEF-045).
+    assert_eq!(d.peer(PEER).and_then(|p| p.pe_capabilities), Some(caps));
     let (id, _) = d
         .pe_request(
             PEER,
@@ -292,4 +310,17 @@ fn responder_sends_subscription_messages() {
             .err(),
         Some(DeviceError::NotSupported)
     );
+    assert_eq!(
+        d.pe_request(PEER, PeKind::SetInquiry, b"{}", Some(0), None)
+            .err(),
+        Some(DeviceError::NotSupported)
+    );
+    // Until the MUID of the peer is invalidated.
+    let n = InvalidateMuid { target: PEER }
+        .write(PEER, Framing::Bare, &mut buf)
+        .unwrap();
+    let _ = deliver(&mut d, &buf[..n]);
+    assert!(d.peer(PEER).is_none());
+    deliver(&mut d, &discovery_from(PEER));
+    assert_eq!(d.peer(PEER).and_then(|p| p.pe_capabilities), None);
 }
