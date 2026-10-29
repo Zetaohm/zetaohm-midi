@@ -681,6 +681,25 @@ mod tests {
     }
 
     #[test]
+    fn midi1_readers_give_each_field() {
+        // REQ-CV1-002, -004, -005, -006, -007: each field read from a known word, with
+        // different values in each field.
+        let off = Midi1NoteOff::from_words(&[0x2182_3C05]).unwrap();
+        assert_eq!(
+            (off.group(), off.channel(), off.note(), off.velocity()),
+            (g(1), c(2), 0x3C, 5)
+        );
+        let pp = Midi1PolyPressure::from_words(&[0x20A3_3D06]).unwrap();
+        assert_eq!((pp.channel(), pp.note(), pp.pressure()), (c(3), 0x3D, 6));
+        let cc = Midi1ControlChange::from_words(&[0x20B4_0708]).unwrap();
+        assert_eq!((cc.channel(), cc.index(), cc.data()), (c(4), 7, 8));
+        let pc = Midi1ProgramChange::from_words(&[0x20C5_0900]).unwrap();
+        assert_eq!((pc.channel(), pc.program()), (c(5), 9));
+        let cp = Midi1ChannelPressure::from_words(&[0x20D6_0A00]).unwrap();
+        assert_eq!((cp.channel(), cp.pressure()), (c(6), 0x0A));
+    }
+
+    #[test]
     fn channel_mode_controllers() {
         // REQ-CV-MODE-001: 120 to 127.
         for i in 0..=127u8 {
@@ -693,10 +712,19 @@ mod tests {
                 None => assert!(i < 120),
             }
         }
-        assert_eq!(
-            ChannelModeController::from_index(123),
-            Some(ChannelModeController::AllNotesOff)
-        );
+        use ChannelModeController::*;
+        for (i, name) in [
+            (120, AllSoundOff),
+            (121, ResetAllControllers),
+            (122, LocalControl),
+            (123, AllNotesOff),
+            (124, OmniOff),
+            (125, OmniOn),
+            (126, MonoOn),
+            (127, PolyOn),
+        ] {
+            assert_eq!(ChannelModeController::from_index(i), Some(name));
+        }
         assert_eq!(ChannelModeController::from_index(128), None);
     }
 

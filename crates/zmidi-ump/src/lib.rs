@@ -18,6 +18,8 @@ pub mod packet;
 pub mod scale;
 pub mod sysex7;
 pub mod system;
+#[cfg(feature = "nfc")]
+pub mod text;
 pub mod translate;
 pub mod ump;
 pub mod ump_stream;

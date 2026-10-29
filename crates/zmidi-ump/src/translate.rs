@@ -1177,6 +1177,32 @@ mod tests {
             Midi2PolyPressure::try_new(g(), c(), 60, 0x8000_0000).unwrap(),
         ));
         assert_eq!(t.translate(&p1), Some(p2));
+        // Min-Center-Max above the center (D.1.3): 0x50 and 0x7F (a plain shift gives
+        // 0xA000_0000 and 0xFE00_0000).
+        for (v1, v2) in [(0x50, 0xA082_0820u32), (0x7F, 0xFFFF_FFFF)] {
+            let p1 = m1(Midi1ChannelVoiceMessage::PolyPressure(
+                Midi1PolyPressure::try_new(g(), c(), 60, v1).unwrap(),
+            ));
+            let p2 = m2(Midi2ChannelVoiceMessage::PolyPressure(
+                Midi2PolyPressure::try_new(g(), c(), 60, v2).unwrap(),
+            ));
+            assert_eq!(t.translate(&p1), Some(p2), "{v1:#X}");
+        }
+    }
+
+    /// REQ-SCALE-005, REQ-SCALE-008: above the center, an Assignable Controller (NRPN) with
+    /// Index < 32 uses Min-Center-Max, and a Registered Controller (RPN) with Index LSB < 32
+    /// uses Zero-Extension. 14-bit 0x2080 (MSB 0x41, LSB 0x00).
+    #[test]
+    fn translate_controller_scaling_by_kind_above_center() {
+        let mut t = Midi1ToMidi2::new();
+        let out = feed(&mut t, &[cc1(99, 0), cc1(98, 5), cc1(6, 0x41), cc1(38, 0)]);
+        assert_eq!(out, [ac2(0, 5, 0x8200_1000)]);
+        let out = feed(
+            &mut t,
+            &[cc1(101, 0), cc1(100, 5), cc1(6, 0x41), cc1(38, 0)],
+        );
+        assert_eq!(out, [rc2(0, 5, 0x8200_0000)]);
     }
 
     fn cc2(index: u8, data: u32) -> Ump {
@@ -1526,6 +1552,8 @@ mod tests {
             (midi1_any_one_group(), any::<u32>())
                 .prop_map(|(u, noise)| u.to_packet().words()[0] ^ (noise & 0x0F00_8080)),
             any::<u32>().prop_map(|w| 0x2000_0000 | (w & 0x0FFF_FFFF)),
+            // REQ-XLATE-026: a word of another Message Type gives no translation.
+            any::<u32>().prop_filter("not Message Type 0x2", |w| w >> 28 != 0x2),
         ];
         proptest!(|(input in proptest::collection::vec(word, 0..64), ch in 0u8..16)| {
             let mut typed = Midi1ToMidi2Group::new();

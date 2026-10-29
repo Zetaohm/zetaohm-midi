@@ -1042,6 +1042,20 @@ pub struct FlexTextPackets<'a> {
 }
 
 impl<'a> FlexTextPackets<'a> {
+    /// The Project Name packets of `text` on `group`, to the Address Group (7.5.9.1,
+    /// REQ-FLEX-011). Use [`Self::try_new`] for another Address.
+    pub fn project_name(group: Group, text: &'a str) -> Result<Self, UmpError> {
+        let status = FlexTextStatus::Metadata(MetadataTextStatus::ProjectName);
+        Self::try_new(group, FlexDestination::Group, status, text)
+    }
+
+    /// The MIDI Clip Name packets of `text` on `group`, to the Address Group (7.5.9.1,
+    /// REQ-FLEX-011). Use [`Self::try_new`] for another Address.
+    pub fn midi_clip_name(group: Group, text: &'a str) -> Result<Self, UmpError> {
+        let status = FlexTextStatus::Metadata(MetadataTextStatus::MidiClipName);
+        Self::try_new(group, FlexDestination::Group, status, text)
+    }
+
     /// The packets of `text` with `status` to `destination` on `group`.
     ///
     /// Gives `OutOfRange` for text that is empty, longer than 384 bytes (32 UMPs, 7.5.1), or
@@ -1842,6 +1856,16 @@ mod tests {
                 .unwrap();
             assert_eq!(words(&p)[0] & 0x00FF_FF00, 0x0002_0100);
         }
+        // The Project Name and MIDI Clip Name writers use the Address Group.
+        let first = |p: Result<FlexTextPackets<'_>, UmpError>| words(&p.unwrap().next().unwrap());
+        assert_eq!(
+            first(FlexTextPackets::project_name(group(1), "Song")),
+            [0xD110_0101, 0x536F_6E67, 0, 0]
+        );
+        assert_eq!(
+            first(FlexTextPackets::midi_clip_name(group(1), "Song")),
+            [0xD110_0103, 0x536F_6E67, 0, 0]
+        );
         // A Group-addressed packet reads with its reserved Channel field cleared.
         let p = FlexTextPacket::from_words(&[0xD01F_0101, 0x4100_0000, 0, 0]).unwrap();
         assert_eq!(words(&p)[0], 0xD010_0101);

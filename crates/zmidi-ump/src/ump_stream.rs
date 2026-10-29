@@ -1408,6 +1408,25 @@ mod tests {
             words(&m.with_stream_configuration(true)),
             [0xF000_0101, 0x10, 0, 0]
         );
+        // Each Filter bit alone: d, n and i.
+        assert_eq!(words(&m.with_device_identity(true))[1], 0x02);
+        assert_eq!(words(&m.with_endpoint_name(true))[1], 0x04);
+        assert_eq!(words(&m.with_product_instance_id(true))[1], 0x08);
+        // The reader gives each bit.
+        for bit in 0..5 {
+            let r = EndpointDiscovery::from_words(&[0xF000_0101, 1 << bit, 0, 0]).unwrap();
+            assert_eq!(
+                [
+                    r.endpoint_info(),
+                    r.device_identity(),
+                    r.endpoint_name(),
+                    r.product_instance_id(),
+                    r.stream_configuration()
+                ],
+                core::array::from_fn(|i| i == bit),
+                "bit {bit}"
+            );
+        }
     }
 
     /// Figure 13: Endpoint Info Notification; Number of Function Blocks 0 to 0x20.
@@ -1581,6 +1600,15 @@ mod tests {
     fn clip_markers_match_figures_24_25() {
         assert_eq!(words(&StartOfClip::new()), [0xF020_0000, 0, 0, 0]);
         assert_eq!(words(&EndOfClip::new()), [0xF021_0000, 0, 0, 0]);
+        // The reader.
+        assert!(matches!(
+            UmpStreamMessage::parse(&[0xF020_0000, 0, 0, 0]),
+            Some(UmpStreamMessage::StartOfClip(_))
+        ));
+        assert!(matches!(
+            UmpStreamMessage::parse(&[0xF021_0000, 0, 0, 0]),
+            Some(UmpStreamMessage::EndOfClip(_))
+        ));
     }
 
     /// Table of 7.1: the defined Status values; others are not decoded (REQ-UMP-004).

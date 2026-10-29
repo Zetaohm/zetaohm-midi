@@ -470,6 +470,21 @@ mod tests {
         assert_eq!(word(&tpq) & DeltaClockstampTpq::RESERVED, 0);
         let dc = DeltaClockstamp::try_new(DeltaClockstamp::MAX_TICKS).unwrap();
         assert_eq!(word(&dc) & DeltaClockstamp::RESERVED, 0);
+        // The exact words: Message Type, Status and the field only (Figures 32 to 35).
+        assert_eq!(word(&Noop::new()), 0x0000_0000);
+        assert_eq!(word(&JrClock::new().with_time(u16::MAX)), 0x0010_FFFF);
+        assert_eq!(
+            word(&JrTimestamp::new().with_timestamp(u16::MAX)),
+            0x0020_FFFF
+        );
+        assert_eq!(word(&tpq), 0x0030_FFFF);
+        assert_eq!(word(&dc), 0x004F_FFFF);
+        // A read word with reserved bits set is written with them cleared.
+        assert_eq!(word(&Noop::from_words(&[0x0F0F_FFFF]).unwrap()), 0);
+        assert_eq!(
+            word(&JrClock::from_words(&[0x0F1F_1234]).unwrap()),
+            0x0010_1234
+        );
     }
 
     #[test]

@@ -7,6 +7,13 @@ change the API. All crates and packages have the same version.
 
 ## [Unreleased]
 
+### Added
+
+- `zmidi-ump`: feature `nfc` (with `alloc`): `text::is_nfc` and `text::to_nfc` for UMP text in
+  Normalization Form C (M2-104 1.8).
+- `zmidi-ump`: `FlexTextPackets::project_name` and `FlexTextPackets::midi_clip_name`, to the Address
+  Group (M2-104 7.5.9.1).
+
 ### Changed
 
 - `zmidi-file`: `SmfWriter::escape` refuses a channel status byte (0x80 to 0xEF) with `BadValue`. Channel

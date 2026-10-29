@@ -19,6 +19,7 @@ path = "src/lib.rs"
 [dependencies]
 bitfield-struct = "0.13"
 thiserror = { version = "2", default-features = false }
+unicode-normalization = { version = "0.1.25", default-features = false, optional = true }
 
 [features]
 # DEC-017: all message families are decoded by default. With a family off, `Ump::parse` gives its
@@ -52,6 +53,8 @@ flex-data = []
 ump-stream = []
 # DEC-002: the core API needs no alloc; `alloc` enables convenience functions only.
 alloc = []
+# DEC-UMP-005: NFC helpers for UMP text (REQ-TEXT-001); needs alloc.
+nfc = ["alloc", "dep:unicode-normalization"]
 
 [dev-dependencies]
 # DEC-UMP-003: property tests (tests only; not built for bare-metal targets)

@@ -1498,6 +1498,38 @@ mod tests {
     }
 
     #[test]
+    fn midi2_readers_give_each_field() {
+        // REQ-CV2-002, -004, -005, -006, -007, -013: each field read from known words, with
+        // different values in each field.
+        let off = Midi2NoteOff::from_words(&[0x4081_3D00, 0x1234_0000]).unwrap();
+        assert_eq!((off.note(), off.velocity()), (0x3D, 0x1234));
+        assert_eq!(
+            Midi2NoteOff::try_new(g(0), c(0), 128, 0, NoteAttribute::None),
+            Err(UmpError::OutOfRange)
+        );
+        let pp = Midi2PolyPressure::from_words(&[0x40A1_3C00, 0x8765_4321]).unwrap();
+        assert_eq!((pp.note(), pp.pressure()), (0x3C, 0x8765_4321));
+        let apnc = AssignablePerNoteController::from_words(&[0x4010_3CFE, 0x0000_0001]).unwrap();
+        assert_eq!(
+            (apnc.note(), apnc.controller(), apnc.data()),
+            (0x3C, 0xFE, 1)
+        );
+        let rpnc = RegisteredPerNoteController::from_words(&[0x4000_3D03, 0x7800_0000]).unwrap();
+        assert_eq!(
+            (rpnc.note(), rpnc.controller(), rpnc.data()),
+            (0x3D, 3, 0x7800_0000)
+        );
+        let cc = Midi2ControlChange::from_words(&[0x41B0_0700, 0x1234_5678]).unwrap();
+        assert_eq!((cc.index(), cc.data()), (7, 0x1234_5678));
+        let pnpb = PerNotePitchBend::from_words(&[0x4060_3D00, 0x8000_0001]).unwrap();
+        assert_eq!((pnpb.note(), pnpb.value()), (0x3D, 0x8000_0001));
+        let d = PerNoteManagement::from_words(&[0x40F0_3C02, 0]).unwrap();
+        assert_eq!((d.note(), d.detach(), d.reset()), (0x3C, true, false));
+        let r = PerNoteManagement::from_words(&[0x40F0_3C01, 0]).unwrap();
+        assert_eq!((r.detach(), r.reset()), (false, true));
+    }
+
+    #[test]
     fn midi2_per_note_management_matches_figure_51() {
         // Byte 4: 6 reserved option flags, then D, then S.
         let m = PerNoteManagement::try_new(g(0), c(0), 60, true, false).unwrap();
@@ -1691,7 +1723,7 @@ mod tests {
                     assert_ne!(op, 0x7);
                     assert_eq!((m.into_words()[0] >> 20) & 0xF, op);
                 }
-                None => assert!(op == 0x7 || op == 0x0, "opcode {op:#x}"),
+                None => assert_eq!(op, 0x7, "opcode {op:#x}"),
             }
         }
         assert_eq!(Midi2ChannelVoiceMessage::parse(&[0x4090_3C00]), None);

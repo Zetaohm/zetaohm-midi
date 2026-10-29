@@ -371,6 +371,48 @@ mod tests {
         ));
     }
 
+    #[cfg(feature = "full")]
+    #[test]
+    fn ump_parse_reads_status_of_each_message_type() {
+        // REQ-UMP-010: SysEx7 Status bits 23..20, Data 128 Status bits 23..20, Flex Data Status
+        // Bank bits 15..8 and Status bits 7..0, UMP Stream Status bits 25..16 (10 bits).
+        assert!(matches!(
+            Ump::parse(&[0x3016_0102, 0x0304_0506]),
+            Ok((Ump::SysEx7(p), 2)) if p.status() == crate::sysex7::SysEx7Status::Start
+        ));
+        assert!(matches!(
+            Ump::parse(&[0x5080_0012, 0x0001_0001, 0x0043_0000, 0]),
+            Ok((
+                Ump::Data128(crate::data128::Data128Message::MdsHeader(_)),
+                4
+            ))
+        ));
+        assert!(matches!(
+            Ump::parse(&[0x5090_0000, 0, 0, 0]),
+            Ok((
+                Ump::Data128(crate::data128::Data128Message::MdsPayload(_)),
+                4
+            ))
+        ));
+        assert!(matches!(
+            Ump::parse(&[0xD010_0001, 0x0402_0800, 0, 0]),
+            Ok((Ump::FlexData(FlexDataMessage::SetTimeSignature(_)), 4))
+        ));
+        assert!(matches!(
+            Ump::parse(&[0xD010_0101, 0x4100_0000, 0, 0]),
+            Ok((Ump::FlexData(FlexDataMessage::Text(_)), 4))
+        ));
+        assert!(matches!(
+            Ump::parse(&[0xF021_0000, 0, 0, 0]),
+            Ok((Ump::UmpStream(UmpStreamMessage::EndOfClip(_)), 4))
+        ));
+        // Status 0x221 has bit 9 set: not End of Clip.
+        assert!(!matches!(
+            Ump::parse(&[0xF221_0000, 0, 0, 0]),
+            Ok((Ump::UmpStream(UmpStreamMessage::EndOfClip(_)), 4))
+        ));
+    }
+
     #[test]
     fn ump_write_keeps_unknown_words_unchanged() {
         // A reserved Message Type (0xB, 3 words) is written only as the received words.
