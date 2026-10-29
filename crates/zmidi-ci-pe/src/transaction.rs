@@ -687,8 +687,12 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
         push_to(&mut self.pending, p);
     }
 
-    fn close<D: PeHost>(&mut self, host: &mut D, i: usize) -> Option<Txn<H>> {
-        let t = self.txns.get_mut(i)?.take()?;
+    /// Frees slot `i` in place and ends its request in the device. Gives the key only: a moved
+    /// `Txn<H>` costs H + 72 bytes in the frame of each caller (GitHub issue #1).
+    fn close<D: PeHost>(&mut self, host: &mut D, i: usize) -> Option<TxnKey> {
+        let slot = self.txns.get_mut(i)?;
+        let t = TxnKey::of(slot.as_ref()?);
+        *slot = None;
         host.end(t.peer, t.request_id, t.role);
         Some(t)
     }
@@ -1071,12 +1075,15 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
         let Some(i) = self.find(peer, chunk.request_id, Direction::Initiator) else {
             return Ok(None);
         };
-        let Some(t) = self.txns[i] else {
+        // The fields are read in the slot: a copy of `Txn<H>` costs H + 72 bytes of stack on each
+        // reply path (GitHub issue #1).
+        let Some(t) = self.txns[i].as_ref() else {
             return Ok(None);
         };
         if t.kind != kind {
             return Ok(None);
         }
+        let (sub_start, resource_list) = (t.sub_start, t.resource_list);
         let first = t.last_good == 0 && chunk.number <= 1;
         if t.phase == Phase::Sending {
             if !first {
@@ -1096,18 +1103,8 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
             Err(e) => return Ok(self.closed(host, i, CloseReason::BadReply(e))),
         };
         let class = header.status.map_or(StatusClass::Unknown, Status::class);
-        let mut started = None;
-        if t.sub_start {
-            started = Some(if class == StatusClass::Success {
-                match Header::parse(HeaderKind::Subscription, &t.hdr[..t.hdr_len]) {
-                    Ok(start) => self.subs.add_started(peer, &start, &header),
-                    Err(_) => Err(SubscriptionError::Invalid),
-                }
-            } else {
-                Err(SubscriptionError::NotSuccess)
-            });
-        }
-        if t.resource_list && class == StatusClass::Success {
+        let started = sub_start.then(|| self.start_reply(i, peer, &header, class));
+        if resource_list && class == StatusClass::Success {
             self.mark_list(peer);
         }
         if let Some(t) = self.txns[i].as_mut() {
@@ -1122,6 +1119,29 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
             m.started = started;
         }
         Ok(ev)
+    }
+
+    /// The reply to a Subscription "start" of this Device (the subscriber): the new entry
+    /// (REQ-PE-SUB-*). Not inlined: only a subscriber runs it, and its second `Header` (the
+    /// stored "start") would add to the stack of each reply path (GitHub issue #1).
+    #[inline(never)]
+    fn start_reply(
+        &mut self,
+        i: usize,
+        peer: Muid,
+        header: &Header<'_>,
+        class: StatusClass,
+    ) -> Result<usize, SubscriptionError> {
+        if class != StatusClass::Success {
+            return Err(SubscriptionError::NotSuccess);
+        }
+        let Some(t) = self.txns[i].as_ref() else {
+            return Err(SubscriptionError::Invalid);
+        };
+        match Header::parse(HeaderKind::Subscription, &t.hdr[..t.hdr_len]) {
+            Ok(start) => self.subs.add_started(peer, &start, header),
+            Err(_) => Err(SubscriptionError::Invalid),
+        }
     }
 
     fn mark_list(&mut self, peer: Muid) {

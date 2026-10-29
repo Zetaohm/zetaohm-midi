@@ -743,6 +743,21 @@ Other sizes measured at the same time, no action proposed: `SendOrder` 96, `JrRe
 
 ## Done
 
+### OPT-053 — The PE reply path copies the transaction (done 2026-10-29)
+
+- Area: `crates/zmidi-ci-pe/src/transaction.rs` (`PeEngine::on_reply`, `close`). Reported in GitHub issue #1
+  (FLXS1 firmware: the deepest stack path of its priority level).
+- Measurement (`scripts/stack-check.py`, `PeEngine<2, 256, 4, 2>`, the FLXS1 settings): the frame of `on_reply`
+  1,376 B; the responder reply path (`on_reply`, `rx`, `close`) 1,928 B; `probe_pe_receive` 2,764 B.
+- Cause: `on_reply` copied the whole `Txn<H>` (H + 72 bytes) to read six small fields; `close` moved the
+  `Txn<H>` out of its slot and gave it back by value, so each caller kept room for it; the subscriber part of a
+  reply (the stored "start" header and `add_started`) was inlined into every reply.
+- Done: `on_reply` reads the fields in the slot; `close` clears the slot in place and gives a `TxnKey`; the
+  subscriber part is `start_reply` (`#[inline(never)]`). No API or behavior change. `on_reply` 1,376 -> 760 B,
+  the responder reply path 1,928 -> 1,200 B, `probe_pe_receive` 2,764 -> 2,152 B (budget 4,608 -> 2,368).
+- Found on the way: a responder-only build (`zmidi-ci` with no `initiator`) can not send Subscription updates
+  (the peer's PE Capabilities are stored only from a Reply, and `pe_request` needs `initiator`).
+
 ### OPT-052 — Size tiers: full MIDI 2.0 by default, opt-out features for small builds (done 2026-10-22)
 
 - Area: all crates; `tools/size-probe`, `scripts/size-check.py`, `scripts/feature-matrix.sh`; DEC-017.
