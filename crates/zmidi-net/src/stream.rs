@@ -2843,4 +2843,339 @@ mod tests {
             prop_assert_eq!(got, want);
         });
     }
+
+    // ---- limits found by mutation testing ----
+
+    #[test]
+    fn seq_range_holds_count_numbers_across_the_wrap() {
+        let r = SeqRange {
+            first: SeqNum(0xFFFE),
+            count: 3,
+        };
+        for (n, inside) in [
+            (0xFFFD, false),
+            (0xFFFE, true),
+            (0xFFFF, true),
+            (0, true),
+            (1, false),
+        ] {
+            assert_eq!(r.contains(SeqNum(n)), inside, "{n:#x}");
+        }
+    }
+
+    /// The receive window against a model with absolute numbers: H, the processed numbers,
+    /// and the numbers that leave the window (REQ-NET-DATA-009, -010, -016, N-01, N-03).
+    fn window_matches_model<const W: usize>(ops: &[(u8, u16)]) -> Result<(), TestCaseError> {
+        use std::collections::BTreeSet;
+        let w = W as i64;
+        let wire = |x: i64| SeqNum(x.rem_euclid(0x1_0000) as u16);
+        let mut win = ReceiveWindow::<W>::new();
+        // The start state: H = -1 and the W numbers before it are processed.
+        let mut h: i64 = -1;
+        let mut done: BTreeSet<i64> = (-1 - w..=-1).collect();
+        for &(kind, v) in ops {
+            let seq = match kind {
+                0..=2 => h + 1 + i64::from(v) % (w + 3),
+                3 => h + 1 + i64::from(v) % 0x7FFF,
+                _ => h - i64::from(v) % (w + 3),
+            };
+            let class = win.classify(wire(seq));
+            let got = win.accept(wire(seq));
+            prop_assert_eq!(got.class, class);
+            if seq > h {
+                // The numbers below seq - W leave: those of the old window that were not
+                // processed, and the skipped numbers H + 1 .. seq - W - 1 (none processed).
+                let mut gone: Vec<i64> = (h - w..h.min(seq - w))
+                    .filter(|x| !done.contains(x))
+                    .collect();
+                if seq - w > h + 1 {
+                    gone.push(seq - w - 1);
+                }
+                let first = gone.first().copied().map(|o| o.min(h + 1));
+                let lost = first.map(|o| SeqRange {
+                    first: wire(o),
+                    count: (gone[gone.len() - 1] - o + 1) as u16,
+                });
+                prop_assert_eq!(
+                    got,
+                    Accepted {
+                        class: Class::New {
+                            gap: (seq - h - 1) as u16
+                        },
+                        lost
+                    }
+                );
+                h = seq;
+            } else {
+                let late = seq < h && seq >= h - w && !done.contains(&seq);
+                let class = if late { Class::Late } else { Class::Duplicate };
+                prop_assert_eq!(got, Accepted { class, lost: None });
+            }
+            done.insert(seq);
+            done = done.split_off(&(h - w - 4));
+            let missing: Vec<i64> = (h - w..h).filter(|x| !done.contains(x)).collect();
+            let want = missing.first().map(|&o| SeqRange {
+                first: wire(o),
+                count: (missing[missing.len() - 1] - o + 1) as u16,
+            });
+            prop_assert_eq!(win.missing(), want);
+            prop_assert_eq!(win.highest(), wire(h));
+            for x in h - w - 2..=h + 2 {
+                let processed = x == h || (x >= h - w && x < h && done.contains(&x));
+                prop_assert_eq!(win.is_processed(wire(x)), processed, "{}", x);
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn prop_receive_window_matches_the_model() {
+        proptest!(|(ops in prop::collection::vec((0u8..6, any::<u16>()), 0..100))| {
+            window_matches_model::<8>(&ops)?;
+            window_matches_model::<64>(&ops)?;
+            window_matches_model::<128>(&ops)?;
+        });
+    }
+
+    #[test]
+    fn window_numbers_at_the_edges() {
+        // A jump of W + 2 is the first one that pushes a skipped number out (gap_lost).
+        let mut win = ReceiveWindow::<8>::new();
+        win.accept(SeqNum(0));
+        assert_eq!(win.accept(SeqNum(9)).lost, None);
+        let mut win = ReceiveWindow::<8>::new();
+        win.accept(SeqNum(0));
+        let a = win.accept(SeqNum(10));
+        assert_eq!(
+            a.lost,
+            Some(SeqRange {
+                first: SeqNum(1),
+                count: 1
+            })
+        );
+        // After a jump of 2 the old H is processed and the skipped number is not.
+        let mut win = ReceiveWindow::<8>::new();
+        win.accept(SeqNum(0));
+        win.accept(SeqNum(2));
+        assert!(win.is_processed(SeqNum(0)));
+        assert!(!win.is_processed(SeqNum(1)));
+        assert!(win.is_processed(SeqNum(2)));
+        // Two missing numbers that do not touch H: 1 and 2 before H = 4.
+        let mut win = ReceiveWindow::<8>::new();
+        for n in [0, 3, 4] {
+            win.accept(SeqNum(n));
+        }
+        assert_eq!(
+            win.missing(),
+            Some(SeqRange {
+                first: SeqNum(1),
+                count: 2
+            })
+        );
+    }
+
+    #[test]
+    fn send_queue_capacity_is_exact() {
+        // C = 512 words: 504 one-word messages take 8 Commands, 504 + 8 = 512 words.
+        let cfg = StreamConfig {
+            fec_repeats: 0,
+            ..StreamConfig::DEFAULT
+        };
+        let mut s: Stream = TestStream::new(cfg).unwrap();
+        let words: Vec<u32> = (0..505).map(msg).collect();
+        assert_eq!(s.send_ump(&words), Err(StreamError::Full));
+        s.send_ump(&words[..504]).unwrap();
+        assert_eq!(s.send_ump(&words[..1]), Err(StreamError::Full));
+        assert_eq!(s.sender().next_seq(), SeqNum(0));
+        let mut sent = Vec::new();
+        loop {
+            let p = payload(&mut s, 0);
+            if p.is_empty() {
+                break;
+            }
+            sent.extend(seqs(&p));
+        }
+        assert_eq!(sent, (0..8).collect::<Vec<u16>>());
+        assert_eq!(s.sender().next_seq(), SeqNum(8));
+        // The written Commands give their words back: the same quantity fits again.
+        s.send_ump(&words[..504]).unwrap();
+        assert_eq!(s.sender().next_seq(), SeqNum(8));
+    }
+
+    #[test]
+    fn a_message_of_max_command_words_fits() {
+        // REQ-NET-PKT-004: a message longer than one Command is refused; one as long is not.
+        let two = [0x4090_3C00, 0x8000_0000];
+        for (max, ok) in [(2, true), (1, false)] {
+            let cfg = StreamConfig {
+                max_command_words: max,
+                ..StreamConfig::DEFAULT
+            };
+            let mut s: Stream = TestStream::new(cfg).unwrap();
+            let r = s.send_ump(&two);
+            assert_eq!(r.is_ok(), ok, "{max}");
+        }
+    }
+
+    #[test]
+    fn retransmit_serves_only_written_commands_and_counts_them() {
+        // REQ-NET-RTX-005, -006: a number that was not written yet is not in the buffer.
+        let cfg = StreamConfig {
+            fec_repeats: 0,
+            ..StreamConfig::DEFAULT
+        };
+        let mut s: Stream = TestStream::new(cfg).unwrap();
+        advance(&mut s, 2);
+        s.send_ump(&[msg(2)]).unwrap();
+        let not_written = s.on_retransmit_request(RetransmitRequest {
+            seq: SeqNum(2),
+            count: 1,
+        });
+        assert!(
+            matches!(not_written, RequestOutcome::Error(_)),
+            "{not_written:?}"
+        );
+        let all = s.on_retransmit_request(RetransmitRequest {
+            seq: SeqNum(0),
+            count: 0,
+        });
+        assert_eq!(all, RequestOutcome::Queued);
+        let mut buf = [0u8; 1400];
+        let mut w = PayloadWriter::new(&mut buf, MaxPayload::default());
+        let r = s.write_data(0, &mut w).unwrap();
+        assert_eq!(
+            r,
+            Written {
+                commands: 3,
+                more: false
+            }
+        );
+        let n = w.finish().unwrap();
+        assert_eq!(seqs(&buf[..n]), [0, 1, 2]);
+    }
+
+    #[test]
+    fn retransmit_error_for_a_removed_number_is_counted() {
+        // REQ-NET-RTX-006: the request was queued; the Command left the history before the
+        // write. The Retransmit Error and the new Commands are counted.
+        let cfg = StreamConfig {
+            fec_repeats: 0,
+            ..StreamConfig::DEFAULT
+        };
+        let mut s: Stream = TestStream::new(cfg).unwrap();
+        advance(&mut s, 1);
+        let r = s.on_retransmit_request(RetransmitRequest {
+            seq: SeqNum(0),
+            count: 1,
+        });
+        assert_eq!(r, RequestOutcome::Queued);
+        let words: Vec<u32> = (0..504).map(msg).collect();
+        s.send_ump(&words).unwrap();
+        assert_eq!(s.sender().history.oldest(), SeqNum(1));
+        let mut buf = [0u8; 1400];
+        let mut w = PayloadWriter::new(&mut buf, MaxPayload::default());
+        let r = s.write_data(0, &mut w).unwrap();
+        let n = w.finish().unwrap();
+        let codes: Vec<u8> = cmds(&buf[..n]).iter().map(|c| c.0).collect();
+        // The Retransmit Error, then five Commands of 64 words (4 + 8 + 5 * 260 bytes).
+        assert_eq!(codes, [0x81, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+        assert_eq!(
+            r,
+            Written {
+                commands: 6,
+                more: true
+            }
+        );
+    }
+
+    #[test]
+    fn fec_repeats_and_requests_are_counted() {
+        // Written::commands holds the FEC repeats (REQ-NET-FEC-001) and the Retransmit
+        // Request (REQ-NET-RTX-009).
+        let mut s = stream();
+        advance(&mut s, 2);
+        s.send_ump(&[msg(2)]).unwrap();
+        let mut buf = [0u8; 1400];
+        let mut w = PayloadWriter::new(&mut buf, MaxPayload::default());
+        let r = s.write_data(0, &mut w).unwrap();
+        assert_eq!(r.commands, 3);
+        let mut s = stream();
+        recv_seq(&mut s, 0, 0);
+        recv_seq(&mut s, 0, 2);
+        assert_eq!(s.poll(10), None);
+        let mut w = PayloadWriter::new(&mut buf, MaxPayload::default());
+        let r = s.write_data(10, &mut w).unwrap();
+        assert_eq!(
+            r,
+            Written {
+                commands: 1,
+                more: false
+            }
+        );
+    }
+
+    #[test]
+    fn idle_command_waits_while_data_is_queued() {
+        // REQ-NET-DATA-012: the idle Zero Length Command is for a stream with nothing to
+        // send; queued data goes alone.
+        let cfg = StreamConfig {
+            fec_repeats: 0,
+            ..StreamConfig::DEFAULT
+        };
+        let mut s: Stream = TestStream::new(cfg).unwrap();
+        advance(&mut s, 1);
+        s.send_ump(&[msg(1)]).unwrap();
+        let p = payload(&mut s, 1000);
+        assert_eq!(cmds(&p), [(0xFF, 1, vec![msg(1)])]);
+    }
+
+    #[test]
+    fn nak_with_no_open_request_gives_no_loss() {
+        // REQ-NET-RTX-011: no request was written, so nothing is lost.
+        let mut s = stream();
+        assert_eq!(s.on_retransmit_nak(), None);
+    }
+
+    #[test]
+    fn retransmit_queue_length_and_clear() {
+        let mut q = RetransmitQueue::<4>::new();
+        assert_eq!((q.len(), q.is_empty()), (0, true));
+        for i in 0..2 {
+            q.push(RetransmitRequest {
+                seq: SeqNum(i),
+                count: 1,
+            })
+            .unwrap();
+        }
+        assert_eq!((q.len(), q.is_empty()), (2, false));
+        q.clear();
+        assert_eq!((q.len(), q.is_empty()), (0, true));
+        assert_eq!(q.front(), None);
+    }
+
+    #[test]
+    fn send_history_edges() {
+        let mut h = SendHistory::<66>::new();
+        assert!(h.is_empty());
+        assert!(!h.contains(SeqNum(0)));
+        h.push(&[1]);
+        assert!(!h.is_empty());
+        assert!(h.contains(SeqNum(0)));
+        assert!(!h.contains(SeqNum(1)));
+        // 2 + 63 = 65 words in use; one word joins the last Command with no removal.
+        let long: Vec<u32> = (10..72).collect();
+        h.push(&long);
+        assert_eq!(h.words(), 65);
+        h.append_to_last(&[72]);
+        assert_eq!((h.oldest(), h.len(), h.words()), (SeqNum(0), 2, 66));
+        // Two words join in order.
+        let mut h = SendHistory::<66>::new();
+        h.push(&[1]);
+        h.append_to_last(&[2, 3]);
+        let mut buf = [0u8; 64];
+        let mut w = PayloadWriter::new(&mut buf, MaxPayload::default());
+        h.write_entry(&mut w, h.index_of(0)).unwrap();
+        let n = w.finish().unwrap();
+        assert_eq!(cmds(&buf[..n]), [(0xFF, 0, vec![1, 2, 3])]);
+    }
 }

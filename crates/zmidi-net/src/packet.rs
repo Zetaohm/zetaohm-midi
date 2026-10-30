@@ -526,7 +526,9 @@ mod tests {
         );
         let max = MaxPayload::new(16).unwrap();
         let mut w = PayloadWriter::new(&mut buf, max);
+        assert!(w.is_empty());
         w.command(0x20, 0, 0, |w| w.word(1)).unwrap(); // 4 + 8 = 12 bytes
+        assert!(!w.is_empty());
         assert_eq!(
             w.command(0x20, 0, 0, |w| w.word(2)),
             Err(PacketError::Overflow)

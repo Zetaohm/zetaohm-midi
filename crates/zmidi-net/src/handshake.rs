@@ -2768,6 +2768,93 @@ mod tests {
         });
     }
 
+    #[test]
+    fn no_credentials_and_the_default_answer() {
+        // N-52: NoCredentials gives nothing; the default answer_now answers at once.
+        let mut n = NoCredentials;
+        assert_eq!(n.random_nonce(), None);
+        assert_eq!(n.shared_secret(), None);
+        assert_eq!(n.password(b"Rosa"), None);
+        assert_eq!(n.user(), None);
+        let challenge = Challenge {
+            method: Method::SharedSecret,
+            state: 0,
+        };
+        assert!(n.answer_now(challenge));
+    }
+
+    #[test]
+    fn host_without_random_bytes_gives_no_challenge() {
+        // N-53, REQ-NET-INV-015: no challenge and Bye 0x45 in each build; with the feature
+        // the error tells why. Without it no method matches.
+        let mut h = Side::host(HostPolicy::new(PolicyKind::SharedSecret));
+        let mut c = Side::client(Capabilities {
+            auth: true,
+            user_auth: false,
+        });
+        let o = c.start(0);
+        let o = send(0, &c, &o, &mut h);
+        assert_eq!(o.reply, Some(Reply::Bye(ByeReason::NO_MATCHING_METHOD)));
+        let error = HandshakeEvent::CredentialsError(CredentialsError::NoRandom);
+        let expected: &[HandshakeEvent] = if cfg!(feature = "auth") {
+            &[error]
+        } else {
+            &[]
+        };
+        assert_eq!(events(&o), expected);
+    }
+
+    #[test]
+    fn peer_info_marks_a_cut_field() {
+        // N-32: a name over 98 bytes or an id over 42 bytes is cut and marked.
+        let peer = |n: &[u8], i: &[u8]| PeerInfo::new(NetStr::from_field(n), NetStr::from_field(i));
+        let p = peer(b"MyDev", b"8shYe3h5");
+        assert!(!p.is_truncated());
+        // The fields only, not the unused bytes of the arrays.
+        assert_eq!(
+            std::format!("{p:?}"),
+            "PeerInfo { name: NetStr([77, 121, 68, 101, 118]), \
+             product_instance_id: NetStr([56, 115, 104, 89, 101, 51, 104, 53]) }"
+        );
+        assert!(!peer(&[b'n'; 98], &[b'i'; 42]).is_truncated());
+        assert!(peer(&[b'n'; 99], b"i").is_truncated());
+        assert!(peer(b"n", &[b'i'; 43]).is_truncated());
+    }
+
+    #[test]
+    fn outcome_and_events_are_empty_only_with_nothing() {
+        let header = Header::from_bytes([0x20, 0, 0, 0]);
+        assert!(Outcome::default().is_empty());
+        assert!(!Outcome::reply(Reply::Accepted).is_empty());
+        assert!(!Outcome::default().next(Idle).is_empty());
+        assert!(!Outcome::default().repeat(Repeat::Stop).is_empty());
+        let o = Outcome::default().event(HandshakeEvent::Expired);
+        assert!(!o.is_empty());
+        assert_eq!((o.events.len(), o.events.is_empty()), (1, false));
+        assert!(Outcome::default().events.is_empty());
+        assert_eq!(Outcome::default().events.len(), 0);
+        let o = Outcome::nak(NakReason::COMMAND_NOT_EXPECTED, header)
+            .event(HandshakeEvent::Expired)
+            .event(HandshakeEvent::Expired);
+        assert_eq!(o.events.len(), 2);
+    }
+
+    #[test]
+    fn touch_moves_only_the_host_answer_deadline() {
+        // REQ-NET-SES-002: only a Host with an answer timeout starts it again.
+        let mut c = Side::client(Capabilities::default());
+        let mut h = Side::host(HostPolicy::DEFAULT);
+        let o = c.start(0);
+        send(0, &c, &o, &mut h);
+        assert_eq!(h.state, EstablishedSession);
+        assert_eq!(h.hs.next_deadline(h.state), None);
+        h.hs.touch(&h.cfg, 100);
+        assert_eq!(h.hs.next_deadline(h.state), None);
+        let before = c.hs.next_deadline(c.state);
+        c.hs.touch(&c.cfg, 100);
+        assert_eq!(c.hs.next_deadline(c.state), before);
+    }
+
     #[cfg(feature = "auth")]
     mod auth_flow {
         use super::*;
@@ -2828,6 +2915,33 @@ mod tests {
         fn invite(now: u64, h: &mut Side, c: &mut Side) -> Outcome {
             let o = c.start(now);
             send(now, c, &o, h)
+        }
+
+        #[test]
+        fn username_limits() {
+            // REQ-NET-AUTH-044: 1 to the capacity and to MAX_USERNAME bytes; no BOM at the
+            // start and no 0x00.
+            let too_long = Err(CredentialsError::UsernameTooLong);
+            let invalid = Err(CredentialsError::InvalidUsername);
+            assert_eq!(check_username(&[b'u'; 128], 128), Ok(()));
+            assert_eq!(check_username(&[b'u'; 129], 128), too_long);
+            assert_eq!(check_username(&[b'u'; MAX_USERNAME], 2000), Ok(()));
+            assert_eq!(check_username(&[b'u'; MAX_USERNAME + 1], 2000), too_long);
+            assert_eq!(check_username(b"", 128), invalid);
+            assert_eq!(check_username(b"\xEF\xBB\xBFu", 128), invalid);
+            assert_eq!(check_username(b"u\0", 128), invalid);
+            assert_eq!(check_username(b"u\xEF\xBB\xBF", 128), Ok(()));
+        }
+
+        #[test]
+        fn auth_reply_that_does_not_fit_is_a_command_error() {
+            // The writer error of an authentication Command keeps its kind.
+            let (mut h, mut c) = shared_pair();
+            let o = invite(0, &mut h, &mut c);
+            let mut buf = [0u8; 64];
+            let mut w = PayloadWriter::new(&mut buf, MaxPayload::new(16).unwrap());
+            let r = o.reply.unwrap().write(&h.hs, &h.id, &mut w);
+            assert!(matches!(r, Err(HandshakeError::Command(_))), "{r:?}");
         }
 
         #[test]

@@ -142,6 +142,11 @@ mod tests {
     fn endpoint_name_rules() {
         // REQ-NET-DISC-011.
         assert_eq!(EndpointName::new("MyDev").unwrap().as_str(), "MyDev");
+        // Debug shows the text, not the unused bytes of the array.
+        let debug = std::format!("{:?}", EndpointName::new("MyDev").unwrap());
+        assert_eq!(debug, r#"EndpointName("MyDev")"#);
+        let debug = std::format!("{:?}", ProductInstanceId::new("8shYe3h5").unwrap());
+        assert_eq!(debug, r#"ProductInstanceId("8shYe3h5")"#);
         assert_eq!(EndpointName::new("Synthé ♪").unwrap().as_str(), "Synthé ♪");
         assert_eq!(EndpointName::new(""), Err(IdentityError::Empty));
         let n98 = "x".repeat(98);

@@ -1024,6 +1024,7 @@ mod tests {
             panic!()
         };
         assert_eq!(d.seq, SeqNum(0x11));
+        assert!(!d.is_empty());
         let m: Vec<_> = d.messages().map(|m| m.words().to_vec()).collect();
         assert_eq!(m, [[0x4590_4000, 0x1234_0000], [0x4580_4000, 0x0100_0000]]);
         let a14 = raw(&[

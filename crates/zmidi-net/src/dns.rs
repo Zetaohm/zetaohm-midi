@@ -846,7 +846,29 @@ mod tests {
         let mut out = [0; 255];
         let n = p.name.write_wire(&mut out).unwrap();
         assert_eq!(&out[..n], &ptr_rdata_vector()[..]);
+        assert_eq!(p.name.wire_len(), n);
         assert_eq!(read_name(&msg, rdata_at).unwrap().1, msg.len());
+    }
+
+    #[test]
+    fn name_reader_follows_a_pointer_above_255() {
+        // RFC 1035 4.1.4: the pointer has 14 bits of offset.
+        let mut msg = Vec::from([0u8; 300]);
+        msg.extend_from_slice(b"\x03abc\x00");
+        msg.extend_from_slice(b"\x01x\xC1\x2C");
+        let (name, end) = read_name(&msg, 305).unwrap();
+        assert_eq!(end, msg.len());
+        assert_eq!(name.wire_len(), 7);
+        assert_eq!(name.labels().collect::<Vec<_>>(), [&b"x"[..], b"abc"]);
+    }
+
+    #[test]
+    fn labels_stop_at_the_root_label() {
+        // The bytes after the root label are not part of the name.
+        let msg = b"\x01a\x00\x04\x01b\x00";
+        let (name, end) = read_name(msg, 0).unwrap();
+        assert_eq!(end, 3);
+        assert_eq!(name.labels().collect::<Vec<_>>(), [&b"a"[..]]);
     }
 
     #[test]
@@ -958,6 +980,11 @@ mod tests {
             Hostname::new("desktop.local").unwrap().as_str(),
             "desktop.local."
         );
+        // Debug shows the text, not the unused bytes of the array.
+        let debug = std::format!("{:?}", Hostname::new("desktop.local").unwrap());
+        assert_eq!(debug, r#"Hostname("desktop.local.")"#);
+        let debug = std::format!("{:?}", ServiceInstanceName::new("MyDev").unwrap());
+        assert_eq!(debug, r#"ServiceInstanceName("MyDev")"#);
         assert_eq!(
             Hostname::new("desktop.LOCAL.").unwrap().as_str(),
             "desktop.LOCAL."
@@ -1062,6 +1089,10 @@ mod tests {
         // REQ-NET-DISC-014, N-59.
         assert_eq!(Ttl::default().seconds(), 60);
         assert_eq!(records(1, "a.local").ttl().seconds(), 60);
+        assert_eq!(
+            records(1, "a.local").with_ttl(30).unwrap().ttl().seconds(),
+            30
+        );
         assert_eq!(Ttl::new(0), Err(DnsError::InvalidTtl));
         assert_eq!(Ttl::new(61), Err(DnsError::InvalidTtl));
         assert_eq!(Ttl::new(1).unwrap().seconds(), 1);

@@ -1534,6 +1534,7 @@ mod tests {
     struct Creds {
         random: Option<[u8; NONCE_RANDOM_LEN]>,
         secret: Option<Vec<u8>>,
+        later: bool,
     }
 
     impl Credentials for Creds {
@@ -1548,6 +1549,9 @@ mod tests {
         }
         fn user(&mut self) -> Option<(&[u8], &[u8])> {
             None
+        }
+        fn answer_now(&mut self, _challenge: crate::handshake::Challenge) -> bool {
+            !self.later
         }
     }
 
@@ -3001,6 +3005,7 @@ mod tests {
         w.hcreds = Creds {
             random: Some([7; NONCE_RANDOM_LEN]),
             secret: Some(b"s3cret".to_vec()),
+            ..Creds::default()
         };
         let shared = ClientConfig {
             capabilities: Capabilities {
@@ -3041,6 +3046,7 @@ mod tests {
         w.hcreds = Creds {
             random: Some([7; NONCE_RANDOM_LEN]),
             secret: None,
+            ..Creds::default()
         };
         let i = w.add(
             "10.0.0.2:6000",
@@ -3088,6 +3094,7 @@ mod tests {
         w.hcreds = Creds {
             random: Some([7; NONCE_RANDOM_LEN]),
             secret: Some(b"s3cret".to_vec()),
+            ..Creds::default()
         };
         let i = w.add(
             "10.0.0.2:6000",
@@ -3151,6 +3158,215 @@ mod tests {
         w.nodes[i].c.send_ump(h, &[NOTE]).unwrap();
         w.run(3);
         assert_eq!(w.host_data(c), [NOTE]);
+    }
+
+    #[test]
+    fn stateless_ping_reply_needs_the_address_and_the_id() {
+        // REQ-NET-PING-007: a Ping Reply closes the open Ping of its address and Ping Id only.
+        let mut c: Client = Client::new(client_cfg()).unwrap();
+        let (a, b) = (addr("10.0.0.1:5673"), addr("10.0.0.2:5673"));
+        assert_eq!(c.next_deadline(), None);
+        c.ping(7, a, Some(1)).unwrap();
+        assert_eq!(c.next_deadline(), Some(7));
+        c.ping(7, b, Some(2)).unwrap();
+        let mut buf = [0u8; 1400];
+        while c.write_pending(7, &mut buf).is_some() {}
+        assert_eq!(c.next_deadline(), None);
+        let reply = |id: u32| {
+            let mut p = midi(&[0x21, 1, 0, 0]);
+            p.extend_from_slice(&id.to_be_bytes());
+            p
+        };
+        let mut cr = Creds::default();
+        let mut got = |from, id| -> bool {
+            let (log, _) = c.rx(9, from, &reply(id), &mut cr);
+            log.contains(&(from, Ev::Ping(id)))
+        };
+        assert!(!got(b, 1), "the id of another address");
+        assert!(!got(a, 2), "another id of the address");
+        assert!(got(a, 1));
+        assert!(got(b, 2));
+        assert!(!got(a, 1), "closed");
+    }
+
+    #[test]
+    fn ping_timeout_events_survive_a_dropped_iterator() {
+        // REQ-NET-PING-009: 5 missed automatic Pings give Timeout and Bye 0x04 in one poll.
+        // The caller reads the first event and drops the iterator: the second waits.
+        let mut c: Client = Client::new(ClientConfig::new(client_id())).unwrap();
+        let mut host: Host = Host::new(host_cfg()).unwrap();
+        let (h, me) = (addr("10.0.0.1:5673"), addr("10.0.0.2:6000"));
+        c.connect(0, h).unwrap();
+        let (_, out) = c.tx(0);
+        let _ = host.rx(0, me, &out[0].1, &mut Creds::default());
+        let (_, back) = host.tx(0);
+        let (log, _) = c.rx(0, h, &back[0].1, &mut Creds::default());
+        assert!(log.contains(&(h, Ev::Established(None))), "{log:?}");
+        let s = c.session(h).unwrap();
+        assert_eq!(s.next_deadline(), Some(2000));
+        assert!(!s.wants_write(1));
+        assert!(s.wants_write(2000));
+        assert!(!s.is_refused(CommandCode::Ping));
+        assert_eq!((s.missed_pings(), s.dropped_replies()), (0, 0));
+        // Six Pings of the Host in one payload: the queue of 4 replies drops two.
+        let mut six = midi(&[]);
+        for id in 0..6u32 {
+            six.extend_from_slice(&[0x20, 1, 0, 0]);
+            six.extend_from_slice(&id.to_be_bytes());
+        }
+        let _ = c.rx(1, h, &six, &mut Creds::default());
+        assert_eq!(c.session(h).unwrap().dropped_replies(), 2);
+        let mut buf = [0u8; 1400];
+        let mut missed = Vec::new();
+        for t in (100..30_000).step_by(100) {
+            let mut p = c.poll(t);
+            let first = p.next().map(|e| own(&e).1);
+            drop(p);
+            if first == Some(Ev::Other("Timeout".into())) {
+                let rest: Vec<_> = c.poll(t).map(|e| own(&e).1).collect();
+                assert_eq!(rest, [Ev::Ending(4)]);
+                assert_eq!(missed.iter().max(), Some(&5));
+                return;
+            }
+            assert_eq!(first, None);
+            while c.write_pending(t, &mut buf).is_some() {}
+            missed.push(c.session(h).unwrap().missed_pings());
+        }
+        panic!("no timeout: {missed:?}");
+    }
+
+    #[test]
+    fn write_pending_polls_the_timers_first() {
+        // The Session contract: poll before write. After the Invitation timeout, the next
+        // write is Bye 0x80, not one more Invitation (REQ-NET-INV-011).
+        let mut c: Client = Client::new(client_cfg()).unwrap();
+        let h = addr("10.0.0.1:5673");
+        c.connect(0, h).unwrap();
+        let _ = c.poll(0).count();
+        let mut buf = [0u8; 1400];
+        let (_, n) = c.write_pending(0, &mut buf).unwrap();
+        assert_eq!(commands(&buf[..n])[0].header.code, 0x01);
+        let (_, n) = c.write_pending(20_000, &mut buf).unwrap();
+        let cmd = commands(&buf[..n])[0];
+        assert_eq!((cmd.header.code, cmd.header.csd1), (0xF0, 0x80));
+        let log: Vec<_> = c.poll(20_000).map(|e| own(&e).1).collect();
+        assert_eq!(log, [Ev::Ending(0x80)]);
+    }
+
+    #[test]
+    fn write_pending_takes_the_sessions_in_turn_payload_by_payload() {
+        // Round robin: with one Command in each UDP payload, the sessions alternate.
+        let small = MaxPayload::new(12).unwrap();
+        let mut w = World::new(HostConfig {
+            max_payload: small,
+            ..host_cfg()
+        });
+        for k in 0..2 {
+            let i = w.add(&format!("10.0.0.{}:6000", k + 2), client_cfg());
+            w.connect(i);
+        }
+        w.run(20);
+        let (a, b) = (w.nodes[0].addr, w.nodes[1].addr);
+        let now = w.now;
+        for _ in 0..2 {
+            w.host.send_ump(a, &[NOTE]).unwrap();
+            w.host.send_ump(b, &[NOTE2]).unwrap();
+        }
+        let _ = w.host.poll(now).count();
+        let mut buf = [0u8; 1400];
+        let mut to = Vec::new();
+        while let Some((d, n)) = w.host.write_pending(now, &mut buf) {
+            assert_eq!(n, 12);
+            to.push(d);
+        }
+        assert_eq!(to, [a, b, a, b]);
+    }
+
+    #[test]
+    fn data_event_only_with_messages_or_a_gap() {
+        // REQ-NET-DATA-011: an in-order Zero Length Command gives no event; one after a gap
+        // gives the gap (REQ-NET-DATA-010).
+        let mut w = established_world(1);
+        let c = w.nodes[0].addr;
+        let now = w.now;
+        let data = |log: &Log| {
+            log.iter()
+                .filter(|(_, e)| matches!(e, Ev::Data(..)))
+                .count()
+        };
+        let (log, _) = w
+            .host
+            .rx(now, c, &midi(&[0xFF, 0, 0, 0]), &mut Creds::default());
+        assert_eq!(data(&log), 0, "{log:?}");
+        let (log, _) = w
+            .host
+            .rx(now, c, &midi(&[0xFF, 0, 0, 5]), &mut Creds::default());
+        assert_eq!(data(&log), 1, "{log:?}");
+    }
+
+    #[test]
+    fn one_received_command_gives_all_its_events() {
+        // The events of one Command come out in order, each once.
+        let mut w = established_world(1);
+        let c = w.nodes[0].addr;
+        // A Zero Length Command after a gap, then one with a NOTE and a cut message.
+        let p = midi(&[
+            0xFF, 0x00, 0x00, 0x03, 0xFF, 0x02, 0x00, 0x04, 0x20, 0x90, 0x3C, 0x40, 0x40, 0x90,
+            0x3C, 0x00,
+        ]);
+        let (log, _) = w.host.rx(w.now, c, &p, &mut Creds::default());
+        let nak = Diagnostic::NakSent {
+            reason: NakReason::COMMAND_MALFORMED,
+            header: Header::from_bytes([0xFF, 0x02, 0x00, 0x04]),
+        };
+        assert_eq!(
+            log,
+            [
+                (c, Ev::Data(vec![], false)),
+                (c, Ev::Data(vec![NOTE], false)),
+                (c, Ev::Diag(nak)),
+            ]
+        );
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn client_answers_the_challenge_later_through_the_endpoint() {
+        // REQ-NET-AUTH-034: Client::answer writes the reply after answer_now gave false.
+        let mut w = World::new(HostConfig {
+            policy: HostPolicy::new(PolicyKind::SharedSecret),
+            ..host_cfg()
+        });
+        w.hcreds = Creds {
+            random: Some([7; NONCE_RANDOM_LEN]),
+            secret: Some(b"s3cret".to_vec()),
+            ..Creds::default()
+        };
+        let i = w.add(
+            "10.0.0.2:6000",
+            ClientConfig {
+                capabilities: Capabilities {
+                    auth: true,
+                    user_auth: false,
+                },
+                ..client_cfg()
+            },
+        );
+        w.nodes[i].creds.secret = Some(b"s3cret".to_vec());
+        w.nodes[i].creds.later = true;
+        w.connect(i);
+        w.run(20);
+        let h = w.haddr;
+        let n = &mut w.nodes[i];
+        assert_eq!(
+            n.c.session(h).unwrap().state(),
+            SessionState::AuthenticationRequired
+        );
+        n.creds.later = false;
+        let ev = n.c.answer(w.now, h, &mut n.creds).unwrap();
+        assert!(ev.is_empty());
+        w.run(5);
+        assert!(w.node_has(i, &Ev::Established(Some(Method::SharedSecret))));
     }
 
     // ----- never panics -----

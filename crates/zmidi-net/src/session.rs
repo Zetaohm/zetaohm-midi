@@ -2165,6 +2165,7 @@ mod tests {
     struct Creds {
         random: Option<[u8; NONCE_RANDOM_LEN]>,
         secret: Option<Vec<u8>>,
+        later: bool,
     }
 
     impl Credentials for Creds {
@@ -2179,6 +2180,9 @@ mod tests {
         }
         fn user(&mut self) -> Option<(&[u8], &[u8])> {
             None
+        }
+        fn answer_now(&mut self, _challenge: Challenge) -> bool {
+            !self.later
         }
     }
 
@@ -4295,6 +4299,198 @@ mod tests {
     }
 
     #[test]
+    fn bye_text_limits() {
+        // 6.16: up to BYE_TEXT_CAPACITY bytes; no BOM at the start and no 0x00.
+        let ok = Ok(());
+        let bad = Err(SessionError::Command(CommandError::InvalidText));
+        for (text, r) in [
+            ("x".repeat(BYE_TEXT_CAPACITY), ok),
+            ("x\u{FEFF}".into(), ok),
+            ("\u{FEFF}x".into(), bad),
+            ("a\0b".into(), bad),
+        ] {
+            let (mut c, _) = established(quiet());
+            let got = c.s().bye(0, ByeReason::USER_TERMINATED, &text).map(|_| ());
+            assert_eq!(got, r, "{text:?}");
+        }
+    }
+
+    #[test]
+    fn nak_01_in_pending_invitation_keeps_the_invitation_and_the_refusal() {
+        // REQ-NET-CMD-003: a NAK 0x01 for a Command that this side does not repeat does not
+        // end the invitation, and the refusal stays for the session that Accepted starts.
+        let mut c = Peer::client(quiet());
+        let mut h = Peer::host(quiet());
+        c.s().connect(0).unwrap();
+        c.receive(0, &nak_pkt(NakReason::COMMAND_NOT_SUPPORTED, 0x20, ""));
+        assert_eq!(c.state(), PendingInvitation);
+        assert!(c.s().is_refused(CommandCode::Ping));
+        round(0, &mut c, &mut h);
+        assert_eq!(c.state(), EstablishedSession);
+        assert!(c.s().is_refused(CommandCode::Ping));
+    }
+
+    #[test]
+    fn going_idle_keeps_only_the_replies_allowed_in_idle() {
+        // REQ-NET-DATA-014, REQ-NET-BYE-008: after a received Bye the Ping Reply and the Bye
+        // Reply go out; the Retransmit Error of the ended session does not. The open Pings
+        // close.
+        let (mut c, _) = established(quiet());
+        c.s().ping(0, 9).unwrap();
+        c.tick(0);
+        assert!(!c.s().open_pings().is_empty());
+        let mut p = ping_pkt(4);
+        for extra in [
+            payload(|w| {
+                RetransmitRequest {
+                    seq: SeqNum(0),
+                    count: 1,
+                }
+                .write(w)
+                .unwrap()
+            }),
+            payload(|w| Bye::write(w, Role::Host, ByeReason::TIMEOUT, "").unwrap()),
+        ] {
+            p.extend_from_slice(&extra[4..]);
+        }
+        c.receive(1, &p);
+        assert_eq!(c.state(), Idle);
+        assert!(c.s().open_pings().is_empty());
+        let mut got = all_codes(&c.tick(1));
+        got.sort_unstable();
+        assert_eq!(got, [0x21, 0xF1]);
+    }
+
+    #[test]
+    fn full_reply_queue_counts_the_dropped_replies() {
+        // R = 4 by default: the fifth and sixth Ping Reply are dropped and counted.
+        let (mut c, _) = established(quiet());
+        let mut p = ping_pkt(0);
+        for id in 1..6 {
+            p.extend_from_slice(&ping_pkt(id)[4..]);
+        }
+        c.receive(0, &p);
+        assert_eq!(c.s().dropped_replies(), 2);
+        assert_eq!(all_codes(&c.tick(0)), [0x21; 4]);
+    }
+
+    #[test]
+    fn write_payload_counts_the_commands_and_asks_for_more() {
+        // Written: the Commands in this UDP payload, and more when some wait.
+        let id = Identity::new("MyDev", "8shYe3h5").unwrap();
+        let (mut c, _) = established(quiet());
+        let mut p = ping_pkt(1);
+        for i in 2..4 {
+            p.extend_from_slice(&ping_pkt(i)[4..]);
+        }
+        c.receive(0, &p);
+        // The Signature and two Ping Replies of 8 bytes.
+        let small = MaxPayload::new(20).unwrap();
+        let write = |s: &mut S| {
+            let mut buf = [0u8; 1400];
+            let mut w = PayloadWriter::new(&mut buf, small);
+            s.write_payload(0, &id, &mut w).unwrap()
+        };
+        let more = |commands| Written {
+            commands,
+            more: true,
+        };
+        let done = |commands| Written {
+            commands,
+            more: false,
+        };
+        assert_eq!(write(c.s()), more(2));
+        assert_eq!(write(c.s()), done(1));
+        // UMP Data: Commands of one word (8 bytes) with max_command_words 1.
+        let mut cfg = quiet();
+        cfg.stream.max_command_words = 1;
+        let (mut c, _) = established(cfg);
+        for _ in 0..3 {
+            c.s().send_ump(&[NOTE]).unwrap();
+        }
+        assert_eq!(write(c.s()), more(2));
+        assert_eq!(write(c.s()), done(1));
+    }
+
+    #[test]
+    fn wants_write_waits_for_the_repeat_of_reset_and_bye() {
+        // REQ-NET-SES-005: after the write, the next Session Reset or Bye is due one repeat
+        // interval later.
+        let (mut c, _) = established(quiet());
+        c.s().reset(10).unwrap();
+        assert!(c.s().wants_write(10));
+        assert_eq!(all_codes(&c.tick(10)), [0x82]);
+        assert!(!c.s().wants_write(11));
+        assert!(c.s().wants_write(510));
+        let (mut c, _) = established(quiet());
+        c.s().bye(10, ByeReason::USER_TERMINATED, "").unwrap();
+        assert!(c.s().wants_write(10));
+        assert_eq!(all_codes(&c.tick(10)), [0xF0]);
+        assert!(!c.s().wants_write(11));
+        assert!(c.s().wants_write(510));
+    }
+
+    #[test]
+    fn idle_client_answers_data_with_one_bye_per_payload() {
+        // REQ-NET-DATA-015, N-16: a Session in Idle writes one Bye 0x05 for a UDP payload.
+        let mut c = Peer::client(quiet());
+        let mut p = data_pkt(0, &[NOTE]);
+        p.extend_from_slice(&data_pkt(1, &[NOTE])[4..]);
+        c.receive(0, &p);
+        let out = c.tick(0);
+        assert_eq!(all_codes(&out), [0xF0]);
+        assert_eq!(headers(&out[0])[0].csd1, 0x05);
+        assert_eq!(c.state(), Idle);
+    }
+
+    #[test]
+    fn pending_bye_drops_a_bye_05_for_reset_commands() {
+        // REQ-NET-RST-011 exception: Session Reset and Session Reset Reply in Pending Bye get
+        // no Bye 0x05, also when the Bye Reply ends the session in the same UDP payload.
+        let (mut c, _) = established(quiet());
+        c.s().bye(0, ByeReason::USER_TERMINATED, "").unwrap();
+        assert_eq!(all_codes(&c.tick(0)), [0xF0]);
+        let mut p = empty_pkt(CommandCode::SessionReset);
+        for code in [CommandCode::SessionResetReply, CommandCode::ByeReply] {
+            p.extend_from_slice(&empty_pkt(code)[4..]);
+        }
+        c.receive(1, &p);
+        assert_eq!(c.state(), Idle);
+        assert!(c.tick(1).is_empty());
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn client_answers_a_challenge_later() {
+        // REQ-NET-AUTH-034: answer_now false waits in Authentication Required; Session::answer
+        // writes the Invitation with Authentication.
+        let caps = Capabilities {
+            auth: true,
+            user_auth: false,
+        };
+        let mut c = Peer::client(quiet());
+        c.s = Some(S::client(quiet(), caps).unwrap());
+        c.creds.secret = Some(b"secret".to_vec());
+        c.creds.later = true;
+        let mut h = Peer::host(quiet());
+        h.policy = HostPolicy::new(PolicyKind::SharedSecret);
+        h.creds.random = Some([7; 16]);
+        h.creds.secret = Some(b"secret".to_vec());
+        c.s().connect(0).unwrap();
+        round(0, &mut c, &mut h);
+        assert_eq!(c.take_ev(), [Ev::AuthRequested(Method::SharedSecret)]);
+        assert_eq!(c.state(), AuthenticationRequired);
+        assert!(c.tick(0).is_empty());
+        let mut creds = std::mem::take(&mut c.creds);
+        let ev = c.s().answer(1, &mut creds);
+        assert_eq!(ev.iter().map(own).collect::<Vec<_>>(), []);
+        assert_eq!(c.state(), PendingInvitation);
+        round(1, &mut c, &mut h);
+        assert_eq!(c.state(), EstablishedSession);
+        assert_eq!(h.state(), EstablishedSession);
+    }
+
+    #[test]
     fn prop_receive_never_panics() {
         // Nothing panics on received bytes; NAK is never answered with a NAK (N-29).
         proptest!(|(cmds in proptest::collection::vec(
@@ -4332,6 +4528,7 @@ mod tests {
         }
         assert_eq!(e.len(), EVENTS_CAPACITY);
         assert!(!e.is_empty());
+        assert!(Events::default().is_empty());
         let _ = format!("{:?}", e);
     }
 }
