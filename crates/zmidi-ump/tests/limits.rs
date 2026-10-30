@@ -7,7 +7,6 @@ use zmidi_ump::flex_data::{
 };
 use zmidi_ump::scale::decode_step;
 use zmidi_ump::system::MidiTimeCode;
-use zmidi_ump::translate::{to_midi1, Midi1ToMidi2Group};
 use zmidi_ump::ump_stream::{
     DeviceIdentityNotification, FunctionBlockDirection, FunctionBlockDiscovery, FunctionBlockInfo,
     FunctionBlockInfoNotification, FunctionBlockMidi1, StreamConfigurationNotification,
@@ -203,6 +202,7 @@ fn channel_voice_and_system_values_at_their_limits() {
 #[cfg(feature = "channel-voice1")]
 #[test]
 fn translators() {
+    use zmidi_ump::translate::{to_midi1, Midi1ToMidi2Group};
     // One MIDI 2.0 Note On gives one MIDI 1.0 Note On.
     let on = Ump::parse(&[0x4090_3C00, 0x8000_0000]).unwrap().0;
     let t = to_midi1(&on);
