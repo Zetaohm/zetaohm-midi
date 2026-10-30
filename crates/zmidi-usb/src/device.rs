@@ -1151,6 +1151,7 @@ mod tests {
         // REQ-USB-GEN-004, REQ-USB-GEN-005 (default 1), choices U-06 and U-09.
         let cfg = FunctionConfig::<'static, 4, 1, 2, 1>::new(0, 1, BusSpeed::Full).unwrap();
         assert_eq!(cfg.alternate_settings(), 2);
+        assert!(!cfg.midi1.as_ref().unwrap().is_empty());
         let bytes = write_vec(&cfg);
         assert_eq!(bytes.len(), 132);
         assert_eq!(bytes[..92], V1_FUNCTION);

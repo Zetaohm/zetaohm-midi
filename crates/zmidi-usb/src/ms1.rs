@@ -2343,4 +2343,37 @@ mod tests {
             prop_assert_eq!(MidiInJack::read(&one(&buf[..n])).unwrap(), i);
         });
     }
+
+    #[test]
+    fn small_values_at_their_limits() {
+        // The descriptors are never empty (the methods go with their length methods).
+        let t = appendix_b();
+        assert!(!t.is_empty());
+        let out = MidiOutJack::new(EMB, 3, &PIN_2);
+        assert!(!out.is_empty());
+        assert!(!Jack::Out(out).is_empty());
+        // REQ-USB-MS2-009: wMaxPacketSize 4 is the smallest, for the writer and the reader.
+        let e = Ms1Endpoint::new(EndpointDirection::MidiOut, 1, 4, &OUT_JACKS);
+        assert!(!e.is_empty());
+        assert_eq!(e.check(), Ok(()));
+        assert!(!e.is_interrupt(), "bulk");
+        let r = read_all(&[9, 5, 0x01, 2, 4, 0, 0, 0, 0, 5, 0x25, 1, 1, 1]);
+        assert_eq!(r.len(), 1, "{r:?}");
+        // Every bit of the mask.
+        let caps = ElementCaps::from_bits(ElementCaps::MIDI_CLOCK);
+        assert!(caps.contains(ElementCaps::MIDI_CLOCK));
+        assert!(!caps.contains(ElementCaps::MIDI_CLOCK | ElementCaps::MTC));
+        // Pins compare by value.
+        let r = read_all(&[9, 0x24, 3, 1, 3, 1, 2, 1, 0]);
+        let Ok(Ms1Desc::OutJack(j)) = r[0] else {
+            panic!("{r:?}")
+        };
+        assert_eq!(j.pins, MidiOutJack::new(EMB, 3, &PIN_2).pins);
+        assert_ne!(j.pins, MidiOutJack::new(EMB, 3, &PIN_1).pins);
+        // REQ-USB-TOPO-007: an OUT Jack of 124 input pins in a topology.
+        let many = [Pin::new(2, 1); MAX_OUT_JACK_PINS];
+        let mut t = appendix_b();
+        t.jacks[2] = Some(Jack::Out(MidiOutJack::new(EMB, 3, &many)));
+        assert_eq!(t.check(), Ok(()));
+    }
 }

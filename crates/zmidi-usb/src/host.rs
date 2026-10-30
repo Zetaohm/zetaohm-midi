@@ -944,6 +944,33 @@ mod tests {
     }
 
     #[test]
+    fn setting_iterators_interface_numbers_and_problem_count() {
+        // REQ-USB-MS1-030: the Elements and the Transfer endpoints of a USB-MIDI 1.0 setting.
+        let element = [14, 0x24, 4, 5, 1, 1, 1, 1, 0, 0, 2, 0xFF, 0xFF, 0];
+        let transfer = [9, 5, 0x82, 2, 64, 0, 0, 0, 0];
+        let rest = cat(&[&MS1_REST, &element, &transfer]);
+        let bytes = config(&cat(&[
+            &setting(1, 0, 0x0110, &rest),
+            &setting(9, 0, 0x0100, &MS1_REST),
+        ]));
+        let f = read_configuration(&bytes);
+        let s = f.settings().next().unwrap();
+        assert_eq!(s.elements().count(), 1);
+        assert_eq!(s.transfer_endpoints().count(), 1);
+        assert_eq!(s.problem_count(), 1, "the unknown minor version");
+        // Each MIDI Streaming interface number once, also numbers above 7.
+        assert_eq!(f.ms_interface_numbers().collect::<Vec<_>>(), [1, 9]);
+        // A Configuration descriptor with more than 9 bytes is read.
+        let mut long = config(&setting(1, 0, 0x0100, &MS1_REST));
+        long[0] = 10;
+        long.insert(9, 0);
+        let [lo, hi] = (long.len() as u16).to_le_bytes();
+        long[2] = lo;
+        long[3] = hi;
+        assert_eq!(read_configuration(&long).problem_count(), 0);
+    }
+
+    #[test]
     fn unknown_minor_version_reads_by_high_byte_and_reports() {
         // REQ-USB-GEN-003: high byte 0x01 or 0x02 with another minor version: the format of
         // the high byte, and an unknown-minor report.

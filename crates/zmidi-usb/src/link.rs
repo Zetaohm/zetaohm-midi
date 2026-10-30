@@ -1229,6 +1229,14 @@ mod tests {
     }
 
     #[test]
+    fn set_mask_changes_the_received_group_terminals() {
+        // REQ-USB-UMP-016.
+        let mut l = link_at(1);
+        l.set_mask(GroupMask::from_bits(0x0002));
+        assert_eq!(l.mask(), GroupMask::from_bits(0x0002));
+    }
+
+    #[test]
     fn short_ump_is_reported_and_taken_in_both_modes() {
         // REQ-USB-UMP-009, REQ-USB-EVT-021: a UMP with too few words is not dropped silently
         // and does not stop the output (review M7).

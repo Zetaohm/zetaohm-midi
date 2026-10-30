@@ -1447,4 +1447,48 @@ mod tests {
             }
         });
     }
+
+    #[test]
+    fn ms2_values_at_their_limits() {
+        // FixedList: capacity, equality by the used items, Debug of the used items.
+        let mut a = GtbIds::one(1);
+        assert_eq!(a.capacity(), MAX_BLOCK_IDS);
+        let b = GtbIds::one(2);
+        assert_ne!(a, b);
+        a.push(2).unwrap();
+        assert_ne!(a, GtbIds::one(1));
+        assert_eq!(std::format!("{a:?}"), "[1, 2]");
+        // bmAttributes D1..0 of a kept transfer type.
+        assert_eq!(TransferType::Other(0x05).attributes(), 0x01);
+        // An interface of another class with subclass 0x03 is no MIDI Streaming interface.
+        let other = [0x09, 0x04, 0x01, 0x01, 0x02, 0xFF, 0x03, 0x00, 0x00];
+        let d = crate::walk::Descriptors::new(&other)
+            .next()
+            .unwrap()
+            .unwrap();
+        assert!(MsInterface::read(&d).is_none());
+        // The writer fills a buffer of exactly its length.
+        let s = Ms2Setting::<2>::new(1, 1, BusSpeed::Full).unwrap();
+        assert!(!s.is_empty());
+        assert!(!s.endpoints[0].is_empty());
+        let mut buf = std::vec![0u8; s.len()];
+        assert_eq!(s.write(&mut buf), Ok(s.len()));
+    }
+
+    #[test]
+    fn setting_reader_keeps_the_first_header_and_counts_problems() {
+        // REQ-USB-MS2-003: the first class header of the setting; each short one is a problem.
+        let short = [0x06, 0x24, 0x01, 0x00, 0x02, 0x07];
+        let second = [0x07, 0x24, 0x01, 0x00, 0x01, 0x07, 0x00];
+        let base = [&B15[..], &B16].concat();
+        let n0 = read_setting::<4>(interfaces(&base).next().unwrap())
+            .unwrap()
+            .problem_count();
+        let bytes = [&B15[..], &short, &B16, &second, &short].concat();
+        let g = interfaces(&bytes).next().unwrap();
+        let info = read_setting::<4>(g).unwrap();
+        assert_eq!(info.header.map(|h| h.bcd_msc), Some(0x0200));
+        assert_eq!(info.problem_count(), n0 + 2);
+        assert_eq!(info.problems().count(), n0 + 2);
+    }
 }
