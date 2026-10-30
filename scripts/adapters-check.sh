@@ -1,6 +1,6 @@
 #!/bin/sh
 # Checks of the adapter crates: USB (DEC-014, DEC-015) and BLE (DEC-016). They are Cargo-only
-# members, not specdev members, so scripts/specdev-gates.sh does not check them. CI runs this
+# members, not specdev members, so the gate scripts do not check them. CI runs this
 # script after the gates.
 set -eu
 cd "$(dirname "$0")/.."

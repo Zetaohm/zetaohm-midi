@@ -68,8 +68,8 @@ pub const CONNECTION_PARAMS: RequestedConnParams = RequestedConnParams {
 pub const RETRY_DELAY: Duration = Duration::from_millis(2);
 
 /// The longest attribute value of the attribute protocol, and so the longest BLE-MIDI packet
-/// (Bluetooth Core Vol 3 Part F 3.2.9, from memory; the Bluetooth Core document is not in
-/// spec_pdfs/).
+/// (Bluetooth Core Vol 3 Part F 3.2.9, from memory; not checked against the Bluetooth Core
+/// document).
 pub const MAX_PACKET: usize = 512;
 
 /// Error of the adapter.

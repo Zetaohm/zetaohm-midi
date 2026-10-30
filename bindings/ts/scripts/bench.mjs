@@ -2,7 +2,7 @@
 //
 // Wall-clock time on the host, not a gate. Each row gives the time of one call and of each MIDI
 // message, so that the fixed cost of a call (the WASM call, the scratch memory) shows against the
-// work in the library. Build first (`sh scripts/specdev-gates.sh` or `pnpm exec tsc -p
+// work in the library. Build first (`sh scripts/compile-gates.sh` or `pnpm exec tsc -p
 // tsconfig.build.json`), then:
 //
 //     node scripts/bench.mjs
