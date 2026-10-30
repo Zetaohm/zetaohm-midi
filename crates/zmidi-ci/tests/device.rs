@@ -235,6 +235,8 @@ fn echo_is_ignored_and_collision_option_a() {
     let (ev, replies) = deliver(&mut a, 0, &other);
     assert_eq!(ev, Some(Event::MuidChanged { old, new: a.muid() }));
     assert_ne!(a.muid(), old);
+    // The new MUID is the random number that the caller gives (deliver: 0x0123_4567).
+    assert_eq!(a.muid(), Muid::new(0x0123_4567).unwrap());
     assert_eq!(sub(&replies[0].1), 0x71);
     assert_eq!(header(&replies[0].1).source, a.muid());
 }
@@ -251,9 +253,32 @@ fn collision_option_b_after_use() {
     let old = a.muid();
     let (ev, replies) = deliver(&mut a, 0, &other);
     assert!(matches!(ev, Some(Event::MuidChanged { .. })));
+    assert_eq!(a.muid(), Muid::new(0x0123_4567).unwrap());
     let r = &replies[0].1;
     assert_eq!(sub(r), 0x7E);
     assert_eq!(&r[13..17], &old.to_bytes());
+}
+
+#[test]
+fn discovery_after_a_collision_that_keeps_this_muid() {
+    // REQ-CI-DISC-006: B resolves a collision with another Device and changes its MUID; the MUID
+    // of the initiator A does not change, and A starts a new Discovery that finds the new MUID.
+    let (mut a, mut b) = discovered();
+    let mut buf = [0u8; 512];
+    let n = b.discovery(0, 0, &mut buf).unwrap();
+    let mut other = buf[..n].to_vec();
+    other[13] = 0x55;
+    let (old_a, old_b) = (a.muid(), b.muid());
+    let (ev, _) = deliver(&mut b, 0, &other);
+    assert!(matches!(ev, Some(Event::MuidChanged { old, .. }) if old == old_b));
+    assert_eq!(a.muid(), old_a);
+    let n = a.discovery(0, 10_000_000, &mut buf).unwrap();
+    assert_eq!(header(&buf[..n]).source, old_a);
+    let r = deliver(&mut b, 0, &buf[..n]).1[0].1.clone();
+    let (ev, _) = deliver_at(&mut a, 0, &r, 10_000_000);
+    assert!(
+        matches!(ev, Some(Event::Discovered { muid, .. }) if muid == b.muid() && muid != old_b)
+    );
 }
 
 #[test]
@@ -313,6 +338,9 @@ fn naks_for_bad_messages() {
     let (ev, r) = deliver(&mut b, 0, m);
     assert!(matches!(ev, Some(Event::Rejected { .. })));
     assert_eq!(nak_of(&r[0].1).status, NakStatus::Malformed);
+    // REQ-CI-GEN-004: the NAK only; no Reply, and the capabilities are not kept.
+    assert_eq!(r.len(), 1);
+    assert!(b.peer(a.muid()).unwrap().pe_capabilities.is_none());
 
     let mut m = good.clone();
     m[1] = 0x7E; // PE Capabilities to a Group
@@ -401,6 +429,7 @@ fn invalidate_muid_flows() {
     // 5.9, 3.3.2; REQ-CI-INV-001 to -007, REQ-CI-MUID-008, -011, REQ-CI-DISC-005.
     let (mut a, mut b) = discovered();
     let mut buf = [0u8; 512];
+    let (a0, b0) = (a.muid(), b.muid());
     // A peer MUID: B forgets A and ends its Requests.
     let n = b.pe_capabilities_inquiry(a.muid(), &mut buf).unwrap();
     let (_, r) = deliver(&mut a, 0, &buf[..n]);
@@ -408,9 +437,11 @@ fn invalidate_muid_flows() {
     let (id, _) = b
         .pe_request(a.muid(), PeKind::GetInquiry, b"{}", Some(0), None)
         .unwrap();
+    // REQ-CI-MUID-008: the MUIDs stay the same over the Transactions.
+    assert_eq!((a.muid(), b.muid()), (a0, b0));
     let old_a = a.muid();
     let n = a.invalidate(&mut rng(&[0x0666_6666]), &mut buf).unwrap();
-    assert_ne!(a.muid(), old_a);
+    assert_eq!(a.muid(), Muid::new(0x0666_6666).unwrap());
     let (ev, r) = deliver(&mut b, 0, &buf[..n]);
     assert_eq!(ev, Some(Event::PeerInvalidated { muid: old_a }));
     assert!(r.is_empty(), "no reply to Invalidate MUID");
@@ -428,6 +459,7 @@ fn invalidate_muid_flows() {
         .unwrap();
     let (ev, r) = deliver(&mut b, 0, &buf[..n]);
     assert!(matches!(ev, Some(Event::MuidChanged { old, new }) if old == old_b && new != old_b));
+    assert_eq!(b.muid(), Muid::new(0x0123_4567).unwrap());
     assert!(r.is_empty());
     // The Function Block moved: Invalidate MUID, new MUID, then a new Discovery.
     let before = a.muid();
@@ -436,7 +468,7 @@ fn invalidate_muid_flows() {
         .unwrap();
     assert_eq!(&buf[13..17], &before.to_bytes());
     assert_eq!(header(&buf[..n]).destination, Muid::BROADCAST);
-    assert_ne!(a.muid(), before);
+    assert_eq!(a.muid(), Muid::new(0x0777_7777).unwrap());
     assert_eq!(a.config().first_group, 4);
     let n = a.discovery(0, 0, &mut buf).unwrap();
     assert_eq!(header(&buf[..n]).source, a.muid());
@@ -1590,14 +1622,13 @@ fn disabled_report_answers_set_profile_on_for_another_profile() {
 
 #[test]
 fn second_discovery_round_is_not_a_duplicate() {
-    // Code review finding 1; REQ-CI-MUID-015, REQ-CI-DISC-011.
+    // Code review finding 1; REQ-CI-MUID-015.
     let mut a = dev(0x41, &[0x0111_1111]);
     let mut b = dev(0x42, &[0x0222_2222]);
     let mut buf = [0u8; 512];
-    for (t, expired) in [(0u64, false), (1_000_000, false), (20_000_000, true)] {
+    for t in [0u64, 1_000_000, 20_000_000] {
         let n = a.discovery(0, t, &mut buf).unwrap();
         let r = deliver(&mut b, 0, &buf[..n]).1[0].1.clone();
-        let _ = expired;
         let (ev, inv) = deliver(&mut a, 0, &r);
         assert!(matches!(ev, Some(Event::Discovered { .. })), "round at {t}");
         assert!(inv.is_empty());
@@ -1782,12 +1813,37 @@ fn calls_of_categories_that_are_off_give_not_supported() {
         profiles,
         a.profile_details_inquiry(p, DeviceId::Channel(0), gm(), 0, &mut buf),
     );
+    off(
+        profiles,
+        a.set_profile_on(p, DeviceId::Channel(0), gm(), 1, None, &mut buf),
+    );
+    off(
+        profiles,
+        a.set_profile_off(p, DeviceId::Channel(0), gm(), &mut buf),
+    );
+    let reply = zmidi_ci::ProfileDetailsReply {
+        profile: gm(),
+        target: 0,
+        data: &[0, 0, 1, 0],
+    };
+    off(
+        profiles,
+        a.profile_details_reply(p, DeviceId::Channel(0), &reply, &mut buf),
+    );
     if !profiles {
-        assert!(a.add_profile(entry(true)).is_err());
+        assert_eq!(
+            a.add_profile(entry(true)).err(),
+            Some(DeviceError::NotSupported)
+        );
         assert!(a
             .set_profile_state(entry(true).address, gm(), true, 1)
             .is_none());
         assert!(a.remove_profile(entry(true).address, gm()).is_none());
+        let report = ProfileReport::Added(entry(false));
+        assert_eq!(
+            a.profile_report(&report, &mut buf),
+            Err(DeviceError::NotSupported)
+        );
     }
     let pe = cfg!(feature = "property-exchange");
     off(pe, a.pe_capabilities_inquiry(p, &mut buf));
@@ -1797,11 +1853,50 @@ fn calls_of_categories_that_are_off_give_not_supported() {
                 .err(),
             Some(DeviceError::NotSupported)
         );
+        assert_eq!(
+            a.pe_reply(p, PeKind::GetReply, 0, b"{}", Some(0), None)
+                .err(),
+            Some(DeviceError::NotSupported)
+        );
     }
     let pi = cfg!(feature = "process-inquiry");
     off(pi, a.pi_capabilities_inquiry(p, &mut buf));
+    let q = MessageReportInquiry {
+        data_control: DataControl::Full,
+        system: Default::default(),
+        channel: Default::default(),
+        note: Default::default(),
+    };
+    off(
+        pi,
+        a.message_report_inquiry(p, DeviceId::FunctionBlock, &q, &mut buf),
+    );
+    off(
+        pi,
+        a.message_report_end(p, DeviceId::FunctionBlock, &mut buf),
+    );
+    off(
+        pi,
+        a.abort_report(p, DeviceId::FunctionBlock, false, &mut buf),
+    );
     if !pi {
         assert!(!a.report_open(p));
+        struct NoValues;
+        impl ReportSource for NoValues {}
+        assert_eq!(
+            a.message_report(
+                p,
+                DeviceId::FunctionBlock,
+                0,
+                &q,
+                &MessageReportReply::default(),
+                Protocol::Midi2,
+                &NoValues,
+                &mut buf,
+            )
+            .err(),
+            Some(DeviceError::NotSupported)
+        );
     }
 }
 

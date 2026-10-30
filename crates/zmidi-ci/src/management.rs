@@ -1177,6 +1177,19 @@ mod tests {
             Details::read(Category::Management, [1; 5]).to_bytes(),
             [0; 5]
         );
+        // REQ-CI-ACK-004: the reader ignores bytes 4 and 5 of the PE details; Process Inquiry
+        // details are reserved.
+        assert_eq!(
+            Details::read(Category::PropertyExchange, [5, 0x2C, 2, 9, 9]),
+            Details::PropertyExchange {
+                request_id: 5,
+                chunk: 300
+            }
+        );
+        assert_eq!(
+            Details::read(Category::ProcessInquiry, [1; 5]),
+            Details::Reserved
+        );
         assert_eq!(AckStatus::from_bytes(0x05, 0).range(), StatusRange::Success);
         assert_eq!(AckStatus::from_bytes(0x10, 7), AckStatus::TimeoutWait(7));
     }
@@ -1495,6 +1508,53 @@ mod tests {
             (0x22, k.status, k.details)
         );
         assert_eq!(back.text().collect::<String>(), "no");
+        // REQ-CI-NAK-004: Property Exchange details are the Request ID and the Chunk number, LSB
+        // first, then two bytes 0x00.
+        let k = Nak {
+            original_sub_id2: 0x34,
+            status: NakStatus::Busy(0),
+            details: Details::PropertyExchange {
+                request_id: 5,
+                chunk: 300,
+            },
+            text: &[],
+        };
+        let n = k
+            .write(
+                "",
+                DeviceId::FunctionBlock,
+                SRC,
+                DST,
+                None,
+                Framing::Bare,
+                &mut buf,
+            )
+            .unwrap();
+        assert_eq!(&buf[16..21], &[5, 0x2C, 2, 0, 0]);
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(Nak::read(&h, body).unwrap().details, k.details);
+        // Other Categories: reserved, written 0x00 and ignored on read.
+        let k = Nak {
+            original_sub_id2: 0x70,
+            status: NakStatus::Busy(0),
+            details: Details::Reserved,
+            text: &[],
+        };
+        let n = k
+            .write(
+                "",
+                DeviceId::FunctionBlock,
+                SRC,
+                DST,
+                None,
+                Framing::Bare,
+                &mut buf,
+            )
+            .unwrap();
+        assert_eq!(&buf[16..21], &[0; 5]);
+        buf[16..21].copy_from_slice(&[1; 5]);
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(Nak::read(&h, body).unwrap().details, Details::Reserved);
     }
 
     #[test]

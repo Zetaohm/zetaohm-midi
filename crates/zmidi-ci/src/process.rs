@@ -1108,6 +1108,11 @@ mod tests {
         assert_eq!(&buf[13..n], &[0x7F, 0x02, 0x00, 0x12, 0x01]);
         let (h, body) = parse(&buf[..n]);
         assert_eq!(MessageReportInquiry::read(&h, body), Ok(q));
+        // REQ-CI-MMR-001: the reader ignores the reserved byte and the reserved bits.
+        assert_eq!(
+            MessageReportInquiry::read(&h, &[0x7F, 0x7A, 0x55, 0x52, 0x61]),
+            Ok(q)
+        );
         assert_eq!(DataControl::from_byte(0x05), DataControl::Reserved(5));
         // Table 44; REQ-CI-MMR-002: each value both ways.
         for (b, dc) in [

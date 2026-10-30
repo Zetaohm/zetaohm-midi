@@ -1168,6 +1168,15 @@ mod tests {
             assert_eq!(h.device_id, d);
             assert_eq!(ProfileInquiry::read(&h, body), Ok(ProfileInquiry));
         }
+        // Device ID 0x10 to 0x7D: the reserved Device ID rule (REQ-CI-MSG-005).
+        for b in [0x10, 0x20, 0x7D] {
+            buf[1] = b;
+            assert_eq!(
+                Header::parse(&buf[..13]),
+                Err(ParseError::ReservedDeviceId),
+                "{b:#04x}"
+            );
+        }
     }
 
     #[test]
@@ -1222,6 +1231,23 @@ mod tests {
         assert_eq!(SetProfileOn::read(&h, body), Ok(on));
         let n = on
             .write(DeviceId::Group, SRC, DST, Framing::Bare, &mut buf)
+            .unwrap();
+        assert_eq!(&buf[n - 2..n], &[0, 0]);
+        // Table 20; REQ-CI-PROF-009: Sub-ID#2 0x22, the Profile ID, then the count LSB first;
+        // 0x0000 for Device ID 0x7F.
+        let wide = SetProfileOn {
+            profile: GM,
+            channels: 0x0081,
+        };
+        let n = wide
+            .write(DeviceId::Channel(0), SRC, DST, Framing::Bare, &mut buf)
+            .unwrap();
+        assert_eq!(buf[3], 0x22);
+        assert_eq!(&buf[13..n], &[0x7E, 0x21, 0x00, 0x01, 0x7F, 0x01, 0x01]);
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(SetProfileOn::read(&h, body), Ok(wide));
+        let n = wide
+            .write(DeviceId::FunctionBlock, SRC, DST, Framing::Bare, &mut buf)
             .unwrap();
         assert_eq!(&buf[n - 2..n], &[0, 0]);
         let n = SetProfileOff { profile: GM }
@@ -1297,6 +1323,15 @@ mod tests {
             .unwrap();
         let (h, body) = parse(&buf[..n]);
         assert_eq!(ProfileAddedReport::read(&h, body).unwrap().profile, DRAW);
+        // Table 24; REQ-CI-PROF-005: Sub-ID#2 0x26, the Broadcast MUID and the Profile ID.
+        let n = ProfileAddedReport { profile: GM }
+            .write(DeviceId::Group, SRC, Framing::Bare, &mut buf)
+            .unwrap();
+        let mut want = std::vec![0x7E, 0x7E, 0x0D, 0x26, 0x02];
+        want.extend(src);
+        want.extend([0x7F; 4]);
+        want.extend(id);
+        assert_eq!(&buf[..n], &want[..]);
         // Version 1: no count.
         let mut v1 = [0u8; 64];
         let n = on
@@ -1320,6 +1355,27 @@ mod tests {
             .unwrap();
         let (h, body) = parse(&buf[..n]);
         assert_eq!(ProfileDetailsInquiry::read(&h, body), Ok(q));
+        // Table 26; REQ-CI-PROF-007: Sub-ID#2 0x28, the Profile ID, then the Inquiry Target.
+        for target in [0x00, 0x40] {
+            let n = ProfileDetailsInquiry {
+                profile: GM,
+                target,
+            }
+            .write(DeviceId::Channel(0), SRC, DST, Framing::Bare, &mut buf)
+            .unwrap();
+            assert_eq!(
+                &buf[..n],
+                &[
+                    0x7E, 0x00, 0x0D, 0x28, 0x02, 0x56, 0x68, 0x48, 0x00, 0x21, 0x06, 0x15, 0x03,
+                    0x7E, 0x21, 0x00, 0x01, 0x7F, target
+                ]
+            );
+            let (h, body) = parse(&buf[..n]);
+            assert_eq!(
+                ProfileDetailsInquiry::read(&h, body).unwrap().target,
+                target
+            );
+        }
         let data = ChannelCounts {
             in_use: 2,
             maximum: 200,
@@ -1408,6 +1464,27 @@ mod tests {
                 &mut buf
             )
             .is_ok());
+        // REQ-CI-MUID-009, REQ-CI-PROF-014: to the Broadcast MUID, 512 bytes pass and 513 bytes
+        // do not.
+        for (len, ok) in [(490, true), (491, false)] {
+            let s = ProfileSpecificData {
+                profile: GM,
+                data: &big[..len],
+            };
+            let r = s.write(
+                false,
+                DeviceId::Channel(0),
+                SRC,
+                Muid::BROADCAST,
+                Framing::Bare,
+                &mut buf,
+            );
+            if ok {
+                assert_eq!(r, Ok(512));
+            } else {
+                assert_eq!(r, Err(WriteError::InvalidValue));
+            }
+        }
         let n = s
             .write(
                 false,
