@@ -875,6 +875,22 @@ mod tests {
         );
     }
 
+    // REQ-USB-UMP-010: only an empty packet splits a long UMP; REQ-USB-UMP-006: the reader
+    // holds at most 3 words.
+    #[test]
+    fn long_ump_after_another_waits_for_the_next_packet() {
+        assert_eq!(MAX_HELD_WORDS, 3);
+        let long: &[u32] = &[0xF000_0001, 2, 3, 4];
+        let first: &[u32] = &[0x2090_3C40];
+        let mut w = UmpPacketWriter::new(8).unwrap();
+        let mut buf = [0u8; 8];
+        let mut p = w.packet(&mut buf).unwrap();
+        assert_eq!(p.push(first), Ok(1));
+        assert_eq!(p.push(long), Err(UmpUsbError::PacketFull));
+        assert_eq!(p.finish(), 4);
+        assert!(!w.pending());
+    }
+
     // REQ-USB-UMP-010: a split UMP is read back whole.
     #[test]
     fn split_ump_reads_back_whole() {

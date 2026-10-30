@@ -1052,6 +1052,272 @@ mod tests {
         Header::parse(buf).unwrap()
     }
 
+    /// A source with a value of each kind; the values have bit 7 set where the writer must
+    /// mask it.
+    struct Every;
+
+    impl ReportSource for Every {
+        fn mtc_quarter_frames(&self, g: u8) -> Option<[u8; 8]> {
+            Some([g, 1, 2, 3, 4, 5, 6, 0x1F])
+        }
+        fn song_position(&self, g: u8) -> Option<u16> {
+            Some(0x1234 + u16::from(g))
+        }
+        fn song_select(&self, g: u8) -> Option<u8> {
+            Some(0x40 + g)
+        }
+        fn pitch_bend(&self, g: u8, c: u8) -> Option<u32> {
+            Some(0x8000_0000 | u32::from(g) << 8 | u32::from(c))
+        }
+        fn control_change(&self, _: u8, c: u8, i: u8) -> Option<u32> {
+            (i == 7).then_some(0x1100_00C0 | u32::from(c))
+        }
+        fn mode(&self, _: u8, c: u8) -> Option<ChannelMode> {
+            Some(if c == 1 {
+                ChannelMode::Poly { omni: true }
+            } else {
+                ChannelMode::Mono {
+                    omni: false,
+                    channels: 3,
+                }
+            })
+        }
+        fn registered_controller(&self, _: u8, _: u8, p: usize) -> Option<Controller> {
+            (p < 2).then(|| Controller {
+                bank: 0x85 + p as u8,
+                index: 0x87 + p as u8,
+                value: 0x1F2F + p as u32,
+            })
+        }
+        fn assignable_controller(&self, _: u8, _: u8, p: usize) -> Option<Controller> {
+            (p < 2).then(|| Controller {
+                bank: 0x95 + p as u8,
+                index: 0x97 + p as u8,
+                value: 0x2F1F + p as u32,
+            })
+        }
+        fn program(&self, _: u8, _: u8) -> Option<(u8, Option<(u8, u8)>)> {
+            Some((0x85, Some((0x81, 0x82))))
+        }
+        fn channel_pressure(&self, _: u8, c: u8) -> Option<u32> {
+            Some(0x2200_00C0 | u32::from(c))
+        }
+        fn note(&self, _: u8, _: u8, p: usize) -> Option<NoteState> {
+            match p {
+                0 => Some(NoteState {
+                    note: 0x83,
+                    on: true,
+                    velocity: 0xABCD,
+                    attribute_type: 3,
+                    attribute_data: 0x1234,
+                }),
+                1 => Some(NoteState {
+                    note: 0x10,
+                    on: false,
+                    velocity: 0x0100,
+                    attribute_type: 0,
+                    attribute_data: 0,
+                }),
+                _ => None,
+            }
+        }
+        fn poly_pressure(&self, _: u8, _: u8, p: usize) -> Option<(u8, u32)> {
+            (p == 0).then_some((0x84, 0x3300_0045))
+        }
+        fn per_note_pitch_bend(&self, _: u8, _: u8, p: usize) -> Option<(u8, u32)> {
+            (p < 2).then(|| (0x85 + p as u8, 0x4400_0000 + p as u32))
+        }
+        fn registered_per_note(&self, _: u8, _: u8, p: usize) -> Option<Controller> {
+            (p < 2).then(|| Controller {
+                bank: 0x86 + p as u8,
+                index: 0x90 + p as u8,
+                value: 0x5500_0000 + p as u32,
+            })
+        }
+        fn assignable_per_note(&self, _: u8, _: u8, p: usize) -> Option<Controller> {
+            (p < 2).then(|| Controller {
+                bank: 0x88 + p as u8,
+                index: 0xA0 + p as u8,
+                value: 0x6600_0000 + p as u32,
+            })
+        }
+    }
+
+    /// A source with no value.
+    struct Nothing;
+    impl ReportSource for Nothing {}
+
+    fn every_bit() -> MessageReportReply {
+        MessageReportReply {
+            system: SystemBits::from_byte(0x07),
+            channel: ChannelBits::from_byte(0x3F),
+            note: NoteBits::from_byte(0x1F),
+        }
+    }
+
+    fn report<S: ReportSource>(source: &S, protocol: Protocol) -> Vec<(u8, Vec<u32>)> {
+        // The Function Block: Groups 2 and 3, Channels 2 and 3 (bits 1 and 2).
+        let mut w = ReportWriter::new(
+            every_bit(),
+            DataControl::Full,
+            DeviceId::FunctionBlock,
+            0,
+            2,
+            2,
+            0b110,
+            protocol,
+            source,
+        );
+        let mut out = Vec::new();
+        while let Some(p) = w.next_packet() {
+            out.push((p.group, p.words[..p.len].to_vec()));
+            assert!(out.len() < 1000);
+        }
+        out
+    }
+
+    /// The report written by hand (Tables 43 and 47, M2-104 Figures 28-30, 45-67).
+    fn expected(protocol: Protocol) -> Vec<(u8, Vec<u32>)> {
+        let midi1 = protocol == Protocol::Midi1;
+        let mut out = Vec::new();
+        for g in 2u8..=3 {
+            let gw = u32::from(g) << 24;
+            let sys =
+                |st: u32, d1: u32, d2: u32| std::vec![0x1000_0000 | gw | st << 16 | d1 << 8 | d2];
+            let frames = [g, 1, 2, 3, 4, 5, 6, 0x0F];
+            for (i, f) in frames.iter().enumerate() {
+                out.push((g, sys(0xF1, (i as u32) << 4 | u32::from(*f), 0)));
+            }
+            let sp = 0x1234 + u32::from(g);
+            out.push((g, sys(0xF2, sp & 0x7F, (sp >> 7) & 0x7F)));
+            out.push((g, sys(0xF3, 0x40 + u32::from(g), 0)));
+            for c in [1u32, 2] {
+                let m1 = |op: u32, d1: u32, d2: u32| {
+                    std::vec![
+                        0x2000_0000 | gw | op << 20 | c << 16 | (d1 & 0x7F) << 8 | (d2 & 0x7F)
+                    ]
+                };
+                let m2 = |op: u32, b2: u32, b3: u32, w1: u32| {
+                    std::vec![0x4000_0000 | gw | op << 20 | c << 16 | b2 << 8 | b3, w1]
+                };
+                let mut push = |v: Vec<u32>| out.push((g, v));
+                let pb = 0x8000_0000 | u32::from(g) << 8 | c;
+                let cc7 = 0x1100_00C0 | c;
+                if midi1 {
+                    push(m1(0xE, pb & 0x7F, (pb >> 7) & 0x7F));
+                    push(m1(0xB, 7, cc7 & 0xFF));
+                    if c == 1 {
+                        push(m1(0xB, 125, 0));
+                        push(m1(0xB, 127, 0));
+                    } else {
+                        push(m1(0xB, 124, 0));
+                        push(m1(0xB, 126, 3));
+                    }
+                    for (cc, base) in [
+                        ((101, 100), (0x85, 0x87, 0x1F2F)),
+                        ((99, 98), (0x95, 0x97, 0x2F1F)),
+                    ] {
+                        for p in 0..2u32 {
+                            let v = base.2 + p;
+                            push(m1(0xB, cc.0, base.0 + p));
+                            push(m1(0xB, cc.1, base.1 + p));
+                            push(m1(0xB, 6, (v >> 7) & 0xFF));
+                            push(m1(0xB, 38, v & 0xFF));
+                        }
+                        push(m1(0xB, cc.0, 127));
+                        push(m1(0xB, cc.1, 127));
+                    }
+                    push(m1(0xB, 0, 0x81));
+                    push(m1(0xB, 32, 0x82));
+                    push(m1(0xC, 0x85, 0));
+                    push(m1(0xD, 0xC0 | c, 0));
+                    push(m1(0x9, 0x83, 0xABCD >> 9));
+                    push(m1(0x8, 0x10, 0x0100 >> 9));
+                    push(m1(0xA, 0x84, 0x45));
+                    push(m1(0x8, 0x83, 0));
+                } else {
+                    push(m2(0xE, 0, 0, pb));
+                    push(m2(0xB, 7, 0, cc7));
+                    if c == 1 {
+                        push(m2(0xB, 125, 0, 0));
+                        push(m2(0xB, 127, 0, 0));
+                    } else {
+                        push(m2(0xB, 124, 0, 0));
+                        push(m2(0xB, 126, 0, 3));
+                    }
+                    for p in 0..2u32 {
+                        push(m2(0x2, (0x85 + p) & 0x7F, (0x87 + p) & 0x7F, 0x1F2F + p));
+                    }
+                    for p in 0..2u32 {
+                        push(m2(0x3, (0x95 + p) & 0x7F, (0x97 + p) & 0x7F, 0x2F1F + p));
+                    }
+                    push(m2(0xC, 0, 1, 0x05 << 24 | 0x01 << 8 | 0x02));
+                    push(m2(0xD, 0, 0, 0x2200_00C0 | c));
+                    push(m2(0x9, 0x03, 3, 0xABCD << 16 | 0x1234));
+                    push(m2(0x8, 0x10, 0, 0x0100 << 16));
+                    push(m2(0xA, 0x04, 0, 0x3300_0045));
+                    for p in 0..2u32 {
+                        push(m2(0x6, (0x85 + p) & 0x7F, 0, 0x4400_0000 + p));
+                    }
+                    for p in 0..2u32 {
+                        push(m2(0x0, (0x86 + p) & 0x7F, 0x90 + p, 0x5500_0000 + p));
+                    }
+                    for p in 0..2u32 {
+                        push(m2(0x1, (0x88 + p) & 0x7F, 0xA0 + p, 0x6600_0000 + p));
+                    }
+                    push(m2(0x8, 0x03, 0, 0));
+                }
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn whole_report_of_every_kind() {
+        // REQ-CI-MMR-007 to -033: each message kind, both Protocols, two Groups and two
+        // Channels, in the order of the writer, with the masks of each field.
+        for protocol in [Protocol::Midi1, Protocol::Midi2] {
+            let got = report(&Every, protocol);
+            let want = expected(protocol);
+            assert_eq!(got.len(), want.len(), "{protocol:?}");
+            for (i, (g, w)) in got.iter().zip(&want).enumerate() {
+                assert_eq!(g, w, "{protocol:?} packet {i}");
+            }
+            // A source with no value gives no message.
+            assert!(report(&Nothing, protocol).is_empty(), "{protocol:?}");
+        }
+        // Each bit of the bitmaps (Table 43); 0 gives no field.
+        assert_eq!(SystemBits::from_byte(0), SystemBits::default());
+        assert_eq!(ChannelBits::from_byte(0), ChannelBits::default());
+        assert_eq!(NoteBits::from_byte(0), NoteBits::default());
+        for b in 0..3 {
+            assert_eq!(SystemBits::from_byte(1 << b).to_byte(), 1 << b);
+        }
+        for b in 0..6 {
+            assert_eq!(ChannelBits::from_byte(1 << b).to_byte(), 1 << b);
+        }
+        for b in 0..5 {
+            assert_eq!(NoteBits::from_byte(1 << b).to_byte(), 1 << b);
+        }
+        // REQ-CI-MMR-013: only the bits that are both requested and supported.
+        let q = MessageReportInquiry {
+            data_control: DataControl::Full,
+            system: SystemBits::from_byte(0b011),
+            channel: ChannelBits::from_byte(0b10_1010),
+            note: NoteBits::from_byte(0b1_0110),
+        };
+        let s = MessageReportReply {
+            system: SystemBits::from_byte(0b110),
+            channel: ChannelBits::from_byte(0b01_1110),
+            note: NoteBits::from_byte(0b0_0111),
+        };
+        let d = MessageReportReply::declare(&q, &s);
+        assert_eq!(
+            (d.system.to_byte(), d.channel.to_byte(), d.note.to_byte()),
+            (0b010, 0b00_1010, 0b0_0110)
+        );
+    }
+
     #[test]
     fn capabilities_and_report_messages() {
         // 9.2-9.8, Tables 43, 44, 46; REQ-CI-PI-001, -002, REQ-CI-MMR-001, -002, -005, -006, -008.

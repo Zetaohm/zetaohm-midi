@@ -794,6 +794,24 @@ mod tests {
     extern crate std;
 
     use super::*;
+
+    // REQ-USB-EVT-018: a cable at or above the cable count gives no byte; the writer gives
+    // back its options.
+    #[test]
+    fn cable_count_and_writer_options() {
+        let mut r = PacketReader::<1>::new(StreamProtocol::Midi1).unwrap();
+        let mut got = std::vec::Vec::new();
+        r.read_packet(EventPacket::from_bytes([0x19, 0x90, 0x3C, 0x40]), |p| {
+            got.push(p)
+        });
+        assert!(got.is_empty(), "cable 1 of 1");
+        r.read_packet(EventPacket::from_bytes([0x09, 0x90, 0x3C, 0x40]), |p| {
+            got.push(p)
+        });
+        assert_eq!(got.len(), 1);
+        let o = WriterOptions { unparsed: true };
+        assert_eq!(PacketWriter::<1>::new(o).options(), o);
+    }
     use proptest::prelude::*;
     use std::vec::Vec;
     use zmidi_io::{BytesToUmp, UmpToBytes};

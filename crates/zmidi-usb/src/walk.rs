@@ -281,6 +281,26 @@ impl<'a> Iterator for Interfaces<'a> {
 mod tests {
     extern crate std;
     use super::*;
+
+    #[test]
+    fn writer_cursor_and_patch_limits() {
+        let mut buf = [0u8; 8];
+        let mut w = DescWriter::new(&mut buf);
+        assert!(w.is_empty());
+        assert_eq!(w.remaining(), 8);
+        w.u8(1).unwrap();
+        assert!(!w.is_empty());
+        assert_eq!(w.remaining(), 7);
+        // A patch only over bytes written before: 2 bytes at 0 need 2 written bytes.
+        assert_eq!(w.patch_u16_le(0, 0x1234), Err(WalkError::Overflow));
+        let at = w.reserve_u16().unwrap();
+        assert_eq!(at, 1);
+        w.patch_u16_le(at, 0x1234).unwrap();
+        assert_eq!(w.written(), &[1, 0x34, 0x12]);
+        // A descriptor has bytes.
+        let d = Descriptors::new(&[2, 0x24]).next().unwrap().unwrap();
+        assert!(!d.is_empty());
+    }
     use proptest::prelude::*;
     use std::vec::Vec;
 

@@ -1057,6 +1057,51 @@ mod tests {
     }
 
     #[test]
+    fn values_at_their_limits() {
+        // 7-bit values: 0x7F is the largest.
+        assert!(Version::from_byte(0x7F).is_ok());
+        assert_eq!(Version::from_byte(0x80), Err(ParseError::InvalidByte));
+        let mut buf = [0u8; 8];
+        let mut w = Writer::new(Framing::SysEx, &mut buf).unwrap();
+        assert_eq!(w.len(), 1, "the framing start");
+        w.bytes(&[0x7F, 0x00]).unwrap();
+        assert_eq!(w.len(), 3);
+        // A MIDI-CI start with no more bytes: too short, not "not MIDI-CI".
+        assert_eq!(
+            Header::parse(&[0x7E, 0x7F, 0x0D, 0x70]),
+            Err(ParseError::TooShort)
+        );
+        // 28 bits from four 7-bit bytes, LSB first.
+        assert_eq!(u28(&[1, 2, 3, 4]), 1 | 2 << 7 | 3 << 14 | 4 << 21);
+        // A value over the range gives a last byte over 0x7F, which the 7-bit check refuses.
+        assert!(le14(0x8000)[1] > 0x7F);
+        assert!(le28(0x2000_0000)[3] > 0x7F);
+        // patch_u14 takes 0x3FFF.
+        let mut buf = [0u8; 32];
+        let mut e = start(
+            DeviceId::FunctionBlock,
+            SubId2::Ack,
+            Muid::new(1).unwrap(),
+            Muid::BROADCAST,
+            Framing::Bare,
+            &mut buf,
+        );
+        let at = e.len();
+        e.u14(0);
+        e.patch_u14(at, 0x3FFF);
+        assert_eq!(e.finish(), Ok(15));
+        assert_eq!(buf[13..15], [0x7F, 0x7F]);
+        // Text: a space is written, and read back from "\u0020"; "\u000A" is a new line and
+        // "\u0001" is dropped.
+        assert_eq!(escape("a b", 100).0, "a b");
+        let s: String = TextChars::new(b"a\\u0020b\\u000Ac\\u0001d").collect();
+        assert_eq!(s, "a b\ncd");
+        // A byte over 0x7F is not a character of the text.
+        let s: String = TextChars::new(&[b'a', 0x80]).collect();
+        assert_eq!(s, "a\u{FFFD}");
+    }
+
+    #[test]
     fn writer_rejects_bit7() {
         // REQ-CI-GEN-001.
         let mut buf = [0u8; 8];

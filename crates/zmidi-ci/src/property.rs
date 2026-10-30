@@ -481,6 +481,68 @@ mod tests {
     }
 
     #[test]
+    fn chunk_writer_at_its_limits() {
+        // Data room: 512 - 13 header bytes - 9 Chunk bytes - the Header Data.
+        let w = ChunkWriter::new(
+            PeKind::GetReply,
+            0x7F,
+            b"{}",
+            512,
+            None,
+            None,
+            SRC,
+            DST,
+            Framing::Bare,
+        )
+        .unwrap();
+        assert_eq!(w.data_room(), 512 - 13 - 9 - 2);
+        // Request ID 0x7F is the largest.
+        let mut out = [0u8; 64];
+        let c = PeChunk {
+            request_id: 0x7F,
+            header: b"{}",
+            total: 1,
+            number: 1,
+            data: &[],
+        };
+        assert!(c
+            .write(PeKind::GetReply, SRC, DST, Framing::Bare, &mut out)
+            .is_ok());
+        // A known total: no Chunk after the last.
+        let mut w = ChunkWriter::new(
+            PeKind::GetReply,
+            1,
+            b"{}",
+            512,
+            None,
+            Some(0),
+            SRC,
+            DST,
+            Framing::Bare,
+        )
+        .unwrap();
+        w.write_next(&[], &mut out).unwrap();
+        assert_eq!(w.write_next(&[], &mut out), Err(WriteError::InvalidValue));
+        // An unknown total: Chunk numbers up to 0x3FFF.
+        let mut w = ChunkWriter::new(
+            PeKind::GetReply,
+            1,
+            b"",
+            512,
+            None,
+            None,
+            SRC,
+            DST,
+            Framing::Bare,
+        )
+        .unwrap();
+        for k in 1..=0x3FFF {
+            assert!(w.write_next(&[], &mut out).is_ok(), "{k}");
+        }
+        assert_eq!(w.write_next(&[], &mut out), Err(WriteError::InvalidValue));
+    }
+
+    #[test]
     fn capabilities() {
         // Tables 31, 32; REQ-CI-PEF-004 to -006.
         let mut buf = [0u8; 32];

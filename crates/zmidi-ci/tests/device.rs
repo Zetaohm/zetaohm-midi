@@ -2497,3 +2497,220 @@ fn broadcast_destination_only_where_allowed() {
         ]
     );
 }
+
+#[test]
+fn device_rules_at_their_limits() {
+    let mut buf = [0u8; 512];
+    // The Group of a reply record: the first Group of the Function Block plus the offset.
+    let mut a = dev(0x41, &[0x0111_1111]);
+    let mut c = config(0x42);
+    c.first_group = 3;
+    c.group_count = 2;
+    let mut b: Dev = CiDevice::new(c, &mut rng(&[0x0222_2222])).unwrap();
+    let n = a.discovery(0, 0, &mut buf).unwrap();
+    let (_, r) = deliver(&mut b, 4, &buf[..n]);
+    assert_eq!(r[0].0, 4);
+    // A random source that gives only reserved values: the MUID steps from 0 to 1.
+    let d: Dev = CiDevice::new(config(0x43), &mut || 0x0FFF_FFFF).unwrap();
+    assert_eq!(d.muid(), Muid::new(1).unwrap());
+    // Function Block change: Groups 0 to 15 only.
+    for (first, count, ok) in [
+        (15, 1, true),
+        (0, 16, true),
+        (16, 1, false),
+        (0, 0, false),
+        (15, 2, false),
+    ] {
+        let mut d = dev(0x44, &[0x0444_4444]);
+        let r = d.function_block_changed(first, count, &mut rng(&[0x0555_5555]), &mut buf);
+        assert_eq!(r.is_ok(), ok, "{first} {count}");
+        if !ok {
+            assert_eq!(r, Err(DeviceError::InvalidConfig));
+        }
+    }
+    // A header error other than a reserved Device ID: the message is rejected, with no NAK.
+    let (mut a, mut b) = discovered();
+    let n = a.endpoint_info_inquiry(b.muid(), &mut buf).unwrap();
+    let mut m = buf[..n].to_vec();
+    m[6] = 0x80;
+    let (ev, r) = deliver(&mut b, 0, &m);
+    assert!(matches!(ev, Some(Event::Rejected { .. })) && r.is_empty());
+    // A Discovery like its own on an Output Path that it did not send: not an echo, a collision.
+    let n = a.discovery(0, 0, &mut buf).unwrap();
+    let mut other = buf[..n].to_vec();
+    assert_eq!(other[29], 0, "Output Path ID");
+    other[29] = 5;
+    let old = a.muid();
+    let (ev, _) = deliver(&mut a, 0, &other);
+    assert!(
+        matches!(ev, Some(Event::MuidChanged { old: o, .. }) if o == old),
+        "{ev:?}"
+    );
+    // One window for the Discovery of all paths (REQ-CI-DISC-015): a Discovery on another
+    // path does not start a new round, so the reply on path 0 again is a duplicate.
+    let mut a = dev(0x41, &[0x0111_1111]);
+    let mut b = dev(0x42, &[0x0222_2222]);
+    let n = a.discovery(0, 0, &mut buf).unwrap();
+    let r0 = deliver(&mut b, 0, &buf[..n]).1[0].1.clone();
+    assert!(matches!(
+        deliver_at(&mut a, 0, &r0, 1000).0,
+        Some(Event::Discovered { .. })
+    ));
+    a.discovery(1, 2000, &mut buf).unwrap();
+    assert_eq!(
+        deliver_at(&mut a, 0, &r0, 4000).0,
+        Some(Event::PeerInvalidated { muid: b.muid() })
+    );
+    // A peer that reports a size of 0: the default of 128 bytes applies to the messages to it.
+    let mut a = dev(0x41, &[0x0111_1111]);
+    let mut b = dev(0x42, &[0x0222_2222]);
+    let n = a.discovery(0, 0, &mut buf).unwrap();
+    let mut r = deliver(&mut b, 0, &buf[..n]).1[0].1.clone();
+    r[25..29].copy_from_slice(&[0, 0, 0, 0]);
+    assert!(matches!(
+        deliver(&mut a, 0, &r).0,
+        Some(Event::Discovered { .. })
+    ));
+    let k = Nak {
+        original_sub_id2: 0x72,
+        status: NakStatus::Nak,
+        details: Details::Reserved,
+        text: &[],
+    };
+    let n = a
+        .nak(
+            b.muid(),
+            DeviceId::FunctionBlock,
+            &k,
+            &"x".repeat(300),
+            &mut buf,
+        )
+        .unwrap();
+    assert_eq!(n, 128);
+}
+
+#[cfg(feature = "property-exchange")]
+#[test]
+fn property_exchange_rules_at_their_limits() {
+    let mut buf = [0u8; 512];
+    // A Device with no Property Exchange in its configuration: NAK 0x01.
+    let mut a = dev(0x41, &[0x0111_1111]);
+    let mut c = config(0x42);
+    c.categories.property_exchange = false;
+    let mut b: Dev = CiDevice::new(c, &mut rng(&[0x0222_2222])).unwrap();
+    let n = a.discovery(0, 0, &mut buf).unwrap();
+    let r = deliver(&mut b, 0, &buf[..n]).1[0].1.clone();
+    deliver(&mut a, 0, &r);
+    let n = a.pe_capabilities_inquiry(b.muid(), &mut buf).unwrap();
+    let (_, r) = deliver(&mut b, 0, &buf[..n]);
+    assert_eq!(nak_of(&r[0].1).status, NakStatus::NotSupported);
+    // A reserved Device ID in a message with SysEx framing (F0 ... F7) gets its NAK too.
+    let (mut a, mut b) = discovered();
+    let n = a.pe_capabilities_inquiry(b.muid(), &mut buf).unwrap();
+    let mut m = std::vec![0xF0];
+    m.extend_from_slice(&buf[..n]);
+    m.push(0xF7);
+    m[2] = 0x20;
+    let (ev, r) = deliver(&mut b, 0, &m);
+    assert!(matches!(ev, Some(Event::Rejected { .. })));
+    assert_eq!(nak_of(&r[0].1).status, NakStatus::NotInUse);
+    // pe_reply gives no inquiry and no Notify.
+    let (mut a, _) = discovered();
+    let peer = Muid::new(0x0222_2222).unwrap();
+    for kind in [PeKind::GetInquiry, PeKind::SetInquiry, PeKind::Notify] {
+        assert_eq!(
+            a.pe_reply(peer, kind, 1, b"{}", Some(0), None).err(),
+            Some(DeviceError::NotSupported),
+            "{kind:?}"
+        );
+    }
+}
+
+#[cfg(feature = "profiles")]
+#[test]
+fn profile_rules_at_their_limits() {
+    let mut buf = [0u8; 512];
+    let (mut a, mut b) = discovered();
+    let _ = b.add_profile(entry(false)).unwrap().count();
+    let n = a
+        .profile_inquiry(b.muid(), DeviceId::FunctionBlock, &mut buf)
+        .unwrap();
+    let (_, r) = deliver(&mut b, 0, &buf[..n]);
+    for (_, m) in &r {
+        deliver(&mut a, 0, m);
+    }
+    // A Function Block address (Device ID 0x7F) is Group 0 of the Profile table, also when the
+    // Function Block starts at Group 2 and the inquiry comes on Group 3.
+    {
+        let mut c = config(0x45);
+        c.first_group = 2;
+        c.group_count = 2;
+        let mut fb: Dev = CiDevice::new(c, &mut rng(&[0x0666_6666])).unwrap();
+        let mut x = dev(0x46, &[0x0777_7777]);
+        let n = x.discovery(0, 0, &mut buf).unwrap();
+        let r = deliver(&mut fb, 2, &buf[..n]).1[0].1.clone();
+        deliver(&mut x, 0, &r);
+        let mut e = entry(false);
+        e.address = ProfileAddress {
+            device_id: DeviceId::FunctionBlock,
+            group: 0,
+        };
+        let _ = fb.add_profile(e).unwrap().count();
+        let n = x
+            .profile_inquiry(fb.muid(), DeviceId::FunctionBlock, &mut buf)
+            .unwrap();
+        let (_, r) = deliver(&mut fb, 3, &buf[..n]);
+        let last = &r.last().unwrap().1;
+        match deliver(&mut x, 3, last).0 {
+            Some(Event::ProfileInquiryReply {
+                device_id, reply, ..
+            }) => {
+                assert_eq!(device_id, DeviceId::FunctionBlock);
+                assert_eq!(reply.disabled().collect::<Vec<_>>(), [gm()]);
+            }
+            e => panic!("{e:?}"),
+        }
+    }
+    // The count may be the Maximum Number of Channels of the peer.
+    assert!(a
+        .set_profile_on(b.muid(), DeviceId::Channel(0), gm(), 4, Some(4), &mut buf)
+        .is_ok());
+    // Profile Specific Data gives its event.
+    let n = zmidi_ci::ProfileSpecificData {
+        profile: gm(),
+        data: &[1, 2, 3],
+    }
+    .write(
+        false,
+        DeviceId::Channel(0),
+        a.muid(),
+        b.muid(),
+        Framing::Bare,
+        &mut buf,
+    )
+    .unwrap();
+    assert!(matches!(
+        deliver(&mut b, 0, &buf[..n]).0,
+        Some(Event::ProfileSpecificData { .. })
+    ));
+    // 4 Profile Details Inquiries wait for a reply; a 5th takes the place of the first.
+    for t in 0x40..0x45u8 {
+        a.profile_details_inquiry(b.muid(), DeviceId::Channel(0), gm(), t, &mut buf)
+            .unwrap();
+    }
+    for (t, notification) in [(0x40u8, true), (0x44, false), (0x41, false)] {
+        let reply = zmidi_ci::ProfileDetailsReply {
+            profile: gm(),
+            target: t,
+            data: &[1],
+        };
+        let n = b
+            .profile_details_reply(a.muid(), DeviceId::Channel(0), &reply, &mut buf)
+            .unwrap();
+        let (ev, _) = deliver(&mut a, 0, &buf[..n]);
+        assert!(
+            matches!(ev, Some(Event::ProfileDetailsReply { notification: x, .. }) if x == notification),
+            "{t:#04x}: {ev:?}"
+        );
+    }
+}

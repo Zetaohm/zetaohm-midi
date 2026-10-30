@@ -961,6 +961,86 @@ mod tests {
     }
 
     #[test]
+    fn writers_at_their_limits() {
+        // Function Block 0x7F is "none" (Table 8): Some(0x7F) is not a value; 0x7E is.
+        let r = DiscoveryReply {
+            identity: identity(),
+            categories: Categories::default(),
+            max_sysex_size: 128,
+            output_path_id: None,
+            function_block: Some(0x7E),
+        };
+        let mut buf = [0u8; 128];
+        assert!(r.write(SRC, DST, Framing::Bare, &mut buf).is_ok());
+        let r = DiscoveryReply {
+            function_block: Some(0x7F),
+            ..r
+        };
+        assert_eq!(
+            r.write(SRC, DST, Framing::Bare, &mut buf),
+            Err(WriteError::InvalidValue)
+        );
+        // A reserved Endpoint Information status keeps its value (Table 10).
+        let e = EndpointInfoReply {
+            status: EndpointInfoStatus::Reserved(0x10),
+            data: &[],
+        };
+        let n = e.write(SRC, DST, Framing::Bare, &mut buf).unwrap();
+        assert_eq!(buf[13], 0x10);
+        let (h, body) = parse(&buf[..n]);
+        assert_eq!(
+            EndpointInfoReply::read(&h, body).unwrap().status,
+            EndpointInfoStatus::Reserved(0x10)
+        );
+        // The smallest size of a NAK with no text: 13 + 10 bytes, 2 more with SysEx framing.
+        let k = Nak {
+            original_sub_id2: 0x70,
+            status: NakStatus::Nak,
+            details: Details::Reserved,
+            text: &[],
+        };
+        for (max, framing, ok) in [
+            (23, Framing::Bare, true),
+            (22, Framing::Bare, false),
+            (25, Framing::SysEx, true),
+            (24, Framing::SysEx, false),
+        ] {
+            let r = k.write_without_text(
+                DeviceId::FunctionBlock,
+                SRC,
+                DST,
+                Some(max),
+                framing,
+                &mut buf,
+            );
+            assert_eq!(r.is_ok(), ok, "{max} {framing:?}");
+        }
+        // A long text with SysEx framing fills the buffer to its last byte, F7.
+        let a = Ack {
+            original_sub_id2: 0x70,
+            status: AckStatus::from_bytes(0x00, 0),
+            details: Details::Reserved,
+            text: &[],
+        };
+        let mut small = [0u8; 40];
+        let long = "x".repeat(100);
+        let n = a
+            .write(
+                &long,
+                DeviceId::FunctionBlock,
+                SRC,
+                DST,
+                None,
+                Framing::SysEx,
+                &mut small,
+            )
+            .unwrap();
+        assert_eq!((n, small[n - 1]), (40, 0xF7));
+        let (h, body) = parse(&small[1..n - 1]);
+        assert_eq!(Ack::read(&h, body).unwrap().text().count(), 40 - 2 - 23);
+    }
+
+    #[test]
     fn discovery_reply_round_trip() {
         // Table 8; REQ-CI-DISC-012.
         let r = DiscoveryReply {

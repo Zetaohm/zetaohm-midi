@@ -1112,6 +1112,37 @@ pub fn read_set<const B: usize, E: EndpointBlocks>(bytes: &[u8], endpoints: &[E]
 mod tests {
     extern crate std;
     use super::*;
+
+    // REQ-USB-GTB-004, -006, -009, -011: the block rules each alone, and the protocol hint.
+    #[test]
+    fn block_rules_and_protocol_hint() {
+        let b = GroupTerminalBlock {
+            protocol: MidiProtocol::Midi2Jr,
+            ..GroupTerminalBlock::DEFAULT
+        };
+        assert_eq!(b.validate(), Ok(()));
+        assert_eq!(
+            b.protocol_hint(),
+            ProtocolHint::from_protocol(MidiProtocol::Midi2Jr)
+        );
+        assert!(b.protocol_hint().is_some());
+        let zero = GroupTerminalBlock { id: 0, ..b };
+        assert_eq!(zero.validate(), Err(GtbError::BlockIdZero));
+        let range = GroupTerminalBlock {
+            first_group: 15,
+            num_groups: 2,
+            ..b
+        };
+        assert_eq!(range.validate(), Err(GtbError::GroupRange(1)));
+        // A class-specific descriptor of type 0x26 that is not a block (the header, subtype
+        // 0x01) is not read as one.
+        let header = [5u8, 0x26, 0x01, 18, 0];
+        let d = crate::walk::Descriptors::new(&header)
+            .next()
+            .unwrap()
+            .unwrap();
+        assert!(GroupTerminalBlock::read(&d).is_none());
+    }
     use crate::ms2::BusSpeed;
     use proptest::prelude::*;
     use std::vec::Vec;

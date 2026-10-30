@@ -1154,6 +1154,65 @@ mod tests {
     }
 
     #[test]
+    fn profile_values_at_their_limits() {
+        // A Manufacturer Specific Profile is the same only with the same bytes.
+        let m = |info| ProfileId::Manufacturer {
+            id: ManufacturerId::OneByte(0x41),
+            info,
+        };
+        assert!(m([1, 2]).same_profile(m([1, 2])));
+        assert!(!m([1, 2]).same_profile(m([1, 3])));
+        // 7-bit bytes: 0x7F is the largest.
+        assert_eq!(
+            ChannelCounts::read(&[0x7F; 4]),
+            Ok(ChannelCounts {
+                in_use: 0x3FFF,
+                maximum: 0x3FFF
+            })
+        );
+        assert_eq!(
+            ChannelCounts {
+                in_use: 0x81,
+                maximum: 0x102
+            }
+            .to_bytes(),
+            [0x01, 0x01, 0x02, 0x02]
+        );
+        // The 4 length bytes, LSB first: a length in byte 3 or 4 is larger than the data.
+        let mut buf = [0u8; 64];
+        let n =
+            ProfileInquiry::write(DeviceId::Channel(0), SRC, DST, Framing::Bare, &mut buf).unwrap();
+        let (h, _) = parse(&buf[..n]);
+        for len in [[0, 0, 1, 0], [0, 0, 0, 1]] {
+            let mut body = std::vec::Vec::from(GM.to_bytes());
+            body.extend(len);
+            body.extend([1, 2, 3]);
+            assert_eq!(
+                ProfileSpecificData::read(&h, &body).map(|_| ()),
+                Err(ParseError::TooShort),
+                "{len:?}"
+            );
+        }
+        // To the Broadcast MUID with SysEx framing: 512 bytes with F0 and F7.
+        let big = [0x11u8; 500];
+        for (len, ok) in [(488, true), (489, false)] {
+            let r = ProfileSpecificData {
+                profile: GM,
+                data: &big[..len],
+            }
+            .write(
+                false,
+                DeviceId::Channel(0),
+                SRC,
+                Muid::BROADCAST,
+                Framing::SysEx,
+                &mut [0u8; 600],
+            );
+            assert_eq!(r.is_ok(), ok, "{len}");
+        }
+    }
+
+    #[test]
     fn profile_inquiry_message() {
         // Table 18; REQ-CI-PROF-003, REQ-CI-PRFR-003, REQ-CI-PRFR-006.
         let mut buf = [0u8; 32];

@@ -396,6 +396,39 @@ mod tests {
     const MS_ALT0: [u8; 9] = [9, 4, 1, 0, 2, 1, 3, 0, 0];
 
     #[test]
+    fn readers_check_each_field() {
+        // Each field alone: the descriptor type, the class and the subclass.
+        for bad in [
+            [9, 0x24, 0, 0, 0, 1, 1, 0, 0],
+            [9, 4, 0, 0, 0, 2, 1, 0, 0],
+            [9, 4, 0, 0, 0, 1, 2, 0, 0],
+        ] {
+            assert_eq!(
+                StandardAcInterface::read(&bad),
+                Err(AcError::NotAudioControl),
+                "{bad:?}"
+            );
+            assert!(!is_audio_control(&bad));
+        }
+        // The header: CS_INTERFACE and subtype HEADER, each alone.
+        let mut h = TABLE_B4;
+        h[1] = 0x25;
+        assert_eq!(AcHeaderView::read(&h).err(), Some(AcError::NotHeader));
+        let mut h = TABLE_B4;
+        h[2] = 0x02;
+        assert_eq!(AcHeaderView::read(&h).err(), Some(AcError::NotHeader));
+        // The group reader takes the first header and skips other class-specific descriptors.
+        let mut cfg = Vec::from(TABLE_B3);
+        cfg.extend([4, 0x24, 0x09, 0x00]);
+        cfg.extend([9, 0x24, 0x01, 0x00, 0x01, 0x09, 0x00, 0x01, 0x01]);
+        cfg.extend([9, 0x24, 0x01, 0x00, 0x01, 0x09, 0x00, 0x01, 0x02]);
+        let g = crate::walk::interfaces(&cfg).next().unwrap();
+        let r = AcInterfaceRead::from_group(&g).unwrap();
+        assert_eq!(r.header.unwrap().interfaces, &[1]);
+        assert_eq!(r.problem, None);
+    }
+
+    #[test]
     fn table_b3_vector_write_and_read() {
         // REQ-USB-VEC1-001, REQ-USB-AC-002.
         let mut buf = [0xAAu8; 12];
