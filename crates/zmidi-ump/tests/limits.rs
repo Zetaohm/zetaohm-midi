@@ -199,8 +199,10 @@ fn channel_voice_and_system_values_at_their_limits() {
     assert_eq!(decode_step(0, 128, 7), Err(UmpError::OutOfRange));
 }
 
+// Ump::parse decodes Message Type 0x2 only with the feature channel-voice1 (DEC-017).
+#[cfg(feature = "channel-voice1")]
 #[test]
-fn translators_and_utility_words() {
+fn translators() {
     // One MIDI 2.0 Note On gives one MIDI 1.0 Note On.
     let on = Ump::parse(&[0x4090_3C00, 0x8000_0000]).unwrap().0;
     let t = to_midi1(&on);
@@ -216,6 +218,10 @@ fn translators_and_utility_words() {
     }
     x.reset();
     assert!(x.flush(g(0), Channel::new(0).unwrap()).is_none());
+}
+
+#[test]
+fn utility_words() {
     // The words of Utility messages through Ump.
     for (u, w) in [
         (UtilityMessage::Noop(Noop::new()), 0x0000_0000u32),
