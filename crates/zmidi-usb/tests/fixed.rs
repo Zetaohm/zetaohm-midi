@@ -294,3 +294,230 @@ fn new_refuses_a_broken_endpoint_rule() {
     const EMPTY: Result<FixedFunction, FixedError> = FixedFunction::new(&[], &[], &[], &[]);
     assert!(EMPTY.is_ok());
 }
+
+// ----- limits found by mutation testing -----
+
+use zmidi_usb::fixed::{Fixed, Function, FunctionIds};
+use zmidi_usb::GtbType;
+
+fn ids() -> FunctionIds {
+    FunctionIds {
+        ac_interface: 2,
+        ms_interface: 3,
+        ac_string: 4,
+        streaming_strings: [5, 6, 7, 8, 9, 10, 11, 12],
+    }
+}
+
+fn check_trait<const J: usize, const S: usize, const E: usize, const B: usize>(
+    fixed: &'static FixedFunction,
+    cfg: &FunctionConfig<'static, J, S, E, B>,
+) {
+    // DEC-USB-002: an adapter sees the same function through `Function` for a Fixed function
+    // and for the run-time configuration, with the ids of the USB stack.
+    let mut f = Fixed::new(fixed);
+    let mut c = cfg.clone();
+    Function::prepare(&mut f, &ids()).unwrap();
+    Function::prepare(&mut c, &ids()).unwrap();
+    let n = cfg.alternate_settings();
+    assert!(n >= 2);
+    assert_eq!(Function::alternate_settings(&f), n);
+    assert_eq!(Function::alternate_settings(&c), n);
+    assert_eq!(Function::group_mask(&c, 0), GroupMask::ALL);
+    for alt in 0..=n as u8 {
+        assert_eq!(
+            Function::group_mask(&f, alt),
+            Function::group_mask(&c, alt),
+            "{alt}"
+        );
+    }
+    let mut expected = vec![0u8; 1024];
+    let k = write_function(&c, &mut expected).unwrap();
+    let mut before = vec![0u8; 1024];
+    let k0 = write_function(cfg, &mut before).unwrap();
+    assert_ne!(&expected[..k], &before[..k0], "prepare gives the ids");
+    let (mut a, mut b) = (Bytes::default(), Bytes::default());
+    Function::write(&f, &mut a).unwrap();
+    Function::write(&c, &mut b).unwrap();
+    assert_eq!(a.0, &expected[..k]);
+    assert_eq!(b.0, &expected[..k]);
+}
+
+#[test]
+fn function_trait_of_fixed_and_run_time_functions() {
+    check_trait(&default_fn::MIDI, &default_cfg());
+    check_trait(&two_settings_fn::MIDI, &two_settings_cfg());
+    assert!(!default_fn::MIDI.is_empty());
+    let empty = FixedFunction::new(&[], &[], &[GroupMask::ALL], &[]).unwrap();
+    assert!(empty.is_empty());
+    // prepare checks the configuration.
+    let mut c = default_cfg();
+    c.midi1 = None;
+    assert!(Function::prepare(&mut c, &ids()).is_err());
+}
+
+#[test]
+fn group_mask_is_the_one_of_the_midi_out_endpoint() {
+    // REQ-USB-UMP-013: the Groups of the MIDI OUT endpoint. Here the MIDI IN endpoint also
+    // has an OUT-only block of Group 2.
+    let mut c = FunctionConfig::<4, 2, 2, 2>::new(0, 1, BusSpeed::Full).unwrap();
+    let s = &mut c.midi2.as_mut_slice()[0];
+    let mut b2 = s.blocks.as_slice()[0];
+    b2.id = 2;
+    b2.kind = GtbType::OutputOnly;
+    b2.first_group = 1;
+    b2.num_groups = 1;
+    s.blocks.push(b2).unwrap();
+    for e in s.endpoints.as_mut_slice() {
+        if e.direction == EndpointDirection::MidiIn {
+            e.blocks.push(2).unwrap();
+        }
+    }
+    assert_eq!(Function::group_mask(&c, 1), GroupMask::from_bits(0x0001));
+    let text = source(&c, "M");
+    assert!(
+        text.contains("GroupMask::from_bits(0xFFFF), ::zmidi_usb::GroupMask::from_bits(0x0001)]"),
+        "{text}"
+    );
+}
+
+#[test]
+fn endpoint_rules_compare_each_property() {
+    // DEC-USB-002 addendum: one address has one transfer type, size and interval; other
+    // addresses may differ.
+    use EndpointDirection::{MidiIn, MidiOut};
+    let masks: &'static [GroupMask] = &[GroupMask::ALL, GroupMask::ALL];
+    let leak =
+        |e: Vec<SettingEndpoint>| -> &'static [SettingEndpoint] { Box::leak(e.into_boxed_slice()) };
+    let with = |t: TransferType, interval: u8| SettingEndpoint {
+        transfer: t,
+        interval,
+        ..ep(1, MidiOut, 1, 64)
+    };
+    let pair = |b: SettingEndpoint| leak(vec![ep(0, MidiOut, 1, 64), b]);
+    let other = |x: u8| SettingEndpoint {
+        transfer: TransferType::Other(x),
+        ..ep(0, MidiOut, 1, 64)
+    };
+    let refused = Err(FixedError::Endpoints { address: 0x01 });
+    assert_eq!(
+        FixedFunction::new(&[], pair(with(TransferType::Interrupt, 0)), masks, &[]),
+        refused
+    );
+    assert_eq!(
+        FixedFunction::new(&[], pair(with(TransferType::Bulk, 1)), masks, &[]),
+        refused
+    );
+    let same_other = leak(vec![
+        other(1),
+        SettingEndpoint {
+            alternate_setting: 1,
+            ..other(1)
+        },
+    ]);
+    assert!(FixedFunction::new(&[], same_other, masks, &[]).is_ok());
+    let two_other = leak(vec![
+        other(0),
+        SettingEndpoint {
+            alternate_setting: 1,
+            ..other(1)
+        },
+    ]);
+    assert_eq!(FixedFunction::new(&[], two_other, masks, &[]), refused);
+    // Two addresses with other values.
+    let ok = leak(vec![
+        ep(0, MidiOut, 1, 64),
+        SettingEndpoint {
+            transfer: TransferType::Interrupt,
+            interval: 1,
+            ..ep(0, MidiIn, 2, 32)
+        },
+    ]);
+    assert!(FixedFunction::new(&[], ok, masks, &[]).is_ok());
+    // The same rules in write_rust (a run-time configuration).
+    let mut c = two_settings_cfg();
+    let e = &mut c.midi2.as_mut_slice()[1].endpoints.as_mut_slice()[0];
+    e.transfer = TransferType::Interrupt;
+    e.interval = 1;
+    let mut s = String::new();
+    assert!(matches!(
+        write_rust(&c, "M", &mut s),
+        Err(FixedError::Endpoints { .. })
+    ));
+}
+
+/// A sink that keeps the kind of each call.
+#[derive(Default, Debug, PartialEq)]
+struct Calls(Vec<(char, Vec<u8>)>);
+
+impl DescriptorSink for Calls {
+    type Error = ();
+    fn interface(&mut self, f: &InterfaceFields) -> Result<(), ()> {
+        self.0.push((
+            'i',
+            vec![
+                f.interface_number,
+                f.alternate_setting,
+                f.subclass,
+                f.string_index,
+            ],
+        ));
+        Ok(())
+    }
+    fn endpoint(&mut self, f: &EndpointFields, extra: &[u8]) -> Result<(), ()> {
+        let mut v = vec![f.address, f.attributes];
+        v.extend_from_slice(extra);
+        self.0.push(('e', v));
+        Ok(())
+    }
+    fn class_descriptor(&mut self, t: u8, payload: &[u8]) -> Result<(), ()> {
+        let mut v = vec![t];
+        v.extend_from_slice(payload);
+        self.0.push(('c', v));
+        Ok(())
+    }
+}
+
+#[test]
+fn replay_reads_each_descriptor_kind_by_its_length() {
+    // REQ-USB-FIX-002: an interface of fewer than 9 bytes or an endpoint of fewer than 7 is
+    // given as it is; the template numbers are replaced in the AudioControl header only.
+    fn replay(d: &'static [u8]) -> Vec<(char, Vec<u8>)> {
+        let f = FixedFunction::new(d, &[], &[GroupMask::ALL], &[]).unwrap();
+        let mut calls = Calls::default();
+        let strings = [5u8, 6];
+        let ids = FixedIds {
+            ac_interface: 2,
+            ms_interface: 3,
+            ac_string: 4,
+            streaming_strings: &strings,
+        };
+        f.replay(&ids, &mut calls).unwrap();
+        calls.0
+    }
+    assert_eq!(replay(&[4, 4, 0, 0]), [('c', vec![4, 0, 0])]);
+    assert_eq!(replay(&[6, 5, 1, 2, 64, 0]), [('c', vec![5, 1, 2, 64, 0])]);
+    assert_eq!(replay(&[7, 5, 1, 2, 64, 0, 0]), [('e', vec![1, 2])]);
+    // AudioControl interface (number template 0), then its header with baInterfaceNr 1 (the
+    // MIDI Streaming template).
+    assert_eq!(
+        replay(&[9, 4, 0, 0, 0, 1, 1, 0, 0, 9, 0x24, 1, 0, 1, 9, 0, 1, 1]),
+        [
+            ('i', vec![2, 0, 1, 4]),
+            ('c', vec![0x24, 1, 0, 1, 9, 0, 1, 3])
+        ]
+    );
+    // A MIDI Streaming interface (template 1): a class descriptor of 9 bytes is unchanged.
+    assert_eq!(
+        replay(&[9, 4, 1, 0, 0, 1, 3, 0, 0, 9, 0x24, 1, 0, 1, 9, 0, 1, 1]),
+        [
+            ('i', vec![3, 0, 3, 5]),
+            ('c', vec![0x24, 1, 0, 1, 9, 0, 1, 1])
+        ]
+    );
+    // An AudioControl subclass with another number is not the AudioControl template.
+    assert_eq!(
+        replay(&[9, 4, 7, 0, 0, 1, 1, 0, 0]),
+        [('i', vec![3, 0, 1, 5])]
+    );
+}

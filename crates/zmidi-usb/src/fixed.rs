@@ -306,7 +306,8 @@ pub trait Function {
     fn alternate_settings(&self) -> usize;
     /// The endpoints, in descriptor order.
     fn endpoints(&self) -> impl Iterator<Item = SettingEndpoint> + '_;
-    /// The Groups of the MIDI OUT endpoint of Alternate Setting `alt` (all for setting 0).
+    /// The Groups of the MIDI OUT endpoint of Alternate Setting `alt`: all for setting 0, none
+    /// for a setting that does not exist.
     fn group_mask(&self, alt: u8) -> GroupMask;
     /// Gives the descriptors of the function to `sink`.
     fn write<K: DescriptorSink>(&self, sink: &mut K) -> Result<(), EmitError<K::Error>>;
@@ -346,14 +347,16 @@ impl<const J: usize, const S: usize, const E: usize, const B: usize> Function
 
     fn group_mask(&self, alt: u8) -> GroupMask {
         match (alt, self.midi2_setting(alt)) {
-            (1.., Some(s)) => s
+            (0, _) => GroupMask::ALL,
+            (_, Some(s)) => s
                 .endpoints
                 .iter()
                 .find(|e| e.direction == EndpointDirection::MidiOut)
                 .map_or(GroupMask::EMPTY, |e| {
                     GroupMask::from_blocks(s.blocks.as_slice(), e)
                 }),
-            _ => GroupMask::ALL,
+            // As FixedFunction::group_mask: no Group for a setting that does not exist.
+            (_, None) => GroupMask::EMPTY,
         }
     }
 

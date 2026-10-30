@@ -57,6 +57,9 @@ change the API. All crates and packages have the same version.
   Required with a reserved Authentication State and the nonce that it answered already treats it as
   a repeat of the first request (M2-124 Tables 15, 16), as for state 0x00. Before, it asked the
   caller for the credentials again.
+- `zmidi-usb`: `Function::group_mask` of a run-time `FunctionConfig` gives no Group for an Alternate
+  Setting that does not exist, as a `Fixed` function and `zmidi_usb_function_group_mask` do. Before,
+  it gave all 16 Groups.
 
 ## [0.1.0-alpha.1]
 
