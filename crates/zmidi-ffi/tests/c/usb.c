@@ -106,6 +106,13 @@ int main(void) {
     CHECK(!zmidi_usb_link_holds_part(&link));
   }
 
+  /* REQ-FFI-USB-003: a SysEx start with no room is refused before it is read. */
+  {
+    static const uint8_t start[] = {0x04, 0xF0, 0x7E, 0x7F};
+    n = 99;
+    CHECK(zmidi_usb_link_read(&link, start, sizeof start, rec, 0, &n, &errors) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
+    CHECK(n == 99 && !zmidi_usb_link_holds_part(&link));
+  }
   /* Small buffers and bad values. */
   {
     static const uint8_t ep[] = {0x09, 0x90, 0x3C, 0x64, 0x09, 0x80, 0x3C, 0x00};
@@ -117,6 +124,17 @@ int main(void) {
     CHECK(zmidi_usb_link_write_packet(&link, u, 1, out, 63, &len, &taken) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
     CHECK(zmidi_usb_link_write_packet(&link, u, 1, out, 64, &len, &taken) == ZMIDI_STATUS_OK);
     CHECK(len == 4 && taken == 1 && out[0] == 0x09 && out[1] == 0x90 && out[2] == 0x3C && out[3] == 0x64);
+  }
+  {
+    /* REQ-FFI-USB-001: the Event Packet reader with the MIDI 2.0 Protocol: a Note On is a MIDI 2.0
+     * Note On, velocity 0x64 upscaled to 16 bits (M2-115): 0xC924. */
+    ZmidiUsbLinkConfig m2 = {false, 0xFFFF, 64, 2};
+    static const uint8_t ep[] = {0x09, 0x90, 0x3C, 0x64};
+    CHECK(zmidi_usb_link_init(&link, &m2) == ZMIDI_STATUS_OK);
+    CHECK(zmidi_usb_link_read(&link, ep, sizeof ep, rec, 32, &n, &errors) == ZMIDI_STATUS_OK);
+    CHECK(n == 1 && rec[0].word_count == 2 && rec[0].words[0] == 0x40903C00u && rec[0].words[1] == 0xC9240000u);
+    m2.protocol = 3;
+    CHECK(zmidi_usb_link_init(&link, &m2) == ZMIDI_STATUS_INVALID_ARGUMENT);
   }
   {
     /* A packet size of 8: a SysEx of 6 data bytes (3 Event Packets) is split, and the writer

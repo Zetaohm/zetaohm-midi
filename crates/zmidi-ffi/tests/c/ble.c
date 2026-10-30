@@ -148,6 +148,18 @@ static void writer_packets(void) {
   CHECK(zmidi_ble_writer_set_running_status(NULL, true) == ZMIDI_STATUS_INVALID_ARGUMENT);
 }
 
+/* REQ-FFI-BLE-001: the Group and the protocol of the reader. */
+static void reader_group_and_protocol(void) {
+  const uint8_t p[] = {HDR(1), TS(1), 0x90, 0x3C, 0x64};
+  size_t dropped = 99;
+  CHECK(zmidi_ble_reader_init(&reader, 5, 2) == ZMIDI_STATUS_OK);
+  CHECK(read_packet(p, sizeof p, &dropped) == 1 && dropped == 0);
+  /* MIDI 2.0 Note On on Group 5; velocity 0x64 upscaled to 16 bits (M2-115): 0xC924. */
+  CHECK(rec[0].word_count == 2 && rec[0].words[0] == 0x45903C00u && rec[0].words[1] == 0xC9240000u);
+  CHECK(zmidi_ble_reader_init(&reader, 16, 1) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_ble_reader_init(&reader, 0, 3) == ZMIDI_STATUS_INVALID_ARGUMENT);
+}
+
 static void round_trip_sysex(void) {
   /* SysEx of 16 bytes in three SysEx7 packets (start, continue, end), written into packets of
    * ATT_MTU 23 and read back. */
@@ -199,6 +211,7 @@ static void sizes(void) {
 int main(void) {
   reader_packets();
   writer_packets();
+  reader_group_and_protocol();
   round_trip_sysex();
   sizes();
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return EXIT_FAILURE; }

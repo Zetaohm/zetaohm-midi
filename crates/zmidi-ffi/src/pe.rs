@@ -1766,6 +1766,17 @@ mod tests {
             (T::QueueFull, E::QueueFull, S::Rejected),
             (T::InvalidWait, E::InvalidWait, S::InvalidArgument),
             (T::InvalidRef, E::InvalidRef, S::InvalidArgument),
+            (T::Write(WriteError::Overflow), E::Write, S::BufferTooSmall),
+            (
+                T::Header(zmidi_ci_pe::HeaderError::Missing("resource")),
+                E::Header,
+                S::InvalidArgument,
+            ),
+            (
+                T::Subscription(zmidi_ci_pe::SubscriptionError::Full),
+                E::Subscription,
+                S::Rejected,
+            ),
         ];
         for (e, error, status) in cases {
             assert_eq!(refusal(&e), (error, status), "{e:?}");

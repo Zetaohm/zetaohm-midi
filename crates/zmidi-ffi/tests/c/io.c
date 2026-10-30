@@ -147,6 +147,15 @@ static void bytes_to_ump_feed(void) {
   CHECK(read == 2 && n == 1 && w[0] == 0x10F80000u);
   /* Too small, no bytes, null pointers. */
   CHECK(zmidi_bytes_to_ump_feed(&r, in, sizeof in, w, ZMIDI_BYTES_TO_UMP_MAX_WORDS - 1, &read, &n) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
+  /* REQ-FFI-IO-007: the refusal reads no byte; the same bytes with room give the same words as
+   * with no refused call. */
+  CHECK(zmidi_bytes_to_ump_init(&r, 0, 1) == ZMIDI_STATUS_OK);
+  read = 99; n = 99;
+  CHECK(zmidi_bytes_to_ump_feed(&r, in, sizeof in, w, ZMIDI_BYTES_TO_UMP_MAX_WORDS - 1, &read, &n) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
+  CHECK(read == 99 && n == 99);
+  CHECK(zmidi_bytes_to_ump_feed(&r, in, sizeof in, w, 16, &read, &n) == ZMIDI_STATUS_OK);
+  CHECK(read == sizeof in && n == 3);
+  CHECK(w[0] == 0x20903C64u && w[1] == 0x10F80000u && w[2] == 0x20903E64u);
   CHECK(zmidi_bytes_to_ump_feed(&r, NULL, 0, w, 16, &read, &n) == ZMIDI_STATUS_OK && read == 0 && n == 0);
   CHECK(zmidi_bytes_to_ump_feed(&r, NULL, 1, w, 16, &read, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_bytes_to_ump_feed(NULL, in, 1, w, 16, &read, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);

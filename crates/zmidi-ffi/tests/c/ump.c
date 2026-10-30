@@ -46,6 +46,9 @@ static void writers(void) {
   CHECK(zmidi_ump_midi2_note_on(0, 0, 128, 1, w) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_ump_midi2_control_change(0, 0, 128, 0, w) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_ump_midi2_program_change(0, 0, 128, false, 0, 0, w) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  /* A Bank byte over 0x7F (REQ-FFI-UMP-003). */
+  CHECK(zmidi_ump_midi2_program_change(0, 0, 5, true, 0x80, 0, w) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_ump_midi2_program_change(0, 0, 5, true, 0, 0x80, w) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_ump_midi2_pitch_bend(0, 0, 0, NULL) == ZMIDI_STATUS_INVALID_ARGUMENT);
 }
 

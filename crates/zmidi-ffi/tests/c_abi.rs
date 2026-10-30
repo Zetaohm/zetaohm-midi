@@ -236,17 +236,33 @@ fn header_compiles_as_c99_for_each_selection() {
 /// it they are.
 #[test]
 fn responder_selection_hides_initiator_calls() {
-    let src = "#include \"zmidi.h\"\nvoid f(void);\nvoid f(void) { (void)zmidi_pe_request; (void)zmidi_pe_request_resource_list; }\n";
-    assert!(!c99_compiles(
-        "h-pe-responder.c",
-        src,
-        &["ZMIDI_CI_PROPERTY_EXCHANGE"]
-    ));
-    assert!(c99_compiles(
-        "h-pe-initiator.c",
-        src,
-        &["ZMIDI_CI_PROPERTY_EXCHANGE", "ZMIDI_CI_INITIATOR"]
-    ));
+    // Each name alone: one hidden name is enough to fail a source with all of them.
+    for name in [
+        "zmidi_pe_request",
+        "zmidi_pe_request_resource_list",
+        "zmidi_pe_subscribe",
+        "zmidi_pe_unsubscribe",
+        "zmidi_pe_refresh",
+    ] {
+        let src =
+            format!("#include \"zmidi.h\"\nvoid f(void);\nvoid f(void) {{ (void){name}; }}\n");
+        assert!(
+            !c99_compiles(
+                &format!("h-pe-responder-{name}.c"),
+                &src,
+                &["ZMIDI_CI_PROPERTY_EXCHANGE"]
+            ),
+            "{name}"
+        );
+        assert!(
+            c99_compiles(
+                &format!("h-pe-initiator-{name}.c"),
+                &src,
+                &["ZMIDI_CI_PROPERTY_EXCHANGE", "ZMIDI_CI_INITIATOR"]
+            ),
+            "{name}"
+        );
+    }
 }
 
 /// REQ-FFI-ABI-003: each C name of the header starts with zmidi_ or ZMIDI_ (types: Zmidi).

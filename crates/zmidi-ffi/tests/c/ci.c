@@ -103,8 +103,8 @@ static void profiles_and_process(void) {
   ZmidiCiProfileEvent pe;
   ZmidiCiProcessEvent pi;
   ZmidiCiProfile entry;
-  uint8_t want[64], ids[10];
-  size_t n = 0, rn = 0, k = 0, count = 0;
+  uint8_t want[64], ids[10], added[64];
+  size_t n = 0, rn = 0, k = 0, count = 0, added_n = 0;
   uint32_t ma, mb;
   /* A Standard Defined Profile (Table 19): Bank 0, Number 1, Version 1, Level 0x01 Minimum. */
   static const uint8_t prof[5] = {0x7E, 0x00, 0x01, 0x01, 0x01};
@@ -138,12 +138,29 @@ static void profiles_and_process(void) {
   k = ci_header(want, 0x00, 0x26, mb, BROADCAST);
   memcpy(want + k, prof, 5); k += 5;
   CHECK(one_record(msgs, n, 0, want, k));
+  memcpy(added, msgs, n);
+  added_n = n;
   CHECK(zmidi_ci_add_profile(&b, &entry, msgs, sizeof msgs, &n) == ZMIDI_STATUS_REJECTED);
   entry.device_id = 0x10; /* reserved Device ID (Table 4) */
   CHECK(zmidi_ci_add_profile(&b, &entry, msgs, sizeof msgs, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  {
+    /* REQ-FFI-CI-016: a Profile ID byte over 0x7F, and a Channel count over 14 bits. */
+    uint8_t badp[5] = {0x7E, 0x80, 0x01, 0x01, 0x01};
+    ZmidiCiProfile be = entry;
+    be.device_id = 0x00;
+    memcpy(be.profile, badp, 5);
+    CHECK(zmidi_ci_add_profile(&b, &be, msgs, sizeof msgs, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
+    CHECK(zmidi_ci_remove_profile(&b, 0x00, 0, badp, msgs, sizeof msgs, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
+    CHECK(zmidi_ci_set_profile_state(&b, 0x00, 0, badp, true, 1, msgs, sizeof msgs, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
+    CHECK(zmidi_ci_set_profile_state(&b, 0x00, 0, prof, true, 0x4000, msgs, sizeof msgs, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  }
 
   /* Set Profile On before Profile Inquiry: rejected (M2-101 2.2). */
   CHECK(zmidi_ci_set_profile_on(&a, mb, 0, 0x00, prof, 1, 0, msgs, sizeof msgs, &n) == ZMIDI_STATUS_REJECTED);
+  /* REQ-FFI-CI-012: A reads the Profile Added Report. */
+  deliver(&a, added, added_n, replies, &rn);
+  CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_PROFILE_REPORT);
+  CHECK(zmidi_ci_profile_event(&a, &pe) == ZMIDI_STATUS_OK && pe.report == ZMIDI_CI_PROFILE_REPORT_ADDED && memcmp(pe.profile, prof, 5) == 0);
 
   /* Profile Inquiry (Table 17), the automatic Reply to Profile Inquiry (Table 18). */
   CHECK(zmidi_ci_profile_inquiry(&a, mb, 0, 0x00, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
@@ -167,7 +184,9 @@ static void profiles_and_process(void) {
 
   /* Set Profile On (Table 24): Level 0x7F, 1 Channel; the SetProfile event; B enables the Profile
    * and sends the Profile Enabled Report (Table 26). */
-  CHECK(zmidi_ci_set_profile_on(&a, mb, 0, 0x00, prof, 1, 0, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  /* REQ-FFI-CI-017: the Maximum Number of Channels of the peer limits the count. */
+  CHECK(zmidi_ci_set_profile_on(&a, mb, 0, 0x00, prof, 2, 1, msgs, sizeof msgs, &n) != ZMIDI_STATUS_OK);
+  CHECK(zmidi_ci_set_profile_on(&a, mb, 0, 0x00, prof, 1, 4, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
   k = ci_header(want, 0x00, 0x22, ma, mb);
   memcpy(want + k, prof, 4); want[k + 4] = 0x7F; k += 5;
   want[k++] = 0x01; want[k++] = 0x00;
@@ -252,6 +271,8 @@ static void profiles_and_process(void) {
   k = ci_header(want, 0x00, 0x27, mb, BROADCAST);
   memcpy(want + k, prof, 5); k += 5;
   CHECK(one_record(msgs, n, 0, want, k));
+  deliver(&a, msgs, n, replies, &rn);
+  CHECK(zmidi_ci_profile_event(&a, &pe) == ZMIDI_STATUS_OK && pe.report == ZMIDI_CI_PROFILE_REPORT_REMOVED);
   CHECK(zmidi_ci_remove_profile(&b, 0x00, 0, prof, msgs, sizeof msgs, &n) == ZMIDI_STATUS_REJECTED);
   CHECK(zmidi_ci_set_profile_state(&b, 0x00, 0, prof, true, 1, msgs, sizeof msgs, &n) == ZMIDI_STATUS_REJECTED);
 
@@ -272,14 +293,16 @@ static void profiles_and_process(void) {
    * and Notes. */
   CHECK(!zmidi_ci_report_open(&a, mb));
   CHECK(zmidi_ci_message_report_inquiry(&a, mb, 0, 0x7F, &bad, msgs, sizeof msgs, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
-  CHECK(zmidi_ci_message_report_inquiry(&a, mb, 0, 0x7F, &requested, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  /* REQ-FFI-CI-019: on Group 3. */
+  CHECK(zmidi_ci_message_report_inquiry(&a, mb, 3, 0x7F, &requested, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
   k = ci_header(want, 0x7F, 0x42, ma, mb);
   want[k++] = 0x7F; want[k++] = 0x01; want[k++] = 0x00; want[k++] = 0x02; want[k++] = 0x01;
-  CHECK(one_record(msgs, n, 0, want, k));
+  CHECK(one_record(msgs, n, 3, want, k));
   CHECK(zmidi_ci_report_open(&a, mb));
   deliver(&b, msgs, n, replies, &rn);
   CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_MESSAGE_REPORT && rn == 0);
   CHECK(zmidi_ci_process_event(&b, &pi) == ZMIDI_STATUS_OK);
+  CHECK(pi.group == 3);
   CHECK(pi.device_id == 0x7F && pi.report.data_control == 0x7F && pi.report.system == 0x01 && pi.report.channel == 0x02 && pi.report.note == 0x01);
 
   /* Reply to MIDI Message Report (Table 45): only the bits both requested and supported. */
@@ -429,6 +452,10 @@ static void audit_cases(void) {
 
   /* REQ-FFI-CI-017, -011: the Group of the record. */
   CHECK(zmidi_ci_profile_inquiry(&x, my, 3, 0x7F, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK && msgs[0] == 3);
+  CHECK(msgs[3 + 1] == 0x7F);
+  /* REQ-FFI-CI-011: the Device ID of the address in byte 1. */
+  CHECK(zmidi_ci_profile_specific_data(&x, my, 0, 0x7F, prof, detail, 2, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK && msgs[3 + 1] == 0x7F);
+  CHECK(zmidi_ci_profile_details_reply(&y, mx, 0, 0x7F, prof, 0x40, detail, 2, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK && msgs[3 + 1] == 0x7F);
   CHECK(zmidi_ci_profile_specific_data(&x, my, 5, 0x00, prof, detail, 2, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK && msgs[0] == 5);
   /* REQ-FFI-CI-011, -012, -014: a Profile Details Reply on Group 5 that x did not ask for (a
    * notification), byte for byte (Table 23). */
@@ -475,6 +502,73 @@ static void audit_cases(void) {
   CHECK(zmidi_ci_endpoint_info_inquiry(&x, 0x00200002u, msgs, sizeof msgs, &n) == ZMIDI_STATUS_REJECTED);
 }
 
+/* A message from `src` to `dst` with Sub-ID#2 `sub` and the body `body`. Gives the byte count. */
+static size_t raw_msg(uint8_t *p, uint8_t sub, uint32_t src, uint32_t dst, const uint8_t *body, size_t n) {
+  size_t at = ci_header(p, 0x7F, sub, src, dst);
+  if (n) memcpy(p + at, body, n);
+  return at + n;
+}
+
+/* A one-Chunk PE message (Table 29) with Sub-ID#2 `sub`, Request ID `rid` and the Header Data `hdr`. */
+static size_t pe_msg(uint8_t *p, uint8_t sub, uint32_t src, uint32_t dst, uint8_t rid, const char *hdr) {
+  size_t at = ci_header(p, 0x7F, sub, src, dst), hn = strlen(hdr);
+  p[at++] = rid;
+  p[at++] = (uint8_t)(hn & 0x7F); p[at++] = (uint8_t)(hn >> 7);
+  memcpy(p + at, hdr, hn); at += hn;
+  p[at++] = 1; p[at++] = 0; p[at++] = 1; p[at++] = 0; p[at++] = 0; p[at++] = 0;
+  return at;
+}
+
+/* REQ-FFI-CI-002: the event kinds of received ACK, NAK, malformed, Subscription and Invalidate
+ * MUID messages, each with the MUID of its sender. */
+static ZmidiCi p, q;
+static void event_kinds(void) {
+  ZmidiCiConfig c = config();
+  uint8_t m[256];
+  size_t n = 0, rn = 0;
+  uint32_t mp, mq, old;
+  static const uint8_t ack_body[10] = {0x34, 0x00, 0x00, 0, 0, 0, 0, 0, 0x00, 0x00};
+  CHECK(zmidi_ci_init(&p, &c, 31) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_ci_init(&q, &c, 32) == ZMIDI_STATUS_OK);
+  mp = zmidi_ci_muid(&p);
+  mq = zmidi_ci_muid(&q);
+  CHECK(zmidi_ci_discovery(&p, 0, 0, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  deliver(&q, msgs, n, replies, &rn);
+  deliver(&p, replies, rn, msgs, &n);
+  CHECK(zmidi_ci_pe_capabilities_inquiry(&p, mq, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+  deliver(&q, msgs, n, replies, &rn);
+  deliver(&p, replies, rn, msgs, &n);
+  CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_PE_CAPABILITIES);
+#define RECV(dev, len) zmidi_ci_receive((dev), 0, m, (len), 1000, replies, sizeof replies, &rn, &ev)
+  n = raw_msg(m, 0x7D, mq, mp, ack_body, sizeof ack_body);
+  CHECK(RECV(&p, n) == ZMIDI_STATUS_OK && ev.kind == ZMIDI_CI_EVENT_KIND_ACK && ev.muid == mq);
+  n = raw_msg(m, 0x7F, mq, mp, ack_body, sizeof ack_body);
+  CHECK(RECV(&p, n) == ZMIDI_STATUS_OK && ev.kind == ZMIDI_CI_EVENT_KIND_NAK && ev.muid == mq);
+  /* An Inquiry: PE Capabilities with no body: malformed (it gets NAK 0x41). */
+  n = raw_msg(m, 0x30, mq, mp, NULL, 0);
+  CHECK(RECV(&p, n) == ZMIDI_STATUS_OK && ev.kind == ZMIDI_CI_EVENT_KIND_REJECTED);
+  CHECK(rn > 3 + 3 && replies[3 + 3] == 0x7F && replies[3 + 13] == 0x30 && replies[3 + 14] == 0x41);
+  n = pe_msg(m, 0x38, mp, mq, 1, "{\"command\":\"start\",\"resource\":\"X-Volume\"}");
+  CHECK(RECV(&q, n) == ZMIDI_STATUS_OK && ev.kind == ZMIDI_CI_EVENT_KIND_PE_SUBSCRIPTION && ev.muid == mp);
+  n = pe_msg(m, 0x39, mq, mp, 1, "{\"status\":200}");
+  CHECK(RECV(&p, n) == ZMIDI_STATUS_OK && ev.kind == ZMIDI_CI_EVENT_KIND_PE_SUBSCRIPTION_REPLY && ev.muid == mq);
+  n = pe_msg(m, 0x3F, mq, mp, 1, "{\"status\":144}");
+  CHECK(RECV(&p, n) == ZMIDI_STATUS_OK && ev.kind == ZMIDI_CI_EVENT_KIND_PE_NOTIFY && ev.muid == mq);
+  /* Invalidate MUID (Table 12) of a peer, then of this Device. */
+  {
+    uint8_t target[4];
+    muid_bytes(target, mq);
+    n = raw_msg(m, 0x7E, 0x00345678u, BROADCAST, target, 4);
+    CHECK(RECV(&p, n) == ZMIDI_STATUS_OK && ev.kind == ZMIDI_CI_EVENT_KIND_PEER_INVALIDATED && ev.muid == mq);
+    old = mp;
+    muid_bytes(target, mp);
+    n = raw_msg(m, 0x7E, 0x00345678u, BROADCAST, target, 4);
+    CHECK(RECV(&p, n) == ZMIDI_STATUS_OK && ev.kind == ZMIDI_CI_EVENT_KIND_MUID_CHANGED);
+    CHECK(zmidi_ci_muid(&p) != old);
+  }
+#undef RECV
+}
+
 int main(void) {
   ZmidiCiConfig c = config();
   size_t n = 0, rn = 0;
@@ -500,6 +594,16 @@ int main(void) {
   /* Discovery: B replies by itself; A gets Discovered. */
   CHECK(zmidi_ci_discovery(&a, 0, 0, msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
   CHECK(deliver(&b, msgs, n, replies, &rn) == 1 && rn > 3);
+  {
+    /* REQ-FFI-CI-001: the Reply to Discovery (Table 6) from the C configuration: identity, the
+     * Property Exchange category (0x08), 512 bytes, Output Path 0, no Function Block (0x7F). */
+    static const uint8_t body[18] = {0x00, 0x21, 0x7F, 0x01, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0x00,
+                                     0x08, 0x00, 0x04, 0x00, 0x00, 0x00, 0x7F};
+    uint8_t want[64];
+    size_t k = ci_header(want, 0x7F, 0x71, zmidi_ci_muid(&b), zmidi_ci_muid(&a));
+    memcpy(want + k, body, sizeof body);
+    CHECK(one_record(replies, rn, 0, want, k + sizeof body));
+  }
   deliver(&a, replies, rn, msgs, &n);
   CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_DISCOVERED && ev.muid == zmidi_ci_muid(&b));
 
@@ -507,6 +611,15 @@ int main(void) {
   CHECK(zmidi_ci_endpoint_info_inquiry(&a, zmidi_ci_muid(&b), msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
   deliver(&b, msgs, n, replies, &rn);
   CHECK(rn > 3);
+  {
+    /* REQ-FFI-CI-001: the Product Instance ID of the configuration (Table 10): status 0x00,
+     * length 12, "zmidi-c-test". */
+    uint8_t want[64];
+    size_t k = ci_header(want, 0x7F, 0x73, zmidi_ci_muid(&b), zmidi_ci_muid(&a));
+    want[k++] = 0x00; want[k++] = 12; want[k++] = 0x00;
+    memcpy(want + k, "zmidi-c-test", 12); k += 12;
+    CHECK(one_record(replies, rn, 0, want, k));
+  }
   deliver(&a, replies, rn, msgs, &n);
   CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_ENDPOINT_INFO);
 
@@ -530,6 +643,12 @@ int main(void) {
   CHECK(zmidi_ci_pe_get(&a, zmidi_ci_muid(&b), (const uint8_t *)"{\"resource\":\"ResourceList\"}", 27, msgs, sizeof msgs, &n, &id) == ZMIDI_STATUS_OK);
   deliver(&b, msgs, n, replies, &rn);
   CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_PE_GET);
+  {
+    /* REQ-FFI-CI-005: for the ResourceList the buffers need 2 x (list length) + 64 bytes. */
+    const size_t need = 2 * (sizeof list - 1) + 64;
+    CHECK(zmidi_ci_pe_reply(&b, 404, NULL, 0, scratch, need - 1, msgs, sizeof msgs, &n) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
+    CHECK(zmidi_ci_pe_reply(&b, 404, NULL, 0, scratch, need, msgs, need - 1, &n) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
+  }
   answer(404, NULL);
   CHECK(ev.data_len == sizeof list - 1 && memcmp(ev.data, list, ev.data_len) == 0);
 
@@ -631,6 +750,7 @@ int main(void) {
 
   profiles_and_process();
   audit_cases();
+  event_kinds();
 
   if (failures) { fprintf(stderr, "%d failure(s)\n", failures); return EXIT_FAILURE; }
   printf("ci ok: state %u B, slot %u B\n", (unsigned)zmidi_ci_size(), (unsigned)sizeof(ZmidiCi));

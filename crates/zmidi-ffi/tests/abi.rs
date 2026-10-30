@@ -311,9 +311,10 @@ mod ci {
             // invalid; otherwise a buffer below ZMIDI_CI_REPORT_BUFFER is too small.
             if group <= 15 && (device_id <= 0x0F || device_id == 0x7E || device_id == 0x7F) {
                 let st = all[0];
-                if channels > 0x3FFF {
+                if channels > 0x3FFF || profile.iter().any(|b| *b > 0x7F) {
+                    // REQ-FFI-CI-016: a Channel count over 14 bits or a Profile ID byte over 0x7F.
                     prop_assert_eq!(st, ZmidiStatus::InvalidArgument);
-                } else if capacity < ZMIDI_CI_REPORT_BUFFER && profile.iter().all(|b| *b <= 0x7F) {
+                } else if capacity < ZMIDI_CI_REPORT_BUFFER {
                     prop_assert_eq!(st, ZmidiStatus::BufferTooSmall);
                 }
             }

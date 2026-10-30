@@ -121,6 +121,30 @@ static size_t first_record(const uint8_t *recs) {
   return 3 + ((size_t)recs[1] | ((size_t)recs[2] << 8));
 }
 
+/* A record of a message with Sub-ID#2 `sub` from `src` to `dst` and the body `body`. Gives its length. */
+static size_t rec_msg(uint8_t *rec, uint8_t sub, uint32_t src, uint32_t dst, const uint8_t *body, size_t n) {
+  uint8_t *p = rec + 3;
+  p[0] = 0x7E; p[1] = 0x7F; p[2] = 0x0D; p[3] = sub; p[4] = 0x02;
+  muid_bytes(p + 5, src);
+  muid_bytes(p + 9, dst);
+  if (n) memcpy(p + 13, body, n);
+  rec[0] = 0; rec[1] = (uint8_t)((13 + n) & 0xFF); rec[2] = (uint8_t)((13 + n) >> 8);
+  return 3 + 13 + n;
+}
+
+/* A record of a one-Chunk PE message (M2-101 Table 29) with Request ID `rid`. Gives its length. */
+static size_t rec_pe(uint8_t *rec, uint8_t sub, uint32_t src, uint32_t dst, uint8_t rid, const char *hdr, const char *data) {
+  uint8_t b[400];
+  size_t at = 0, hn = strlen(hdr), dn = strlen(data);
+  b[at++] = rid;
+  b[at++] = (uint8_t)(hn & 0x7F); b[at++] = (uint8_t)(hn >> 7);
+  memcpy(b + at, hdr, hn); at += hn;
+  b[at++] = 1; b[at++] = 0; b[at++] = 1; b[at++] = 0;
+  b[at++] = (uint8_t)(dn & 0x7F); b[at++] = (uint8_t)(dn >> 7);
+  memcpy(b + at, data, dn); at += dn;
+  return rec_msg(rec, sub, src, dst, b, at);
+}
+
 static ZmidiPeResource resource(const char *name) {
   ZmidiPeResource r;
   memset(&r, 0, sizeof r);
@@ -207,6 +231,14 @@ static void init_checks(const ZmidiPeResource *table, size_t count) {
   CHECK(has(body, n, "\"canGet\":true") && has(body, n, "\"canSet\":\"full\""));
   CHECK(has(body, n, "\"encodings\":[\"Mcoded7\"]"));
   CHECK(has(body, n, "\"mediaTypes\":[\"application/octet-stream\"]"));
+  /* REQ-FFI-PE-009: write_defaults writes the default values too. */
+  CHECK(has(body, n, "\"canSubscribe\":false") && has(body, n, "\"requireResId\":false") && has(body, n, "\"canPaginate\":false"));
+  bad[0] = resource("X-Two");
+  bad[0].require_res_id = true;
+  bad[0].fc_on_get = true;
+  CHECK(zmidi_pe_init(&pb, bad, 1) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_pe_resource_list(&pb, body, sizeof body, &n) == ZMIDI_STATUS_OK);
+  CHECK(has(body, n, "\"requireResId\":true") && has(body, n, "\"fcOnGet\":true") && !has(body, n, "\"canSubscribe\""));
   CHECK(zmidi_pe_init(&pb, table, count) == ZMIDI_STATUS_OK);
   /* A copied storage is refused: the engine points into its own storage. */
   memcpy(&moved, &pb, sizeof moved);
@@ -349,6 +381,8 @@ int main(void) {
   CHECK(events[2].end == ZMIDI_PE_CHUNK_END_COMPLETE);
   CHECK(events[0].header_len > 0 && events[1].header_len == 0 && events[0].status == 200);
   CHECK(got_n == 1200 && memcmp(got, body, 1200) == 0);
+  /* REQ-FFI-PE-010: a Get reply is not a subscription message: -1. */
+  CHECK(events[0].subscription == -1 && events[2].subscription == -1);
   /* The same ZmidiCi event is not given to the engine again. */
   CHECK(zmidi_pe_receive(&pa, &a, now, scratch, sizeof scratch, &pev) == ZMIDI_STATUS_OK);
   CHECK(pev.kind == ZMIDI_PE_EVENT_KIND_NONE);
@@ -605,6 +639,8 @@ int main(void) {
   CHECK(zmidi_pe_wait(&pb, ma, id, 1, 500) == ZMIDI_STATUS_OK);
   n = pending(&pb, &b, msgs, sizeof msgs);
   CHECK(n > 3 && msgs[3 + 3] == 0x7D); /* MIDI-CI ACK */
+  /* REQ-FFI-PE-006: Original Sub-ID#2 0x34, Status Code 0x10, Status Data 5 (500 ms). */
+  CHECK(msgs[3 + 13] == 0x34 && msgs[3 + 14] == 0x10 && msgs[3 + 15] == 5);
   deliver(&a, &pa, msgs, n, replies, &rn);
   CHECK(zmidi_pe_corrupt(&pb, ma, id, 1) == ZMIDI_STATUS_REJECTED); /* no Flow Control */
   CHECK(zmidi_pe_abort(&pb, &b, ma, id, 1) == ZMIDI_STATUS_OK);
@@ -911,6 +947,138 @@ int main(void) {
     CHECK(zmidi_pe_request(&pa, &a, mc, 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_REJECTED);
     CHECK(zmidi_pe_last_error(&pa, NULL) == ZMIDI_PE_ERROR_FULL);
     for (i = 0; i < 4; i++) CHECK(zmidi_pe_abort(&pa, &a, i < 2 ? mb : mc, ids[i], 0) == ZMIDI_STATUS_OK);
+    n = pending(&pa, &a, msgs, sizeof msgs);
+  }
+
+  /* REQ-FFI-PE-005: "resId" and "mediaType" of the ZmidiPeHeader reach the header. */
+  h = header("DeviceInfo");
+  h.res_id = (const uint8_t *)"a1";
+  h.media_type = (const uint8_t *)"application/json";
+  h.length = 2;
+  CHECK(zmidi_pe_request(&pa, &a, mb, 1, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_OK);
+  n = send_all(&pa, &a, mb, id, 0, (const uint8_t *)"{}", 2, msgs, sizeof msgs, &chunks);
+  CHECK(has(msgs, n, "\"resId\":\"a1\"") && has(msgs, n, "\"mediaType\":\"application/json\""));
+  CHECK(zmidi_pe_abort(&pa, &a, mb, id, 0) == ZMIDI_STATUS_OK);
+  n = pending(&pa, &a, msgs, sizeof msgs);
+  /* REQ-FFI-PE-008: a header that M2-103 8.1 refuses gives invalid-argument and ERROR_HEADER. */
+  h = header("Re-s");
+  CHECK(zmidi_pe_request(&pa, &a, mb, 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_pe_last_error(&pa, NULL) == ZMIDI_PE_ERROR_HEADER);
+
+  /* REQ-FFI-PE-007: the "resId" of a subscription entry, on both sides. */
+  h = header("X-Sub");
+  h.res_id = (const uint8_t *)"a1";
+  CHECK(zmidi_pe_subscribe(&pa, &a, mb, &h, &table[2], now, &id, &missing) == ZMIDI_STATUS_OK);
+  deliver(&b, &pb, msgs, send_all(&pa, &a, mb, id, 0, NULL, 0, msgs, sizeof msgs, &chunks), replies, &rn);
+  index = -1;
+  for (i = 0; i < event_n; i++) {
+    if (events[i].kind == ZMIDI_PE_EVENT_KIND_SUBSCRIPTION_STARTED) index = events[i].subscription;
+  }
+  CHECK(index >= 0 && zmidi_pe_subscription(&pb, (size_t)index, &sub) == ZMIDI_STATUS_OK);
+  CHECK(strcmp((const char *)sub.res_id, "a1") == 0);
+  deliver(&a, &pa, msgs, pending(&pb, &b, msgs, sizeof msgs), replies, &rn);
+  CHECK(event_n == 1 && events[0].started >= 0);
+  CHECK(zmidi_pe_subscription(&pa, (size_t)events[0].started, &sub) == ZMIDI_STATUS_OK);
+  CHECK(strcmp((const char *)sub.res_id, "a1") == 0);
+  CHECK(zmidi_pe_unsubscribe(&pa, &a, (size_t)events[0].started, now, &id) == ZMIDI_STATUS_OK);
+  deliver(&b, &pb, msgs, send_all(&pa, &a, mb, id, 0, NULL, 0, msgs, sizeof msgs, &chunks), replies, &rn);
+  deliver(&a, &pa, msgs, pending(&pb, &b, msgs, sizeof msgs), replies, &rn);
+
+  /* REQ-FFI-PE-001: 256 header bytes for each transaction: B takes a header of 256 bytes and
+   * replies 413 to one of 257 bytes. */
+  {
+    char hd[300];
+    uint8_t r[400];
+    size_t k;
+    for (k = 256; k <= 257; k++) {
+      size_t at;
+      strcpy(hd, "{\"resource\":\"DeviceInfo\",\"x\":\"");
+      at = strlen(hd);
+      while (at < k - 2) hd[at++] = 'x';
+      hd[at++] = '"'; hd[at++] = '}'; hd[at] = 0;
+      CHECK(strlen(hd) == k);
+      deliver(&b, &pb, r, rec_pe(r, 0x34, ma, mb, 0x60, hd, ""), replies, &rn);
+      if (k == 256) {
+        CHECK(event_n == 1 && events[0].kind == ZMIDI_PE_EVENT_KIND_MESSAGE && events[0].request_id == 0x60);
+        CHECK(zmidi_pe_reply_status(&pb, &b, ma, 0x60, 404, now) == ZMIDI_STATUS_OK);
+        n = pending(&pb, &b, msgs, sizeof msgs);
+        CHECK(n > 3 && has(msgs, n, "\"status\":404"));
+      } else {
+        CHECK(event_n == 0);
+        n = pending(&pb, &b, msgs, sizeof msgs);
+        CHECK(n > 3 && has(msgs, n, "\"status\":413"));
+      }
+    }
+  }
+
+  /* REQ-FFI-PE-001: 4 subscriptions: with 4 entries, a 5th "start" is refused. */
+  {
+    int32_t started[4];
+    for (i = 0; i < 4; i++) {
+      h = header("X-Sub");
+      CHECK(zmidi_pe_subscribe(&pa, &a, mb, &h, &table[2], now, &id, &missing) == ZMIDI_STATUS_OK);
+      deliver(&b, &pb, msgs, send_all(&pa, &a, mb, id, 0, NULL, 0, msgs, sizeof msgs, &chunks), replies, &rn);
+      deliver(&a, &pa, msgs, pending(&pb, &b, msgs, sizeof msgs), replies, &rn);
+      CHECK(event_n == 1);
+      started[i] = events[0].started;
+    }
+    CHECK(started[0] >= 0 && started[1] >= 0 && started[2] >= 0 && started[3] >= 0);
+    h = header("X-Sub");
+    CHECK(zmidi_pe_subscribe(&pa, &a, mb, &h, &table[2], now, &id, &missing) == ZMIDI_STATUS_REJECTED);
+    CHECK(zmidi_pe_last_error(&pa, NULL) == ZMIDI_PE_ERROR_SUBSCRIPTION);
+    for (i = 0; i < 4; i++) {
+      CHECK(zmidi_pe_unsubscribe(&pa, &a, (size_t)started[i], now, &id) == ZMIDI_STATUS_OK);
+      deliver(&b, &pb, msgs, send_all(&pa, &a, mb, id, 0, NULL, 0, msgs, sizeof msgs, &chunks), replies, &rn);
+      deliver(&a, &pa, msgs, pending(&pb, &b, msgs, sizeof msgs), replies, &rn);
+    }
+    CHECK(zmidi_pe_subscription(&pa, 0, &sub) == ZMIDI_STATUS_NO_PENDING);
+  }
+
+  /* REQ-FFI-PE-001: 4 peers with a known ResourceList. A forgets a peer in its ZmidiCi only (no
+   * engine call), so that a 5th peer fits in the ZmidiCi; its list then takes the place of the
+   * first (B). */
+  {
+    static const uint32_t pm[4] = {0x00300001u, 0x00300002u, 0x00300003u, 0x00300004u};
+    static const uint8_t disc[18] = {0x00, 0x21, 0x7F, 1, 0, 2, 0, 0, 0, 1, 0, 0x08, 0x00, 0x04, 0, 0, 0, 0x7F};
+    static const uint8_t caps[3] = {4, 0, 0};
+    uint8_t r[400];
+    size_t k;
+    for (k = 0; k < 4; k++) {
+      if (k >= 2) {
+        /* The ZmidiCi of A has 4 peers (B, the third device, pm[0], pm[1]): it forgets pm[k - 2]. */
+        n = invalidate(r, 0x0123456, pm[k - 2]);
+        CHECK(zmidi_ci_receive(&a, 0, r + 3, n - 3, now, replies, sizeof replies, &rn, &ev) == ZMIDI_STATUS_OK);
+        CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_PEER_INVALIDATED && ev.muid == pm[k - 2]);
+      }
+      deliver(&a, &pa, r, rec_msg(r, 0x71, pm[k], ma, disc, sizeof disc), replies, &rn);
+      CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_DISCOVERED && ev.muid == pm[k]);
+      CHECK(zmidi_ci_pe_capabilities_inquiry(&a, pm[k], msgs, sizeof msgs, &n) == ZMIDI_STATUS_OK);
+      deliver(&a, &pa, r, rec_msg(r, 0x31, pm[k], ma, caps, sizeof caps), replies, &rn);
+      CHECK(ev.kind == ZMIDI_CI_EVENT_KIND_PE_CAPABILITIES);
+      CHECK(zmidi_pe_request_resource_list(&pa, &a, pm[k], now, msgs, sizeof msgs, &n, &id) == ZMIDI_STATUS_OK);
+      deliver(&a, &pa, r, rec_pe(r, 0x35, pm[k], ma, id, "{\"status\":200}", "[]"), replies, &rn);
+      CHECK(event_n == 1 && events[0].status == 200);
+      if (k == 2) {
+        /* B, pm[0], pm[1] and pm[2]: 4 known lists (pm[0] is no longer a peer of the ZmidiCi). */
+        uint32_t known[3];
+        size_t j;
+        known[0] = mb; known[1] = pm[1]; known[2] = pm[2];
+        for (j = 0; j < 3; j++) {
+          h = header("DeviceInfo");
+          CHECK(zmidi_pe_request(&pa, &a, known[j], 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_OK && !missing);
+          CHECK(zmidi_pe_abort(&pa, &a, known[j], id, 0) == ZMIDI_STATUS_OK);
+          n = pending(&pa, &a, msgs, sizeof msgs);
+        }
+      }
+    }
+    /* The 5th list (pm[3]) took the place of the first (B). */
+    h = header("DeviceInfo");
+    CHECK(zmidi_pe_request(&pa, &a, mb, 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_OK && missing);
+    CHECK(zmidi_pe_abort(&pa, &a, mb, id, 0) == ZMIDI_STATUS_OK);
+    n = pending(&pa, &a, msgs, sizeof msgs);
+    h = header("DeviceInfo");
+    CHECK(zmidi_pe_request(&pa, &a, pm[3], 0, &h, NULL, now, &id, &missing) == ZMIDI_STATUS_OK && !missing);
+    CHECK(zmidi_pe_abort(&pa, &a, pm[3], id, 0) == ZMIDI_STATUS_OK);
     n = pending(&pa, &a, msgs, sizeof msgs);
   }
 

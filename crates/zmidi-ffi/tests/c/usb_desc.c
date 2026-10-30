@@ -198,7 +198,11 @@ int main(void) {
   CHECK(zmidi_usb_function_add_setting(&fn, 0, &alt) == ZMIDI_STATUS_REJECTED && alt == 2);
   /* Alternate Setting 2 has no endpoint: the writers refuse the function (REQ-USB-GEN-008). */
   CHECK(zmidi_usb_function_len(&fn, &len) == ZMIDI_STATUS_REJECTED);
+  /* REQ-FFI-USB-006: nothing is written. */
+  memset(out, 0xEE, sizeof out);
+  written = 99;
   CHECK(zmidi_usb_function_write(&fn, out, sizeof out, &written) == ZMIDI_STATUS_REJECTED);
+  CHECK(written == 99 && out[0] == 0xEE && out[sizeof out - 1] == 0xEE);
   {
     /* Four MIDI OUT endpoints, each on its own block: a block is named by one endpoint of a
      * direction only (REQ-USB-GTB-013). */
@@ -244,7 +248,10 @@ int main(void) {
     bad.num_groups = 0;
     CHECK(zmidi_usb_function_set_blocks(&fn, 1, &bad, 1) == ZMIDI_STATUS_OK);
     CHECK(zmidi_usb_function_len(&fn, &len) == ZMIDI_STATUS_REJECTED);
+    memset(out, 0xEE, sizeof out);
+    written = 99;
     CHECK(zmidi_usb_gtb_set_write(&fn, 1, out, sizeof out, &written) == ZMIDI_STATUS_REJECTED);
+    CHECK(written == 99 && out[0] == 0xEE && out[sizeof out - 1] == 0xEE);
     setup_answer(B24, 64, ZMIDI_STATUS_REJECTED, ZMIDI_USB_GTB_RESPONSE_ANSWERED, 0);
     /* 16 blocks, one for each Group, fit; 17 do not. */
     for (i = 0; i <= ZMIDI_USB_MAX_BLOCKS; i++) {

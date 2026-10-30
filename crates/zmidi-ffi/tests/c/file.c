@@ -60,6 +60,8 @@ static void write_and_read_back(void) {
   p.profile_id[0] = 0x7E;
   p.profile_id[2] = 0x01;
   p.destination = 1;
+  /* REQ-FFI-FILE-002: Group 3 for the configuration messages. */
+  c.group = 3;
   c.has_tempo = true;
   c.tempo_10ns = 50000000u;
   c.has_time_signature = true;
@@ -78,6 +80,8 @@ static void write_and_read_back(void) {
   CHECK(zmidi_clip_writer_event(&w, 96, note_off, 2, &e) == ZMIDI_STATUS_OK);
   /* Ticks never decrease (events are in presentation order). */
   CHECK(zmidi_clip_writer_event(&w, 10, note_on, 2, &e) == ZMIDI_STATUS_REJECTED && e == ZMIDI_CLIP_ERROR_OUT_OF_ORDER);
+  /* REQ-FFI-FILE-003: with no place for the error, the status alone. */
+  CHECK(zmidi_clip_writer_event(&w, 10, note_on, 2, NULL) == ZMIDI_STATUS_REJECTED);
   /* Not one whole UMP. */
   CHECK(zmidi_clip_writer_event(&w, 96, note_on, 1, &e) == ZMIDI_STATUS_INVALID_ARGUMENT && e == ZMIDI_CLIP_ERROR_INVALID_MESSAGE);
   CHECK(zmidi_clip_writer_finish(&w, 192, &len, &e) == ZMIDI_STATUS_OK);
@@ -90,9 +94,9 @@ static void write_and_read_back(void) {
     events++;
     if (ev.section == 0) {
       /* Set Profile On, Group destination: 7E 7E 0D 22 02 7F in the first SysEx7 UMP. */
-      if (ev.words[0] == 0x30167E7Eu && ev.words[1] == 0x0D22027Fu) profile = true;
-      if (ev.words[0] == 0xD0100000u && ev.words[1] == 50000000u) tempo = true;
-      if (ev.words[0] == 0xD0100001u && ev.words[1] == 0x04020800u) time_sig = true;
+      if (ev.words[0] == 0x33167E7Eu && ev.words[1] == 0x0D22027Fu) profile = true;
+      if (ev.words[0] == 0xD3100000u && ev.words[1] == 50000000u) tempo = true;
+      if (ev.words[0] == 0xD3100001u && ev.words[1] == 0x04020800u) time_sig = true;
       if (ev.words[0] == note_on[0] && ev.word_count == 2 && ev.ticks == 0) config_note = true;
     }
     if (ev.section == 1 && (ev.words[0] == note_on[0] || ev.words[0] == note_off[0])) {
