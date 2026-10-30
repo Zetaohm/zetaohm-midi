@@ -790,6 +790,46 @@ mod tests {
     }
 
     #[test]
+    fn writer_rules_at_their_limits() {
+        // Not empty after new (the File Header is written).
+        let mut buf = [0u8; 256];
+        let mut w = ClipWriter::new(&mut buf, &config(96)).unwrap();
+        assert!(!w.is_empty());
+        // Only Lyrics and Ruby keep their UMPs at one time: a Metadata Text Start (Bank 0x01)
+        // or a Lyrics Language Start (Bank 0x02, Status 0x02) with no End does not.
+        w.start(0, None, None).unwrap();
+        w.event(0, &[0xD050_0101, 0x4142_4344, 0, 0]).unwrap();
+        w.event(10, &NOTE_ON).unwrap();
+        w.event(10, &[0xD050_0202, 0x656E_0000, 0, 0]).unwrap();
+        w.event(20, &NOTE_ON).unwrap();
+        // A non-standard Denominator (0, or 32 and more) has no bar grid.
+        for den in [0u8, 32] {
+            let sig = SetTimeSignature::try_new(g0(), 4, den, 8).unwrap();
+            let mut buf = [0u8; 256];
+            let mut w = ClipWriter::new(&mut buf, &config(96)).unwrap();
+            w.start(0, None, Some(sig)).unwrap();
+            let mut words = [0u32; 4];
+            sig.to_words(&mut words).unwrap();
+            assert_eq!(w.event(100, &words), Ok(()), "denominator {den}");
+        }
+        // Number of Channels Requested: 14 bits.
+        let id = [0x7E, 0x21, 0x00, 0x01, 0x01];
+        for (channels, ok) in [(0x3FFF, true), (0x4000, false)] {
+            let p = [ProfileOn {
+                profile_id: id,
+                destination: ProfileDestination::Channel(0),
+                channels,
+            }];
+            let cfg = ClipConfig {
+                profiles: &p,
+                ..config(96)
+            };
+            let mut buf = [0u8; 256];
+            assert_eq!(ClipWriter::new(&mut buf, &cfg).is_ok(), ok, "{channels:#x}");
+        }
+    }
+
+    #[test]
     fn writer_keeps_lyrics_umps_at_one_time() {
         let mut buf = [0u8; 256];
         let mut w = ClipWriter::new(&mut buf, &config(96)).unwrap();

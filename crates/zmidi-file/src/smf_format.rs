@@ -609,6 +609,48 @@ mod tests {
     use super::*;
     use proptest::prelude::*;
 
+    #[test]
+    fn values_at_their_limits_and_each_name() {
+        // Ticks per quarter-note: 15 bits.
+        assert_eq!(
+            Division::TicksPerQuarterNote(0x7FFF).to_word(),
+            Some(0x7FFF)
+        );
+        assert_eq!(Division::TicksPerQuarterNote(0x8000).to_word(), None);
+        // The text kinds 0x01 to 0x07 (Meta-Events, p. 8 to 9).
+        for (b, k) in [
+            (0x01, TextKind::Text),
+            (0x02, TextKind::Copyright),
+            (0x03, TextKind::TrackName),
+            (0x04, TextKind::InstrumentName),
+            (0x05, TextKind::Lyric),
+            (0x06, TextKind::Marker),
+            (0x07, TextKind::CuePoint),
+        ] {
+            assert_eq!(TextKind::from_byte(b), Some(k), "{b:#04x}");
+        }
+        // The hour byte 0rrhhhhh: rate 1 (25 frames per second), 11 hours.
+        let o = SmpteOffset {
+            hour: 0x2B,
+            minute: 0,
+            second: 0,
+            frame: 0,
+            fraction: 0,
+        };
+        assert_eq!((o.hours(), o.rate()), (11, 1));
+        // A one-byte manufacturer ID of 0 is not valid (0 starts the three-byte form).
+        let bad = MetaEvent::SequencerSpecific {
+            manufacturer: ManufacturerId::One(0),
+            data: &[],
+        };
+        assert!(!bad.is_valid());
+        let three = MetaEvent::SequencerSpecific {
+            manufacturer: ManufacturerId::Three([1, 2, 3]),
+            data: &[],
+        };
+        assert!(!three.is_valid());
+    }
+
     /// Conventions (p. 2): the table of variable-length quantities.
     const VLQ_TABLE: [(u32, &[u8]); 12] = [
         (0x0000_0000, &[0x00]),
