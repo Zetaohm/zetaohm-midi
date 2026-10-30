@@ -37,6 +37,9 @@ change the API. All crates and packages have the same version.
   when it fills the buffer exactly.
 - `zmidi-usb`: after a USB reset or a configuration change, `MidiLink` writes packets of the
   wMaxPacketSize of Alternate Setting 0 again, not of the last USB MIDI 2.0 setting.
+- `zmidi-ffi`: a Property Exchange call with a null `ci`, a null `header` (`zmidi_pe_request`,
+  `zmidi_pe_subscribe`) or a null `part` with a length (`zmidi_pe_send`) no longer clears the error
+  that `zmidi_pe_last_error` gives: it changes no state.
 - `zmidi-ffi`: `zmidi_usb_link_read` counts the ignored last 1 to 3 bytes of a transfer as an error, as
   zmidi-usb reports them.
 - `zmidi-ci`, `zmidi-ci-pe`: a responder-only build (feature `initiator` off) can send Subscription updates

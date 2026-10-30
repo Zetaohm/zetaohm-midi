@@ -484,8 +484,12 @@ unsafe fn states<'a>(
     pe: *mut ZmidiPe,
     ci: *mut ZmidiCi,
 ) -> Option<(&'a mut PeState, &'a mut ci::State)> {
-    // SAFETY: caller contract above.
-    unsafe { Some((pe_state(pe)?, ci::state(ci)?)) }
+    // SAFETY: caller contract above. `ci` first: `pe_state` clears the last error, and a call
+    // with a null `ci` changes no state (REQ-FFI-ABI-002).
+    unsafe {
+        let c = ci::state(ci)?;
+        Some((pe_state(pe)?, c))
+    }
 }
 
 /// Milliseconds of the engine from microseconds of the program.
@@ -1253,7 +1257,8 @@ pub unsafe extern "C" fn zmidi_pe_request(
     request_id: *mut u8,
     list_missing: *mut bool,
 ) -> ZmidiStatus {
-    if request_id.is_null() || list_missing.is_null() {
+    // Every pointer before `states`, which clears the last error (REQ-FFI-ABI-002).
+    if request_id.is_null() || list_missing.is_null() || header.is_null() {
         return ZmidiStatus::InvalidArgument;
     }
     // SAFETY: caller contract above.
@@ -1370,7 +1375,8 @@ pub unsafe extern "C" fn zmidi_pe_subscribe(
     request_id: *mut u8,
     list_missing: *mut bool,
 ) -> ZmidiStatus {
-    if request_id.is_null() || list_missing.is_null() {
+    // Every pointer before `states`, which clears the last error (REQ-FFI-ABI-002).
+    if request_id.is_null() || list_missing.is_null() || header.is_null() {
         return ZmidiStatus::InvalidArgument;
     }
     // SAFETY: caller contract above.
@@ -1515,7 +1521,8 @@ pub unsafe extern "C" fn zmidi_pe_send(
     capacity: usize,
     out_len: *mut usize,
 ) -> ZmidiStatus {
-    if out.is_null() || out_len.is_null() {
+    // Every pointer before `states`, which clears the last error (REQ-FFI-ABI-002).
+    if out.is_null() || out_len.is_null() || (part.is_null() && part_len > 0) {
         return ZmidiStatus::InvalidArgument;
     }
     // SAFETY: caller contract above.

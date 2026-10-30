@@ -29,3 +29,6 @@ run 'cargo' 'check' '--quiet' '--lib' '--no-default-features' '--features' 'pani
 
 echo 'compile-gates: gate test' >&2
 run 'cargo' 'test' '--quiet' '--all-features'
+
+echo 'compile-gates: gate null-args-current' >&2
+run 'python3' 'tests/gen_null_args.py' '--check'

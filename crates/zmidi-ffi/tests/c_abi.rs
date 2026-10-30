@@ -152,6 +152,13 @@ fn c_ci_responder() {
     run_c_with("ci_responder", responder_staticlib());
 }
 
+/// REQ-FFI-ABI-002: each pointer argument of each status function, NULL, gives invalid-argument and
+/// changes no state (`tests/c/null_args.c`, written by `tests/gen_null_args.py`).
+#[test]
+fn c_null_args() {
+    run_c("null_args");
+}
+
 /// REQ-FFI-NET-005: a Network MIDI 2.0 Host and Client in memory through the header (M2-124).
 #[test]
 fn c_net() {
