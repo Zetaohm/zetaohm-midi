@@ -24,6 +24,8 @@ struct St {
     /// (address, type, wMaxPacketSize, interval) of each allocated endpoint.
     allocated: Vec<(u8, EndpointType, u16, u8)>,
     enabled: Vec<u8>,
+    /// The address of each `wait_enabled` call.
+    waited: Vec<u8>,
     out_packets: HashMap<u8, VecDeque<Vec<u8>>>,
     written: Vec<(u8, Vec<u8>)>,
 }
@@ -112,7 +114,9 @@ impl Endpoint for FakeOut {
         &self.0
     }
     async fn wait_enabled(&mut self) {
-        assert!(self.1.borrow().enabled.contains(&u8::from(self.0.addr)));
+        let a = u8::from(self.0.addr);
+        assert!(self.1.borrow().enabled.contains(&a));
+        self.1.borrow_mut().waited.push(a);
     }
 }
 
@@ -138,7 +142,9 @@ impl Endpoint for FakeIn {
         &self.0
     }
     async fn wait_enabled(&mut self) {
-        assert!(self.1.borrow().enabled.contains(&u8::from(self.0.addr)));
+        let a = u8::from(self.0.addr);
+        assert!(self.1.borrow().enabled.contains(&a));
+        self.1.borrow_mut().waited.push(a);
     }
 }
 
@@ -643,4 +649,124 @@ fn full_packet_is_followed_by_a_zero_length_packet() {
     let count = st.borrow().written.len();
     assert_eq!(block_on(tx.write_packet(&mut none, &mut buf)), Ok(0));
     assert_eq!(st.borrow().written.len(), count);
+}
+
+// ----- limits found by mutation testing -----
+
+#[test]
+fn packet_size_is_the_one_of_the_midi_in_endpoint_of_the_setting() {
+    // The link writes packets of wMaxPacketSize of the MIDI IN endpoint of the selected
+    // setting; with no MIDI IN endpoint, of the MIDI OUT endpoint.
+    let mut cfg: FunctionConfig<'static> = FunctionConfig::midi1_only(0, 1, BusSpeed::Full);
+    let mut s = Midi2Setting::empty();
+    s.endpoints
+        .push(EndpointConfig::bulk(
+            EndpointDirection::MidiOut,
+            2,
+            BusSpeed::Full,
+        ))
+        .unwrap();
+    s.endpoints
+        .push(EndpointConfig::interrupt(
+            EndpointDirection::MidiIn,
+            2,
+            32,
+            1,
+        ))
+        .unwrap();
+    cfg.add_midi2_setting(s).unwrap();
+    let mut inner = Inner {
+        cfg,
+        link: MidiLink::<1>::new(LinkConfig::default()).unwrap(),
+    };
+    inner.select(1);
+    assert_eq!(inner.link.packet_size(), 32);
+    inner.select(0);
+    assert_eq!(inner.link.packet_size(), 64);
+}
+
+#[test]
+fn wait_connection_waits_on_the_endpoints_of_the_setting() {
+    let shared = shared();
+    let st: Shared0 = Rc::default();
+    let (outs, ins) = endpoints(&st);
+    let mut rx: Receiver<'_, FakeDriver, NoopRawMutex> = Receiver { shared, eps: outs };
+    let mut tx: Sender<'_, FakeDriver, NoopRawMutex> = Sender {
+        shared,
+        eps: ins,
+        zlp: None,
+    };
+    let mut control = Control {
+        shared,
+        ms_if: 1,
+        names: [None; MAX_NAMES],
+    };
+    control.set_alternate_setting(InterfaceNumber(1), 1);
+    assert_eq!(tx.setting(), SettingNumber(1));
+    st.borrow_mut().enabled = vec![0x02, 0x82];
+    block_on(rx.wait_connection());
+    block_on(tx.wait_connection());
+    assert_eq!(st.borrow().waited, [0x02, 0x82]);
+}
+
+#[test]
+fn two_endpoints_of_one_direction_in_a_setting_are_refused() {
+    // DEC-USB-002 addendum: one MIDI OUT endpoint in each Alternate Setting. Two blocks of IN
+    // Group Terminals, one for each MIDI OUT endpoint.
+    let mut cfg = FunctionConfig::<'static, 4, 1, 2, 2>::midi1_only(0, 1, BusSpeed::Full);
+    let mut s = Midi2Setting::empty();
+    s.blocks.as_mut_slice()[0].kind = zmidi_usb::GtbType::InputOnly;
+    let b2 = zmidi_usb::GroupTerminalBlock {
+        id: 2,
+        first_group: 1,
+        kind: zmidi_usb::GtbType::InputOnly,
+        ..zmidi_usb::GroupTerminalBlock::DEFAULT
+    };
+    s.blocks.push(b2).unwrap();
+    for n in 2..=3u8 {
+        let mut e = EndpointConfig::bulk(EndpointDirection::MidiOut, n, BusSpeed::Full);
+        e.blocks = zmidi_usb::ms2::GtbIds::one(n - 1);
+        s.endpoints.push(e).unwrap();
+    }
+    cfg.add_midi2_setting(s).unwrap();
+    let ids = FunctionIds {
+        ms_interface: 1,
+        ..FunctionIds::default()
+    };
+    cfg.prepare(&ids).unwrap();
+    assert_eq!(
+        check_endpoints::<_, 2>(&cfg),
+        Err(Error::SettingEndpoints { alt: 1 })
+    );
+}
+
+#[test]
+fn more_endpoints_than_eps_are_refused() {
+    // Three MIDI OUT endpoints (settings 0, 1, 2) with EPS = 2; EPS = 3 takes them.
+    let mut cfg = FunctionConfig::<'static, 4, 2, 2, 1>::midi1_only(0, 1, BusSpeed::Full);
+    for n in 2..=3u8 {
+        let mut s = Midi2Setting::empty();
+        s.endpoints
+            .push(EndpointConfig::bulk(
+                EndpointDirection::MidiOut,
+                n,
+                BusSpeed::Full,
+            ))
+            .unwrap();
+        s.endpoints
+            .push(EndpointConfig::bulk(
+                EndpointDirection::MidiIn,
+                n,
+                BusSpeed::Full,
+            ))
+            .unwrap();
+        cfg.add_midi2_setting(s).unwrap();
+    }
+    let ids = FunctionIds {
+        ms_interface: 1,
+        ..FunctionIds::default()
+    };
+    cfg.prepare(&ids).unwrap();
+    assert_eq!(check_endpoints::<_, 2>(&cfg), Err(Error::TooManyEndpoints));
+    assert_eq!(check_endpoints::<_, 3>(&cfg), Ok(()));
 }

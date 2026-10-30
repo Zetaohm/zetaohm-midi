@@ -344,3 +344,33 @@ fn sender_stops_on_another_error() {
     assert_eq!(calls, 2);
     assert!(a.peek().is_some());
 }
+
+/// The sender holds the rest of a SysEx message that does not fit the packet; reset forgets
+/// it, for a new connection.
+#[test]
+fn sender_holds_a_cut_message_until_reset() {
+    let (_t, s) = table();
+    let mut sender = Sender::<20>::new(s);
+    // SysEx7 Start, Continue, End: 18 data bytes, more than one packet of 20 bytes.
+    let words: [[u32; 2]; 3] = [
+        [0x3016_0102, 0x0304_0506],
+        [0x3026_0708, 0x090A_0B0C],
+        [0x3036_0D0E, 0x0F10_1112],
+    ];
+    let mut umps = words
+        .iter()
+        .map(|w| TimedUmp {
+            millis: 0,
+            words: &w[..],
+        })
+        .peekable();
+    let p = sender.next_packet(23, &mut umps).unwrap();
+    assert!(!p.is_empty());
+    assert!(sender.has_held() || umps.peek().is_some());
+    while umps.peek().is_some() {
+        sender.next_packet(23, &mut umps).unwrap();
+    }
+    assert!(sender.has_held());
+    sender.reset();
+    assert!(!sender.has_held());
+}

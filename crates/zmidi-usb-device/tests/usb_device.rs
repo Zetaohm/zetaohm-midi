@@ -41,6 +41,8 @@ struct State {
     /// When true, an IN packet of a data endpoint does not complete by itself.
     hold_in: bool,
     stalled: Vec<u8>,
+    /// The type of each allocated endpoint.
+    types: HashMap<u8, EndpointType>,
 }
 
 /// The fake bus; the test keeps a second handle to the same state.
@@ -54,7 +56,7 @@ impl UsbBus for FakeBus {
         &mut self,
         dir: UsbDirection,
         addr: Option<EndpointAddress>,
-        _ep_type: EndpointType,
+        ep_type: EndpointType,
         _max_packet_size: u16,
         _interval: u8,
     ) -> usb_device::Result<EndpointAddress> {
@@ -65,6 +67,7 @@ impl UsbBus for FakeBus {
             return Err(UsbError::InvalidEndpoint);
         }
         st.allocated.push(a);
+        st.types.insert(a, ep_type);
         Ok(addr)
     }
     fn enable(&mut self) {}
@@ -588,4 +591,199 @@ fn fixed_function_answers_as_the_run_time_function() {
     }
     assert!(answers[0][0].len() > 100);
     assert_eq!(answers[0], answers[1]);
+}
+
+// ----- limits found by mutation testing -----
+
+fn two_settings() -> FunctionConfig<'static, 4, 2, 2, 1> {
+    let mut c = FunctionConfig::<4, 2, 2, 1>::new(0, 0, BusSpeed::Full).unwrap();
+    c.add_midi2_setting(Midi2Setting::new(BusSpeed::Full).unwrap())
+        .unwrap();
+    c
+}
+
+#[test]
+fn adapter_endpoint_rules() {
+    // DEC-USB-002 addendum: one endpoint in each direction in each Alternate Setting, and
+    // one size and interval for each address.
+    let a = alloc();
+    let mut c = FunctionConfig::<4, 1, 2, 2>::new(0, 0, BusSpeed::Full).unwrap();
+    let s = &mut c.midi2.as_mut_slice()[0];
+    // Two blocks of IN Group Terminals only (host to device), one for each MIDI OUT endpoint.
+    s.blocks.as_mut_slice()[0].kind = zmidi_usb::GtbType::InputOnly;
+    let b2 = zmidi_usb::GroupTerminalBlock {
+        id: 2,
+        first_group: 1,
+        kind: zmidi_usb::GtbType::InputOnly,
+        ..zmidi_usb::GroupTerminalBlock::DEFAULT
+    };
+    s.blocks.push(b2).unwrap();
+    let e = &mut s.endpoints.as_mut_slice()[1];
+    e.direction = EndpointDirection::MidiOut;
+    e.number = 2;
+    e.blocks = zmidi_usb::ms2::GtbIds::one(2);
+    let r: Result<MidiClass<'_, FakeBus, FunctionConfig<'_, 4, 1, 2, 2>>, _> = MidiClass::new(
+        &a.alloc,
+        c,
+        InterfaceNames::default(),
+        LinkConfig::default(),
+    );
+    assert_eq!(r.err(), Some(Error::SettingEndpoints { alt: 1 }));
+    let a = alloc();
+    let mut c = two_settings();
+    c.midi2.as_mut_slice()[1].endpoints.as_mut_slice()[0].max_packet = 32;
+    let r: Result<MidiClass<'_, FakeBus, FunctionConfig<'_, 4, 2, 2, 1>>, _> = MidiClass::new(
+        &a.alloc,
+        c,
+        InterfaceNames::default(),
+        LinkConfig::default(),
+    );
+    assert_eq!(r.err(), Some(Error::EndpointMismatch { address: 0x01 }));
+}
+
+#[test]
+fn each_setting_writes_on_its_own_in_endpoint() {
+    // The IN endpoint of the selected Alternate Setting, also when two settings have two IN
+    // endpoints; an interrupt endpoint is allocated as interrupt.
+    let a = alloc();
+    let mut c = two_settings();
+    let e = &mut c.midi2.as_mut_slice()[1].endpoints.as_mut_slice()[1];
+    e.number = 2;
+    e.transfer = zmidi_usb::ms2::TransferType::Interrupt;
+    e.interval = 1;
+    let mut class: MidiClass<'_, FakeBus, FunctionConfig<'_, 4, 2, 2, 1>> = MidiClass::new(
+        &a.alloc,
+        c,
+        InterfaceNames::default(),
+        LinkConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(bus(&a).types.get(&0x82), Some(&EndpointType::Interrupt));
+    assert_eq!(bus(&a).types.get(&0x81), Some(&EndpointType::Bulk));
+    let mut dev = device(&a, false);
+    assert!(control(
+        &a,
+        &mut dev,
+        &mut class,
+        [0x01, 0x0B, 2, 0x00, 0x01, 0x00, 0x00, 0x00]
+    )
+    .is_some());
+    let words = [0x2080_3C00u32];
+    let mut umps = core::iter::once(&words[..]).peekable();
+    let mut buf = [0u8; 64];
+    assert_eq!(class.write(&mut umps, &mut buf), Ok(4));
+    assert_eq!(written_on(&a, 0x82).len(), 1);
+    assert!(written_on(&a, 0x81).is_empty());
+}
+
+#[test]
+fn interface_numbers_come_from_the_allocator() {
+    // Another class takes interface 0: the AudioControl interface is 1, MIDI Streaming 2.
+    let a = alloc();
+    let _other = a.alloc.interface();
+    let cfg = FunctionConfig::new(0, 0, BusSpeed::Full).unwrap();
+    let names = InterfaceNames {
+        audio_control: None,
+        streaming: &[Some("one"), Some("two")],
+    };
+    let mut class: Class = MidiClass::new(&a.alloc, cfg, names, LinkConfig::default()).unwrap();
+    let mut dev = device(&a, false);
+    let bytes = get_configuration(&a, &mut dev, &mut class);
+    let mut ifs = Vec::new();
+    let mut i = 0;
+    while i + 1 < bytes.len() && bytes[i] > 0 {
+        if bytes[i + 1] == 4 {
+            ifs.push((bytes[i + 2], bytes[i + 6]));
+        }
+        i += usize::from(bytes[i]);
+    }
+    assert_eq!(&ifs[..2], [(1, 1), (2, 3)]);
+}
+
+#[test]
+fn other_standard_requests_keep_the_setting() {
+    // Only SET_CONFIGURATION goes back to Alternate Setting 0.
+    let a = alloc();
+    let cfg = FunctionConfig::new(0, 0, BusSpeed::Full).unwrap();
+    let mut class: Class = MidiClass::new(
+        &a.alloc,
+        cfg,
+        InterfaceNames::default(),
+        LinkConfig::default(),
+    )
+    .unwrap();
+    let mut dev = device(&a, false);
+    assert!(set_interface(&a, &mut dev, &mut class, 1));
+    // SET_FEATURE DEVICE_REMOTE_WAKEUP.
+    control(
+        &a,
+        &mut dev,
+        &mut class,
+        [0x00, 0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00],
+    );
+    assert_eq!(class.link().setting().0, 1);
+}
+
+#[test]
+fn gtb_answer_of_three_blocks() {
+    // The answer buffer holds the header and the blocks of a setting.
+    use zmidi_usb::GroupTerminalBlock;
+    let a = alloc();
+    let mut c = FunctionConfig::<4, 1, 2, 3>::new(0, 0, BusSpeed::Full).unwrap();
+    let s = &mut c.midi2.as_mut_slice()[0];
+    for id in 2..=3u8 {
+        let b = GroupTerminalBlock {
+            id,
+            first_group: id - 1,
+            ..GroupTerminalBlock::DEFAULT
+        };
+        s.blocks.push(b).unwrap();
+        for e in s.endpoints.as_mut_slice() {
+            e.blocks.push(id).unwrap();
+        }
+    }
+    let mut class: MidiClass<'_, FakeBus, FunctionConfig<'_, 4, 1, 2, 3>> = MidiClass::new(
+        &a.alloc,
+        c,
+        InterfaceNames::default(),
+        LinkConfig::default(),
+    )
+    .unwrap();
+    let mut dev = device(&a, false);
+    let mut set = [0u8; 64];
+    let n = gtb_set(class.config(), 1, &mut set).unwrap();
+    assert_eq!(n, 5 + 3 * 13);
+    let answer = control(
+        &a,
+        &mut dev,
+        &mut class,
+        [0x81, 0x06, 0x01, 0x26, 0x01, 0x00, 0xFF, 0x00],
+    );
+    assert_eq!(answer.as_deref(), Some(&set[..n]));
+}
+
+#[test]
+fn setting_with_one_direction_and_eight_names() {
+    // A setting with only a MIDI OUT endpoint is valid; 8 names fit a function of 9 settings.
+    let a = alloc();
+    let mut c = FunctionConfig::<4, 8, 2, 1>::new(0, 0, BusSpeed::Full).unwrap();
+    {
+        let s = &mut c.midi2.as_mut_slice()[0];
+        s.blocks.as_mut_slice()[0].kind = zmidi_usb::GtbType::InputOnly;
+        let out = s.endpoints.as_slice()[0];
+        s.endpoints.clear();
+        s.endpoints.push(out).unwrap();
+    }
+    for _ in 0..7 {
+        c.add_midi2_setting(Midi2Setting::new(BusSpeed::Full).unwrap())
+            .unwrap();
+    }
+    let names = [Some("n"); 8];
+    let names = InterfaceNames {
+        audio_control: None,
+        streaming: &names,
+    };
+    let r: Result<MidiClass<'_, FakeBus, FunctionConfig<'_, 4, 8, 2, 1>>, _> =
+        MidiClass::new(&a.alloc, c, names, LinkConfig::default());
+    assert!(r.is_ok(), "{:?}", r.err());
 }
