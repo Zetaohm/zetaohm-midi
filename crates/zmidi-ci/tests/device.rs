@@ -2517,6 +2517,7 @@ fn device_rules_at_their_limits() {
     for (first, count, ok) in [
         (15, 1, true),
         (0, 16, true),
+        (5, 4, true),
         (16, 1, false),
         (0, 0, false),
         (15, 2, false),
@@ -2532,9 +2533,20 @@ fn device_rules_at_their_limits() {
     let (mut a, mut b) = discovered();
     let n = a.endpoint_info_inquiry(b.muid(), &mut buf).unwrap();
     let mut m = buf[..n].to_vec();
-    m[6] = 0x80;
+    m[4] = 0x80;
     let (ev, r) = deliver(&mut b, 0, &m);
     assert!(matches!(ev, Some(Event::Rejected { .. })) && r.is_empty());
+    // A space in a Message Text is written.
+    let k = Nak {
+        original_sub_id2: 0x72,
+        status: NakStatus::Nak,
+        details: Details::Reserved,
+        text: &[],
+    };
+    let n = a
+        .nak(b.muid(), DeviceId::FunctionBlock, &k, "a b", &mut buf)
+        .unwrap();
+    assert_eq!(&buf[n - 3..n], b"a b");
     // A Discovery like its own on an Output Path that it did not send: not an echo, a collision.
     let n = a.discovery(0, 0, &mut buf).unwrap();
     let mut other = buf[..n].to_vec();
@@ -2660,6 +2672,10 @@ fn profile_rules_at_their_limits() {
             .profile_inquiry(fb.muid(), DeviceId::FunctionBlock, &mut buf)
             .unwrap();
         let (_, r) = deliver(&mut fb, 3, &buf[..n]);
+        assert!(
+            r.iter().all(|(g, _)| *g == 3),
+            "the replies go on the Group of the inquiry"
+        );
         let last = &r.last().unwrap().1;
         match deliver(&mut x, 3, last).0 {
             Some(Event::ProfileInquiryReply {
@@ -2668,6 +2684,20 @@ fn profile_rules_at_their_limits() {
                 assert_eq!(device_id, DeviceId::FunctionBlock);
                 assert_eq!(reply.disabled().collect::<Vec<_>>(), [gm()]);
             }
+            e => panic!("{e:?}"),
+        }
+        // Set Profile On to Device ID 0x7F on Group 3: the address is Group 0 of the table.
+        let n = x
+            .set_profile_on(fb.muid(), DeviceId::FunctionBlock, gm(), 0, None, &mut buf)
+            .unwrap();
+        match deliver(&mut fb, 3, &buf[..n]).0 {
+            Some(Event::SetProfile { address, .. }) => assert_eq!(
+                address,
+                ProfileAddress {
+                    device_id: DeviceId::FunctionBlock,
+                    group: 0
+                }
+            ),
             e => panic!("{e:?}"),
         }
     }
