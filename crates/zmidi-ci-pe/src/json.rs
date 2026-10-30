@@ -1627,6 +1627,14 @@ mod tests {
             });
             assert_eq!(r, Err(JsonError::InvalidName), "{bad}");
         }
+        // REQ-PE-HDR-003: a name of 20 characters passes.
+        assert!(write(|w| {
+            w.begin_object()?;
+            w.name("abcdefghijklmnopqrst", 20)?;
+            w.number_u64(1)?;
+            w.end_object()
+        })
+        .is_ok());
         assert!(write(|w| {
             w.begin_object()?;
             w.number_u64(1)?;

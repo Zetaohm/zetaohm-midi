@@ -545,7 +545,10 @@ fn responder_statuses() {
         r#"{{"resource":"X-Bin","mediaType":"application/{}"}}"#,
         "x".repeat(64)
     );
-    let cases: [(&[u8], PeKind, u16); 12] = [
+    let cases: [(&[u8], PeKind, u16); 14] = [
+        // REQ-PE-STAT-009: a header that the parser refuses, in a Set and in a Subscription.
+        (br#"{"resource":"X-Patch","offset":1}"#, PeKind::SetInquiry, 400),
+        (br#"{"command":"start"}"#, PeKind::Subscription, 400),
         (br#"{"resource":"Nope"}"#, PeKind::GetInquiry, 404),
         (br#"{"resource":"Nope"}"#, PeKind::SetInquiry, 404),
         // A "mediaType" of 76 characters, which the header parser refuses.
@@ -795,6 +798,74 @@ fn chunk_gap_and_incomplete_end() {
     );
     assert_eq!(status(&out[0]), 342);
     assert_eq!(b.eng.open(), 0);
+    // The initiator: zlib data that can not be decoded gives an error to the caller. B (with a
+    // zlib window) asks A.
+    let (mut a, mut b) = pair(512);
+    let msg = Outgoing {
+        encoding: EncodingName::ZlibMcoded7,
+        ..Outgoing::json(get("X-Zip"), 0)
+    };
+    let info = b
+        .eng
+        .request(&mut b.dev, a.muid(), TxnKind::Get, &msg, None, b.now)
+        .unwrap();
+    let rid = info.request_id;
+    let m = b.send(a.muid(), rid, Direction::Initiator, &[], true);
+    a.rx(&m);
+    let m = raw(
+        PeKind::GetReply,
+        a.muid(),
+        b.muid(),
+        rid,
+        br#"{"status":200,"mutualEncoding":"zlib+Mcoded7"}"#,
+        1,
+        1,
+        &[0x00, 0x00, 0x00],
+    );
+    let (e, _) = b.rx(&m);
+    assert_eq!(
+        e,
+        Some(Ev::Closed(
+            rid,
+            Direction::Initiator,
+            CloseReason::Refused(Status::BAD_DATA)
+        ))
+    );
+    assert_eq!(b.eng.open(), 0);
+    a.eng
+        .abort(&mut a.dev, b.muid(), rid, Direction::Responder)
+        .unwrap();
+    a.pending();
+    // The initiator: a Chunk gap in a reply gets NAK 0x21 and closes.
+    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    let m = raw(
+        PeKind::GetReply,
+        b.muid(),
+        a.muid(),
+        rid,
+        br#"{"status":200}"#,
+        3,
+        1,
+        b"{",
+    );
+    assert!(matches!(a.rx(&m).0, Some(Ev::Msg { .. })));
+    let m = raw(PeKind::GetReply, b.muid(), a.muid(), rid, b"", 3, 3, b"}");
+    let (e, out) = a.rx(&m);
+    assert_eq!(
+        e,
+        Some(Ev::Closed(
+            rid,
+            Direction::Initiator,
+            CloseReason::OutOfSequence
+        ))
+    );
+    // The Sub-ID#2 of the inquiry (0x34), as for every NAK of the transaction.
+    let n = nak(&out[0]);
+    assert_eq!(
+        (n.status, n.original_sub_id2, n.details),
+        (NakStatus::ChunksOutOfSequence, 0x34, pe(rid, 3))
+    );
+    assert_eq!(a.eng.open(), 0);
 }
 
 #[test]
@@ -830,6 +901,13 @@ fn timeouts_and_waits() {
     );
     let (e, _) = a.rx(&out[0]);
     assert_eq!(e, None);
+    // REQ-PE-END-010: 6 s is Status Data 0x3C (Table 13 example); 12.7 s is the largest wait.
+    // These ACKs do not go to A.
+    for (ms, units) in [(6_000, 0x3C), (12_700, 0x7F)] {
+        b.eng.wait(a.muid(), rid, Direction::Responder, ms).unwrap();
+        let out = b.pending();
+        assert_eq!(ack(&out[0]).status, AckStatus::TimeoutWait(units), "{ms}");
+    }
     // A: 3 s + 300 ms after its Chunk.
     a.now += 3_300;
     assert_eq!(a.poll(), (None, vec![]));
@@ -890,6 +968,42 @@ fn timeouts_and_waits() {
         Err(TransactionError::Late)
     );
     assert_eq!(b.eng.open(), 0);
+}
+
+#[test]
+fn ack_and_nak_of_another_device_are_ignored() {
+    // REQ-PE-END-001: the transaction is found by the MUID of the sender and the Request ID.
+    let (mut a, mut b) = pair(512);
+    let mut c = Side::new(0x43, 0x0333_3333, 512, 0);
+    let mut buf = [0u8; 600];
+    let n = c.dev.discovery(0, 0, &mut buf).unwrap();
+    let (_, r) = a.rx(&buf[..n]);
+    c.rx(&r[0]);
+    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    assert_eq!(a.eng.open(), 1);
+    let terminate = NakStatus::Terminate {
+        by_initiator: false,
+    };
+    for m in [
+        ack_from(&c, a.muid(), 0x34, AckStatus::TimeoutWait(10), rid, 1),
+        nak_from(&c, a.muid(), 0x34, terminate, rid, 1),
+    ] {
+        let (e, out) = a.rx(&m);
+        assert_eq!(e, None);
+        assert!(out.is_empty());
+        assert_eq!(a.eng.open(), 1);
+    }
+    // The same NAK from B ends the transaction.
+    let (e, _) = a.rx(&nak_from(&b, a.muid(), 0x34, terminate, rid, 1));
+    assert_eq!(
+        e,
+        Some(Ev::Closed(
+            rid,
+            Direction::Initiator,
+            CloseReason::Terminated
+        ))
+    );
+    assert_eq!(a.eng.open(), 0);
 }
 
 #[test]
@@ -1221,14 +1335,8 @@ fn flow_control_resend() {
     assert_eq!(out.len(), 1);
     let n = nak(&out[0]);
     assert_eq!(
-        (n.status, n.details),
-        (
-            NakStatus::FlowControlResend,
-            Details::PropertyExchange {
-                request_id: rid,
-                chunk: 0
-            }
-        )
+        (n.status, n.original_sub_id2, n.details),
+        (NakStatus::FlowControlResend, 0x36, pe(rid, 0))
     );
     // A sends Chunk 1 again (REQ-PE-FLOW-012).
     assert_eq!(a.rx(&out[0]).0, Some(Ev::Resend(rid, 1)));
@@ -1287,12 +1395,11 @@ fn flow_control_resend() {
     );
     let (e, out) = b.rx(&c3);
     assert_eq!(e, None);
+    // REQ-PE-FLOW-011: NAK 0x12 (not 0x21) for the Set Inquiry 0x36.
+    let n = nak(&out[0]);
     assert_eq!(
-        nak(&out[0]).details,
-        Details::PropertyExchange {
-            request_id: rid,
-            chunk: 1
-        }
+        (n.status, n.original_sub_id2, n.details),
+        (NakStatus::FlowControlResend, 0x36, pe(rid, 1))
     );
     // REQ-PE-FLOW-014: B waits 12 s after its ACK, then closes with NAK 0x20.
     b.now += 12_000;
@@ -1456,6 +1563,43 @@ fn initiator_rules() {
         ),
         Err(TransactionError::Refused(Status::NOT_ALLOWED))
     );
+    // REQ-PE-RES-001: "requireResId":true needs a "resId".
+    let rid_caps = ResourceCaps {
+        require_res_id: true,
+        ..caps()
+    };
+    assert_eq!(
+        a.eng.request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Get,
+            &Outgoing::json(get("DeviceInfo"), 0),
+            Some(&rid_caps),
+            a.now
+        ),
+        Err(TransactionError::Refused(Status::BAD_REQUEST))
+    );
+    let with_id = Header {
+        res_id: text("a"),
+        ..get("DeviceInfo")
+    };
+    let info = a
+        .eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Get,
+            &Outgoing::json(with_id, 0),
+            Some(&rid_caps),
+            a.now,
+        )
+        .unwrap();
+    let m = a.send(b.muid(), info.request_id, Direction::Initiator, &[], true);
+    assert_eq!(header_text(&m), r#"{"resource":"DeviceInfo","resId":"a"}"#);
+    a.eng
+        .abort(&mut a.dev, b.muid(), info.request_id, Direction::Initiator)
+        .unwrap();
+    a.pending();
     // Not JSON needs a mediaType.
     let msg = Outgoing {
         json: false,
@@ -1693,6 +1837,32 @@ fn schema_ref_values() {
     ] {
         assert_eq!(schema_ref(bad), Err(TransactionError::InvalidRef), "{bad}");
     }
+    // An <id> longer than 36 characters (REQ-PE-HDR-007).
+    let long = format!("midi+jsonschema://{}", "s".repeat(37));
+    assert_eq!(schema_ref(&long), Err(TransactionError::InvalidRef));
+    // Table 88: the Header Data of the Inquiry: Get for the "$ref".
+    let (mut a, b) = pair(512);
+    let (id, _) = schema_ref("midi+jsonschema://patchSchema#/x").unwrap();
+    let h = Header {
+        res_id: Some(HeaderStr::Text(id)),
+        ..get("JSONSchema")
+    };
+    let info = a
+        .eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Get,
+            &Outgoing::json(h, 0),
+            None,
+            a.now,
+        )
+        .unwrap();
+    let m = a.send(b.muid(), info.request_id, Direction::Initiator, &[], true);
+    assert_eq!(
+        header_text(&m),
+        r#"{"resource":"JSONSchema","resId":"patchSchema"}"#
+    );
 }
 
 /// A subscribes to B's "X-Patch"; gives the index in A's table and in B's table.
@@ -2202,12 +2372,10 @@ fn corrupt_mcoded7_chunk_is_decoded_again() {
     b.rx(&m);
     b.eng.corrupt(a.muid(), rid, Direction::Responder).unwrap();
     let out = b.pending();
+    let n = nak(&out[0]);
     assert_eq!(
-        nak(&out[0]).details,
-        Details::PropertyExchange {
-            request_id: rid,
-            chunk: 2
-        }
+        (n.status, n.original_sub_id2, n.details),
+        (NakStatus::FlowControlResend, 0x36, pe(rid, 2))
     );
     assert_eq!(a.rx(&out[0]).0, Some(Ev::Resend(rid, 3)));
     let m = a.send(b.muid(), rid, Direction::Initiator, &parts[2], true);

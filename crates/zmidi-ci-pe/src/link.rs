@@ -438,6 +438,39 @@ mod tests {
         );
         let back = Link::parse(&buf[..n]).unwrap();
         assert_eq!(back.role, LinkRole::SimpleAction);
+        // REQ-PE-LINK-006: the bytes of each "confirmType" and "confirmIcon" value.
+        for (t, i, want) in [
+            (
+                ConfirmType::YesNo,
+                ConfirmIcon::Exclamation,
+                r#""confirmType":"yesno","confirmIcon":"exclamation""#,
+            ),
+            (
+                ConfirmType::OkCancel,
+                ConfirmIcon::Warning,
+                r#""confirmType":"okcancel","confirmIcon":"warning""#,
+            ),
+            (
+                ConfirmType::YesNo,
+                ConfirmIcon::Question,
+                r#""confirmType":"yesno","confirmIcon":"question""#,
+            ),
+            (
+                ConfirmType::OkCancel,
+                ConfirmIcon::Information,
+                r#""confirmType":"okcancel","confirmIcon":"information""#,
+            ),
+        ] {
+            let n = Link {
+                confirm_type: Some(t),
+                confirm_icon: Some(i),
+                ..base
+            }
+            .write(&mut buf)
+            .unwrap();
+            let out = core::str::from_utf8(&buf[..n]).unwrap();
+            assert!(out.ends_with(&std::format!("{want}}}")), "{out}");
+        }
         assert!(Link {
             res_id: Some(HeaderStr::Text("Upper")),
             ..base
@@ -539,6 +572,29 @@ mod tests {
             "]".repeat(10)
         );
         assert!(Link::parse(ok.as_bytes()).is_ok());
+        // REQ-PE-LINK-005: "propData" at depth 64 from the document start passes; 65 does not.
+        for (arrays, ok) in [(63, true), (64, false)] {
+            let t = std::format!(
+                r#"{{"resource":"A","role":"simpleAction","propData":{}{}}}"#,
+                "[".repeat(arrays),
+                "]".repeat(arrays)
+            );
+            let r = Link::parse(t.as_bytes()).map(|_| ());
+            if ok {
+                assert_eq!(r, Ok(()));
+            } else {
+                assert_eq!(r, Err(LinkError::Json(JsonError::Depth)));
+            }
+        }
+        // REQ-PE-LINK-001: "resource" of 36 characters and "role" of 32 pass; "role" of 33
+        // does not.
+        let r36 = "R".repeat(36);
+        let t = std::format!(r#"{{"resource":"{r36}","role":"{}"}}"#, "o".repeat(32));
+        let l = Link::parse(t.as_bytes()).unwrap();
+        assert_eq!(s(Some(l.resource)), r36);
+        assert!(matches!(l.role, LinkRole::Other(_)));
+        let t = std::format!(r#"{{"resource":"A","role":"{}"}}"#, "o".repeat(33));
+        assert_eq!(Link::parse(t.as_bytes()), Err(LinkError::Invalid("role")));
         for (text, icon) in [
             ("information", ConfirmIcon::Information),
             ("question", ConfirmIcon::Question),

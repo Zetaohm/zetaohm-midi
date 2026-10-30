@@ -23,6 +23,9 @@ change the API. All crates and packages have the same version.
   that is not Chunk 1 of 1 with no Property Data (M2-101 Tables 33, 36).
 - `zmidi-ci`: `ReportWriter` leaves out the inactive notes for Message Data Control 0x01 (M2-101
   Table 44); the application still gives only the non-default controller values.
+- `zmidi-ci-pe`: the ResourceList writer leaves out a "mediaTypes" list equal to the default
+  `["application/json"]`, as for the other default values (M2-103 14.3), unless `write_defaults` is
+  set.
 - `zmidi-file`: `SmfWriter::escape` refuses a channel status byte (0x80 to 0xEF) with `BadValue`. Channel
   messages are MIDI events in a Standard MIDI File (RP-001).
 
@@ -45,6 +48,8 @@ change the API. All crates and packages have the same version.
   For a Resource whose "encodings" do not list "ASCII", the responder now replies 415. Before, the
   inquiry went to the application, and a reply in another encoding was refused, so the transaction
   stayed open until its timeout.
+- `zmidi-ci-pe`: the Partial SET reader and writer refuse a key with a "~" that is not "~0" or "~1"
+  (RFC 6901), with `InvalidKey`.
 - `zmidi-net`: a Client that gets Invitation Reply: Authentication Required or User Authentication
   Required with a reserved Authentication State and the nonce that it answered already treats it as
   a repeat of the first request (M2-124 Tables 15, 16), as for state 0x00. Before, it asked the

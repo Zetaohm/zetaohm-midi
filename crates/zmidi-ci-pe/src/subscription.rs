@@ -594,6 +594,15 @@ mod tests {
             "REQ-PE-LINK-009: same resource only"
         );
         assert_eq!(t.updates_for("X", Some(long.as_str())).count(), 1);
+        // A "resource" longer than 36 bytes gets 400 too.
+        let mut t = SubscriptionTable::<2>::new();
+        let mut g = get("X");
+        g.resource = Some(HeaderStr::Text(&wide));
+        assert_eq!(
+            t.accept_start(peer(1), &start_header(&g), &caps),
+            Err(Status::BAD_REQUEST)
+        );
+        assert_eq!(t.updates_for(&wide, None).count(), 0);
     }
 
     #[test]
@@ -753,6 +762,15 @@ mod tests {
             Err(SubscriptionError::NotPermitted)
         );
         assert_eq!(check_send(Role::Responder, Command::Partial, true), Ok(()));
+        assert_eq!(
+            update_command(401, 400, false, Command::Partial),
+            Command::Notify
+        );
+        // REQ-PE-SUB-012: data that fills the Chunk exactly fits in one Chunk.
+        assert_eq!(
+            update_command(400, 400, false, Command::Partial),
+            Command::Partial
+        );
         assert_eq!(
             update_command(600, 400, false, Command::Partial),
             Command::Notify

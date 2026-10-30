@@ -291,7 +291,9 @@ impl<'a> ResourceEntry<'a> {
             w.name("canSet", 20)?;
             w.string(c.can_set.as_str())?;
         }
-        if all || !self.media_types.is_empty() {
+        // REQ-PE-LIST-009: a list equal to the default ["application/json"] is the default value.
+        let default_media = self.media_types.is_empty() || self.media_types == ["application/json"];
+        if all || !default_media {
             w.name("mediaTypes", 20)?;
             w.begin_array()?;
             if self.media_types.is_empty() {
@@ -1284,7 +1286,7 @@ mod tests {
         let whole = write_all(&t, 1000);
         assert_eq!(
             String::from_utf8(whole.clone()).unwrap(),
-            r#"[{"resource":"DeviceInfo"},{"resource":"CMList","canSet":"partial","mediaTypes":["application/json"],"encodings":["ASCII","Mcoded7"],"schema":{"type":"object"},"columns":[{"property":"name","title":"Name"}]}]"#
+            r#"[{"resource":"DeviceInfo"},{"resource":"CMList","canSet":"partial","encodings":["ASCII","Mcoded7"],"schema":{"type":"object"},"columns":[{"property":"name","title":"Name"}]}]"#
         );
         for room in [1, 3, 17] {
             assert_eq!(write_all(&t, room), whole, "room {room}");
@@ -1297,15 +1299,81 @@ mod tests {
         let (ev, end) = read::<32>(&[&whole]);
         end.unwrap();
         assert_eq!(ev.iter().filter(|e| matches!(e, E::R(..))).count(), 2);
+        // REQ-PE-LIST-009: the caller mark writes every default value.
         let mut all = ResourceEntry::new("A");
         all.write_defaults = true;
         let mut buf = [0u8; 400];
         let n = all.write(&mut buf).unwrap();
-        assert!(core::str::from_utf8(&buf[..n])
-            .unwrap()
-            .contains(r#""canGet":true"#));
+        assert_eq!(
+            core::str::from_utf8(&buf[..n]).unwrap(),
+            r#"{"resource":"A","canGet":true,"canSubscribe":false,"requireResId":false,"fcOnGet":false,"fcOnSet":false,"canPaginate":false,"canSet":"none","mediaTypes":["application/json"],"encodings":["ASCII"]}"#
+        );
+        // A list that is not the default is written as given.
+        let mut m = ResourceEntry::new("A");
+        m.media_types = &["application/json", "audio/mpeg"];
+        let n = m.write(&mut buf).unwrap();
+        assert_eq!(
+            &buf[..n],
+            br#"{"resource":"A","mediaTypes":["application/json","audio/mpeg"]}"#
+        );
         assert!(ResourceEntry::new("").write(&mut buf).is_err());
         assert!(ResourceEntry::new("Bad-Name").write(&mut buf).is_err());
+        // REQ-PE-LIST-005: a "mediaTypes" string is "type/subtype", 75 characters at most.
+        let long75 = std::format!("a/{}", "b".repeat(73));
+        let long76 = std::format!("a/{}", "b".repeat(74));
+        for (t, ok) in [
+            ("text", false),
+            (long75.as_str(), true),
+            (long76.as_str(), false),
+        ] {
+            let types = [t];
+            let mut m = ResourceEntry::new("A");
+            m.media_types = &types;
+            let r = m.write(&mut buf).map(|_| ());
+            if ok {
+                assert_eq!(r, Ok(()), "{t}");
+            } else {
+                assert_eq!(r, Err(ListError::Invalid("mediaTypes")), "{t}");
+            }
+        }
+        // REQ-PE-LIST-008: a Column "link" is 1 to 36 characters.
+        let l36 = "L".repeat(36);
+        let l37 = "L".repeat(37);
+        for (l, ok) in [("", false), (l36.as_str(), true), (l37.as_str(), false)] {
+            let cols = [Column {
+                kind: ColumnKind::Link(l),
+                title: "T",
+            }];
+            let mut m = ResourceEntry::new("A");
+            m.columns = &cols;
+            let r = m.write(&mut buf).map(|_| ());
+            if ok {
+                assert_eq!(r, Ok(()), "{l}");
+            } else {
+                assert_eq!(r, Err(ListError::Invalid("link")), "{l}");
+            }
+        }
+        // REQ-PE-LIST-001: a list larger than the buffer of the writer.
+        let names = ["A0", "A1", "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9"];
+        let ten = names.map(ResourceEntry::new);
+        let mut w = ResourceListWriter::<64>::new(&ten);
+        let mut out = Vec::new();
+        loop {
+            let mut b = [0u8; 16];
+            let n = w.write_next(&mut b).unwrap();
+            if n == 0 {
+                break;
+            }
+            out.extend_from_slice(&b[..n]);
+        }
+        let want: Vec<String> = names
+            .iter()
+            .map(|n| std::format!(r#"{{"resource":"{n}"}}"#))
+            .collect();
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            std::format!("[{}]", want.join(","))
+        );
     }
 
     #[test]
@@ -1361,6 +1429,13 @@ mod tests {
         assert_eq!(
             rid.check(Operation::Get, &h(|_| {})),
             Err(Status::BAD_REQUEST)
+        );
+        assert_eq!(
+            rid.check(
+                Operation::Get,
+                &h(|h| h.res_id = Some(HeaderStr::Text("a")))
+            ),
+            Ok(())
         );
         assert_eq!(
             base.check(Operation::Get, &h(|h| h.flow_control = true)),

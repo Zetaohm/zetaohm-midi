@@ -947,6 +947,8 @@ mod tests {
         text.push_str(r#"","x":1}"#);
         let h = Header::parse(HeaderKind::Reply, text.as_bytes()).unwrap();
         assert!(h.msg_truncated);
+        // REQ-PE-LINK-008: the cut is at 512 escaped bytes exactly (64 groups of 8).
+        assert_eq!(s(&h.msg), "abé".repeat(64));
         let HeaderStr::Raw(raw) = h.msg.unwrap() else {
             panic!()
         };
@@ -1102,6 +1104,22 @@ mod tests {
             ..base
         };
         assert!(write(&ok, HeaderKind::Inquiry).is_ok());
+        // REQ-PE-TXN-006: "limit" with no "offset".
+        let no_offset = Header {
+            limit: Some(5),
+            ..base
+        };
+        assert!(write(&no_offset, HeaderKind::Inquiry).is_err());
+        // REQ-PE-HDR-011: "cacheTime" at its largest value.
+        let cached = Header {
+            status: Some(Status::OK),
+            cache_time: Some(u32::MAX),
+            ..Default::default()
+        };
+        assert_eq!(
+            write(&cached, HeaderKind::Reply).as_deref(),
+            Ok(r#"{"status":200,"cacheTime":4294967295}"#)
+        );
         assert_eq!(
             write(&Header::default(), HeaderKind::Reply),
             Err(HeaderError::Missing("status"))
@@ -1214,6 +1232,89 @@ mod tests {
         )
         .unwrap();
         assert_eq!(s(&h.subscribe_id), "Ab-\u{e9} 0123456789x", "16 characters");
+        // REQ-PE-HDR-013, REQ-PE-TXN-006: "offset", "limit" and "totalCount" are integers in
+        // their ranges, and "offset" and "limit" come together.
+        for (text, kind, want) in [
+            (
+                r#"{"resource":"a","offset":1.5,"limit":2}"#,
+                HeaderKind::Inquiry,
+                HeaderError::Invalid("offset"),
+            ),
+            (
+                r#"{"resource":"a","offset":1e2,"limit":2}"#,
+                HeaderKind::Inquiry,
+                HeaderError::Invalid("offset"),
+            ),
+            (
+                r#"{"resource":"a","offset":4294967296,"limit":2}"#,
+                HeaderKind::Inquiry,
+                HeaderError::Invalid("offset"),
+            ),
+            (
+                r#"{"resource":"a","offset":0,"limit":2.5}"#,
+                HeaderKind::Inquiry,
+                HeaderError::Invalid("limit"),
+            ),
+            (
+                r#"{"resource":"a","offset":0,"limit":-2}"#,
+                HeaderKind::Inquiry,
+                HeaderError::Invalid("limit"),
+            ),
+            (
+                r#"{"resource":"a","offset":0,"limit":4294967296}"#,
+                HeaderKind::Inquiry,
+                HeaderError::Invalid("limit"),
+            ),
+            (
+                r#"{"status":200,"totalCount":1.5}"#,
+                HeaderKind::Reply,
+                HeaderError::Invalid("totalCount"),
+            ),
+            (
+                r#"{"status":200,"totalCount":-1}"#,
+                HeaderKind::Reply,
+                HeaderError::Invalid("totalCount"),
+            ),
+            (
+                r#"{"resource":"a","limit":2}"#,
+                HeaderKind::Inquiry,
+                HeaderError::Missing("offset"),
+            ),
+        ] {
+            assert_eq!(Header::parse(kind, text.as_bytes()), Err(want), "{text}");
+        }
+        let h = Header::parse(
+            HeaderKind::Inquiry,
+            br#"{"resource":"a","offset":4294967295,"limit":4294967295}"#,
+        )
+        .unwrap();
+        assert_eq!((h.offset, h.limit), (Some(u32::MAX), Some(u32::MAX)));
+        // REQ-PE-HDR-005: JSON whitespace around names, values and separators.
+        let h = Header::parse(
+            HeaderKind::Inquiry,
+            b"{ \"resource\" :\n\"A\"\t,\r\"resId\": \"b\" }",
+        )
+        .unwrap();
+        assert_eq!(
+            (s(&h.resource), s(&h.res_id)),
+            (String::from("A"), String::from("b"))
+        );
+        // REQ-PE-JSON-001: JSON that is not valid is a parse error of the header parser.
+        for bad in [
+            &br#"{"a" 1}"#[..],
+            br#"{} {}"#,
+            br#"{"resource":"a""#,
+            br#"{"resource":}"#,
+        ] {
+            assert!(
+                matches!(
+                    Header::parse(HeaderKind::Inquiry, bad),
+                    Err(HeaderError::Json(_))
+                ),
+                "{}",
+                core::str::from_utf8(bad).unwrap()
+            );
+        }
     }
 
     #[test]

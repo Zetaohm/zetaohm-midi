@@ -9,7 +9,7 @@ use zmidi_ci::{
 };
 use zmidi_ci_pe::{
     Command, EncodingName, EngineConfig, Header, HeaderKind, PeEngine, PeEvent, ResourceCaps,
-    ResourceEntry, TxnKind,
+    ResourceEntry, TransactionError, TxnKind,
 };
 
 type Dev = CiDevice<'static, 4, 2, 8>;
@@ -239,6 +239,31 @@ fn responder_reads_the_replies_to_its_subscription_updates() {
         // The transaction is closed: the same reply again gets no event.
         let (got, _) = b.rx(&raw(PeKind::SubscriptionReply, me, rid, reply.as_bytes()));
         assert_eq!(got, Got::Nothing);
+    }
+    // REQ-PE-GEN-003: the subscriber reported 2 simultaneous requests; a third open update is
+    // refused.
+    let open: Vec<u8> = (0..2).map(|_| b.update(index, Command::Notify).1).collect();
+    assert_eq!(
+        b.eng
+            .update(
+                &mut b.dev,
+                index,
+                Command::Notify,
+                EncodingName::Ascii,
+                Some(0),
+                b.now
+            )
+            .err(),
+        Some(TransactionError::PeerBusy)
+    );
+    for rid in open {
+        let (got, _) = b.rx(&raw(
+            PeKind::SubscriptionReply,
+            me,
+            rid,
+            br#"{"status":200}"#,
+        ));
+        assert_eq!(got, Got::Reply(TxnKind::Subscription, Some(200)));
     }
     assert_eq!(b.eng.subscriptions().entries().count(), 1);
     // The responder ends the subscription.

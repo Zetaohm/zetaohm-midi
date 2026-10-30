@@ -151,7 +151,7 @@ impl<const K: usize> PartialSetItems<'_, '_, K> {
                     if truncated || text.len() > K {
                         return Some(Err(PropertyDataError::KeyTooLong));
                     }
-                    if !text.starts_with('/') {
+                    if !pointer_ok(text) {
                         return Some(Err(PropertyDataError::InvalidKey));
                     }
                     self.key[..text.len()].copy_from_slice(text.as_bytes());
@@ -178,6 +178,15 @@ impl<const K: usize> PartialSetItems<'_, '_, K> {
     }
 }
 
+/// A JSON Pointer (RFC 6901) that starts with "/": each "~" is "~0" or "~1" (REQ-PE-TXN-004).
+fn pointer_ok(key: &str) -> bool {
+    let b = key.as_bytes();
+    b.first() == Some(&b'/')
+        && b.iter()
+            .enumerate()
+            .all(|(i, &c)| c != b'~' || matches!(b.get(i + 1), Some(b'0' | b'1')))
+}
+
 /// Writer of Partial SET Property Data (REQ-PE-TXN-004, -005).
 #[derive(Debug)]
 pub struct PartialSetWriter<'b> {
@@ -194,7 +203,7 @@ impl<'b> PartialSetWriter<'b> {
 
     /// Writes one change; the key must be a JSON Pointer that starts with "/".
     pub fn item(&mut self, key: &str, value: ScalarValue<'_>) -> Result<(), PropertyDataError> {
-        if !key.starts_with('/') {
+        if !pointer_ok(key) {
             return Err(PropertyDataError::InvalidKey);
         }
         self.w.key(key)?;
@@ -441,6 +450,17 @@ mod tests {
             (e, e.status()),
             (PropertyDataError::InvalidKey, Status::BAD_REQUEST)
         );
+        // RFC 6901: no empty key, and "~" only as "~0" or "~1".
+        for k in [&br#"{"":1}"#[..], br#"{"/a~2":1}"#, br#"{"/a~":1}"#] {
+            assert_eq!(
+                read_partial::<32>(&[k]).unwrap_err(),
+                PropertyDataError::InvalidKey
+            );
+        }
+        assert_eq!(
+            read_partial::<32>(&[br#"{"/a~0b~1c":1}"#]).unwrap(),
+            [(String::from("/a~0b~1c"), V::N(String::from("1")))]
+        );
         for v in [
             &br#"{"/a":{"b":1}}"#[..],
             br#"{"/a":[1]}"#,
@@ -482,10 +502,13 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(
-            w.item("x", ScalarValue::Bool(true)),
-            Err(PropertyDataError::InvalidKey)
-        );
+        for k in ["x", "", "/a~2", "/a~"] {
+            assert_eq!(
+                w.item(k, ScalarValue::Bool(true)),
+                Err(PropertyDataError::InvalidKey),
+                "{k}"
+            );
+        }
         let n = w.finish().unwrap();
         assert_eq!(&buf[..n], br#"{"/lfoSpeed":10,"/name":"a~b"}"#);
     }
