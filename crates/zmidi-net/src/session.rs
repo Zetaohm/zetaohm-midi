@@ -2697,6 +2697,17 @@ mod tests {
             c.s().bye(700, ByeReason::USER_TERMINATED, ""),
             Err(SessionError::WrongState(Idle))
         );
+        // In Pending Session Reset: one Bye with the text, and no more Session Reset.
+        let (mut c, _) = established(quiet());
+        c.s().reset(0).unwrap();
+        c.tick(0);
+        let ev = c.s().bye(1, ByeReason::USER_TERMINATED, "x").unwrap();
+        assert_eq!(ev.iter().map(own).collect::<Vec<_>>(), [Ev::Ending(1)]);
+        assert_eq!(c.state(), PendingBye);
+        let ps = c.tick(1);
+        assert_eq!(all_codes(&ps), [0xF0]);
+        assert_eq!(&ps[0][8..12], b"x\0\0\0");
+        assert!(all_codes(&c.tick(500)).iter().all(|c| *c == 0xF0));
     }
 
     #[test]
@@ -2868,6 +2879,16 @@ mod tests {
         assert_eq!(c.data.last().unwrap(), &(0, false, vec![NOTE3]));
         // No further Session Reset.
         assert!(all_codes(&c.tick(2000)).iter().all(|c| *c != 0x82));
+        // REQ-NET-RST-008: two Session Resets in one payload get two replies, and no third.
+        let (mut c, _) = established(quiet());
+        let mut two = empty_pkt(CommandCode::SessionReset);
+        two.extend_from_slice(&empty_pkt(CommandCode::SessionReset)[4..]);
+        c.receive(10, &two);
+        assert_eq!(all_codes(&c.tick(10)), [0x83, 0x83]);
+        assert!(c.tick(1000).is_empty());
+        // A repeat in a later payload gets one more.
+        c.receive(1100, &empty_pkt(CommandCode::SessionReset));
+        assert_eq!(all_codes(&c.tick(1100)), [0x83]);
     }
 
     #[test]
@@ -3156,6 +3177,141 @@ mod tests {
             assert!(c.tick(t).is_empty(), "{t}");
             t += 100;
         }
+        // Invitation Reply: Pending is written once, not repeated by a timer.
+        let mut c = Peer::client(quiet());
+        let mut h = Peer::host(quiet());
+        h.policy = HostPolicy::new(PolicyKind::AskCaller);
+        c.s().connect(0).unwrap();
+        send(0, &mut c, &mut h);
+        assert_eq!(all_codes(&h.tick(0)), [0x11]);
+        let mut t = 100;
+        while t < 60_000 {
+            assert!(h.tick(t).is_empty(), "{t}");
+            t += 500;
+        }
+        assert!(h.tick(59_999).is_empty());
+    }
+
+    /// A Client with Authentication and a Host with a shared secret; the Host is in
+    /// Authentication Required and has not written its challenge yet.
+    #[cfg(feature = "auth")]
+    fn authentication_required() -> (Peer, Peer) {
+        let mut c = Peer::client(quiet());
+        c.s = Some(
+            S::client(
+                quiet(),
+                Capabilities {
+                    auth: true,
+                    user_auth: false,
+                },
+            )
+            .unwrap(),
+        );
+        c.creds.secret = Some(b"secret".to_vec());
+        let mut h = Peer::host(quiet());
+        h.policy = HostPolicy::new(PolicyKind::SharedSecret);
+        h.creds.random = Some([7; 16]);
+        h.creds.secret = Some(b"secret".to_vec());
+        c.s().connect(0).unwrap();
+        send(0, &mut c, &mut h);
+        assert_eq!(h.state(), AuthenticationRequired);
+        c.take_ev();
+        h.take_ev();
+        (c, h)
+    }
+
+    #[cfg(feature = "auth")]
+    #[test]
+    fn authentication_required_rules() {
+        let bye80 =
+            payload(|w| Bye::write(w, Role::Client, ByeReason::INVITATION_CANCELED, "").unwrap());
+        // REQ-NET-DATA-003: UMP Data or a Retransmit Request: Bye 0x05 and Pending Bye.
+        let (_, mut h) = authentication_required();
+        assert_eq!(all_codes(&h.tick(0)), [0x12]);
+        h.receive(10, &data_pkt(0, &[NOTE]));
+        assert_eq!(h.state(), PendingBye);
+        assert_eq!(h.take_ev(), [Ev::Ending(5)]);
+        let p = h.tick(10);
+        assert_eq!(all_codes(&p), [0xF0]);
+        assert_eq!(headers(&p[0])[0].csd1, 0x05);
+        let (_, mut h) = authentication_required();
+        h.receive(
+            10,
+            &payload(|w| {
+                RetransmitRequest {
+                    seq: SeqNum(0),
+                    count: 1,
+                }
+                .write(w)
+                .unwrap()
+            }),
+        );
+        assert_eq!(h.state(), PendingBye);
+        assert_eq!(headers(&h.tick(10)[0])[0].csd1, 0x05);
+
+        // REQ-NET-BYE-008: a received Bye: Bye Reply, Idle, the closed event, no repeat.
+        let (_, mut h) = authentication_required();
+        h.tick(0);
+        h.receive(10, &bye80);
+        assert_eq!(h.state(), Idle);
+        assert_eq!(h.take_ev(), [Ev::ClosedBye(0x80, "".into())]);
+        assert_eq!(all_codes(&h.tick(10)), [0xF1]);
+        assert!(h.s.is_none());
+        assert!(h.tick(600).is_empty());
+
+        // REQ-NET-BYE-006: a Bye from the caller of the Host, with its text.
+        let (_, mut h) = authentication_required();
+        h.tick(0);
+        let ev = h.s().bye(1, ByeReason::USER_DID_NOT_ACCEPT, "x").unwrap();
+        assert_eq!(ev.iter().map(own).collect::<Vec<_>>(), [Ev::Ending(0x42)]);
+        assert_eq!(h.state(), PendingBye);
+        let ps = h.tick(1);
+        assert_eq!(all_codes(&ps), [0xF0]);
+        assert_eq!(headers(&ps[0])[0].csd1, 0x42);
+        assert_eq!(&ps[0][8..12], b"x\0\0\0");
+
+        // REQ-NET-SES-002, REQ-NET-DATA-014: the challenge is not repeated by a timer; at the
+        // Host answer timeout the entry goes with no Command.
+        let (_, mut h) = authentication_required();
+        assert_eq!(all_codes(&h.tick(0)), [0x12]);
+        assert_eq!(h.s().next_deadline(), Some(60_000));
+        assert!(h.tick(59_999).is_empty());
+        assert!(h.tick(60_000).is_empty());
+        assert!(h.s.is_none());
+        assert_eq!(h.take_ev(), [Ev::ClosedExpired]);
+
+        // REQ-NET-AUTH-017: a wrong digest gets a delayed reply; a Bye before it is due
+        // discards it.
+        let (mut c, mut h) = authentication_required();
+        c.creds.secret = Some(b"wrong".to_vec());
+        h.delay = FailureDelay::default();
+        send(0, &mut h, &mut c);
+        send(0, &mut c, &mut h);
+        assert_eq!(h.take_ev(), [Ev::AuthFailed(1)]);
+        assert!(h.tick(0).is_empty(), "the reply is due later");
+        h.receive(1, &bye80);
+        assert_eq!(all_codes(&h.tick(1)), [0xF1]);
+        assert!(h.s.is_none());
+        assert!(h.tick(10_000).is_empty(), "no delayed reply");
+
+        // REQ-NET-AUTH-033: the Client keeps the CryptoNonce until it goes to Idle; after a
+        // Bye it writes no Invitation with Authentication.
+        let digest = |c: &Peer| {
+            let mut buf = [0u8; 128];
+            let mut w = PayloadWriter::new(&mut buf, MaxPayload::default());
+            Reply::InvitationWithAuth.write(&c.s.as_ref().unwrap().core.hs, &c.id, &mut w)
+        };
+        let (mut c, mut h) = authentication_required();
+        send(0, &mut h, &mut c);
+        assert_eq!(digest(&c), Ok(()), "the nonce is kept");
+        let bye42 =
+            payload(|w| Bye::write(w, Role::Host, ByeReason::USER_DID_NOT_ACCEPT, "").unwrap());
+        c.receive(1, &bye42);
+        assert_eq!(c.state(), Idle);
+        assert_eq!(digest(&c), Err(HandshakeError::NothingToWrite));
+        assert_eq!(all_codes(&c.tick(1)), [0xF1]);
+        assert!(c.tick(500).is_empty());
+        assert!(c.tick(1000).is_empty());
     }
 
     // ----- Table 9 and directions -----

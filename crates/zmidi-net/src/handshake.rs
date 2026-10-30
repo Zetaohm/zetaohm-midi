@@ -1803,7 +1803,9 @@ impl<const U: usize> Hs<'_, U> {
         };
         let peer = PeerInfo::new(name, id);
         self.peer = Some(peer);
-        let key = (method, nonce, st);
+        // REQ-NET-AUTH-003, -004: a reserved state is processed as 0x00, so it has the key of
+        // 0x00; the caller gets the raw value.
+        let key = (method, nonce, if first { 0x00 } else { st });
         // A duplicate first request that the kept digest answers already (a reply to a
         // repeated Invitation): no new prompt, the repeats go on.
         if state == SessionState::PendingInvitation
@@ -3259,6 +3261,37 @@ mod tests {
             let oc = send(1, &h, &oh, &mut c);
             let first = c.wire(&oc);
             c.creds.user = None;
+            assert_eq!(bytes(Reply::InvitationWithUserAuth, &c.hs, &c.id), first);
+        }
+
+        #[test]
+        fn reserved_authentication_state_is_processed_as_first_request() {
+            // REQ-NET-AUTH-003, REQ-NET-AUTH-004: a reserved state with the same nonce is a
+            // duplicate first request: no new prompt, the same repeat.
+            let mut c = Side::client(SHARED);
+            c.creds.secret = Some(Vec::from(&b"5483"[..]));
+            c.start(0);
+            let o = c.receive(1, &challenge_pkt(0x12, 0x00, &NONCE_69));
+            let first = c.wire(&o);
+            assert_eq!(c.creds.secret_calls, 1);
+            let o = c.receive(2, &challenge_pkt(0x12, 0x7E, &NONCE_69));
+            assert!(o.is_empty());
+            assert_eq!(c.creds.secret_calls, 1);
+            assert_eq!(c.hs.repeating(), Some(Reply::InvitationWithAuth));
+            assert_eq!(bytes(Reply::InvitationWithAuth, &c.hs, &c.id), first);
+            // State 0x01 with the same nonce is not a duplicate: a new answer.
+            c.receive(3, &challenge_pkt(0x12, 0x01, &NONCE_69));
+            assert_eq!(c.creds.secret_calls, 2);
+            // User Authentication: state 0x03 is processed as 0x00.
+            let mut c = Side::client(USER);
+            c.creds.user = Some((Vec::from(&b"Rosa"[..]), Vec::from(&b"RPBqBno"[..])));
+            c.start(0);
+            let o = c.receive(1, &challenge_pkt(0x13, 0x00, &NONCE_610));
+            let first = c.wire(&o);
+            let asked = c.creds.challenges.len();
+            let o = c.receive(2, &challenge_pkt(0x13, 0x03, &NONCE_610));
+            assert!(o.is_empty());
+            assert_eq!(c.creds.challenges.len(), asked);
             assert_eq!(bytes(Reply::InvitationWithUserAuth, &c.hs, &c.id), first);
         }
 

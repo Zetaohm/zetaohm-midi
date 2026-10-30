@@ -45,6 +45,10 @@ change the API. All crates and packages have the same version.
   For a Resource whose "encodings" do not list "ASCII", the responder now replies 415. Before, the
   inquiry went to the application, and a reply in another encoding was refused, so the transaction
   stayed open until its timeout.
+- `zmidi-net`: a Client that gets Invitation Reply: Authentication Required or User Authentication
+  Required with a reserved Authentication State and the nonce that it answered already treats it as
+  a repeat of the first request (M2-124 Tables 15, 16), as for state 0x00. Before, it asked the
+  caller for the credentials again.
 
 ## [0.1.0-alpha.1]
 

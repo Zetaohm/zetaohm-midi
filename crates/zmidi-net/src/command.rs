@@ -942,6 +942,24 @@ mod tests {
         };
         assert!(i.name.is_empty());
         assert_eq!(i.product_instance_id.to_str(), Ok("abcde"));
+        // REQ-NET-INV-032: csd1 26 and pl 40 (above the Table 12 ranges), and a 44-byte id.
+        let mut v = std::vec![0x01, 40, 26, 0x00];
+        v.extend([b'n'; 104]);
+        v.extend([b'i'; 56]);
+        let q = raw(&v);
+        let Command::Invitation(i) = one(&q) else {
+            panic!()
+        };
+        assert_eq!(i.name.as_bytes(), [b'n'; 104]);
+        assert_eq!(i.product_instance_id.as_bytes(), [b'i'; 56]);
+        let mut v = std::vec![0x01, 12, 1, 0x00, b'a', 0, 0, 0];
+        v.extend([b'i'; 44]);
+        let q = raw(&v);
+        let Command::Invitation(i) = one(&q) else {
+            panic!()
+        };
+        assert_eq!(i.name.to_str(), Ok("a"));
+        assert_eq!(i.product_instance_id.as_bytes(), [b'i'; 44]);
     }
 
     #[test]
@@ -970,6 +988,16 @@ mod tests {
             panic!()
         };
         assert!(r.name.is_empty() && r.product_instance_id.is_empty() && !r.pending);
+        // REQ-NET-INV-034: csd1 26 and pl 40, above the Table 12 ranges.
+        let mut v = std::vec![0x10, 40, 26, 0x00];
+        v.extend([b'n'; 104]);
+        v.extend([b'i'; 56]);
+        let q = raw(&v);
+        let Command::InvitationReply(r) = one(&q) else {
+            panic!()
+        };
+        assert_eq!(r.name.as_bytes(), [b'n'; 104]);
+        assert_eq!(r.product_instance_id.as_bytes(), [b'i'; 56]);
         // csd1 (the name words) more than pl: Command Malformed.
         let q = raw(&[0x10, 0x00, 0x01, 0x00]);
         let PacketItem::Command(c) = command_packets(&q).unwrap().next().unwrap() else {
@@ -1178,6 +1206,9 @@ mod tests {
             write_err(|w| Nak::write(w, NakReason::OTHER, h, &"x".repeat(1017))),
             CommandError::TextTooLong
         );
+        // REQ-NET-NAK-002: 1016 bytes of text is the largest: pl 255.
+        let p = write(|w| Nak::write(w, NakReason::OTHER, h, &"x".repeat(1016)));
+        assert_eq!(p[5], 255);
         assert_eq!(
             write_err(|w| Nak::write(w, NakReason::OTHER, h, "\u{FEFF}x")),
             CommandError::InvalidText
@@ -1296,6 +1327,15 @@ mod tests {
             panic!()
         };
         assert_eq!((e.reason, e.seq), (RetransmitErrorReason(9), SeqNum(5)));
+        // REQ-NET-RTX-001: the reader of 0x80 also ignores the words after the first.
+        let q = raw(&[0x80, 2, 0x00, 0x07, 0, 2, 0, 0, 9, 9, 9, 9]);
+        assert_eq!(
+            one(&q),
+            Command::RetransmitRequest(RetransmitRequest {
+                seq: SeqNum(7),
+                count: 2
+            })
+        );
         for z in [raw(&[0x80, 0, 0, 0]), raw(&[0x81, 0, 0, 0])] {
             let PacketItem::Command(c) = command_packets(&z).unwrap().next().unwrap() else {
                 panic!()

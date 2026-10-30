@@ -2026,6 +2026,31 @@ mod tests {
     }
 
     #[test]
+    fn retransmit_commands_with_pl_0_get_nak_03_and_long_ump_data_gets_none() {
+        // REQ-NET-RTX-001, REQ-NET-RTX-014: pl 0 is Command Malformed.
+        let mut w = established_world(1);
+        let c = w.nodes[0].addr;
+        for code in [0x80u8, 0x81] {
+            let (_, out) = w
+                .host
+                .rx(w.now, c, &midi(&[code, 0, 0, 0]), &mut Creds::default());
+            assert_eq!(
+                out,
+                [(c, midi(&[0x8F, 0x01, 0x03, 0x00, code, 0x00, 0x00, 0x00]))],
+                "{code:#04x}"
+            );
+        }
+        // REQ-NET-DATA-001: pl 65 is accepted with no NAK.
+        let mut p = vec![0xFF, 65, 0x00, 0x00];
+        for _ in 0..65 {
+            p.extend(NOTE.to_be_bytes());
+        }
+        let (log, out) = w.host.rx(w.now, c, &midi(&p), &mut Creds::default());
+        assert_eq!(data_of(&log, c), [NOTE; 65]);
+        assert!(out.is_empty(), "{out:?}");
+    }
+
+    #[test]
     fn ump_data_cut_inside_a_message_is_delivered_with_one_nak_03() {
         // REQ-NET-DATA-006 with REQ-NET-NAK-004: whole messages first, one NAK, the repeat
         // of the same Command gets no second NAK.
