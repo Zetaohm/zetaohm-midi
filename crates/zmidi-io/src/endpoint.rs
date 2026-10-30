@@ -768,6 +768,13 @@ mod tests {
             Endpoint::try_new(description(true), [fb(1)]).map(|_| ()),
             Err(EndpointError::FunctionBlockNumbering)
         );
+        // Numbered 0 to N-1 in order: no duplicate, no other order.
+        for bad in [[fb(0), fb(0)], [fb(1), fb(0)]] {
+            assert_eq!(
+                Endpoint::try_new(description(true), bad).map(|_| ()),
+                Err(EndpointError::FunctionBlockNumbering)
+            );
+        }
         let mut b = blocks();
         b[1].info.zmidi_ci_version = 0;
         assert_eq!(
@@ -916,6 +923,36 @@ mod tests {
         ep.receive(&[0xF006_0100, 0, 0, 0]).count();
         assert!(!ep.is_waiting());
         assert_eq!(ep.stream_configuration(), midi1);
+    }
+
+    #[test]
+    fn stream_configuration_needs_a_declared_jr_use() {
+        // REQ-SCFG-002, -003: an endpoint that does not declare RXJR keeps receive_jr off and
+        // replies with its current configuration.
+        let mut d = description(true);
+        d.rxjr = false;
+        let mut ep = Endpoint::try_new(d, blocks()).unwrap();
+        assert_eq!(
+            collect(ep.receive(&[0xF005_0202, 0, 0, 0])),
+            [[0xF006_0200, 0, 0, 0]]
+        );
+        assert!(!ep.expects_jr_timestamps());
+        // REQ-SCFG-010: a Notification that offers a JR use the endpoint does not declare (it
+        // has no TXJR) is not adopted.
+        let mut ep = endpoint(true);
+        ep.request_configuration(StreamConfiguration {
+            protocol: StreamProtocol::Midi2,
+            send_jr: false,
+            receive_jr: false,
+        })
+        .unwrap();
+        ep.receive(&[0xF006_0202, 0, 0, 0]).count();
+        assert!(!ep.is_waiting());
+        assert!(!ep.sends_jr_timestamps());
+        // A Notification that the peer sends when its configuration changes (7.1.6.3) is followed
+        // when the endpoint supports it.
+        ep.receive(&[0xF006_0100, 0, 0, 0]).count();
+        assert_eq!(ep.stream_configuration().protocol, StreamProtocol::Midi1);
     }
 
     /// REQ-JR-013: after an unexpected JR Timestamp, the application asks the sender to stop

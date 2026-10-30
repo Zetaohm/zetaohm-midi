@@ -272,6 +272,8 @@ mod tests {
         s.check(&[FLEX_CONTINUE, 0, 0, 0]).unwrap();
         assert_eq!(s.check(&[NOTE_ON_G1]), Err(SendOrderError::FlexDataOpen));
         assert_eq!(s.check(&[JR_TIMESTAMP]), Err(SendOrderError::FlexDataOpen));
+        // System Common is not System Real Time.
+        assert_eq!(s.check(&[0x11F2_0102]), Err(SendOrderError::FlexDataOpen));
         assert_eq!(
             s.check(&[LYRICS_START, 0, 0, 0]),
             Err(SendOrderError::FlexDataOpen)
@@ -411,6 +413,11 @@ mod tests {
         assert_eq!(
             end_mds_early(g, 16, ids, 10, 3, true),
             Err(UmpError::OutOfRange)
+        );
+        // Another Group and the highest MDS ID, 15.
+        assert_eq!(
+            end_mds_early(Group::from_bits(3), 15, ids, 10, 3, true).map(|w| w[0]),
+            Ok(0x538F_0010)
         );
     }
 

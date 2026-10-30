@@ -911,6 +911,9 @@ mod tests {
         assert_eq!(write_all(&mut w, &[&[0x20D0_0500]]), [0xD0, 0x05]);
         assert_eq!(write_all(&mut w, &[&[0x20E0_0506]]), [0xE0, 0x05, 0x06]);
         assert_eq!(write_all(&mut w, &[&[0x10F1_0500]]), [0xF1, 0x05]);
+        assert_eq!(write_all(&mut w, &[&[0x20B0_0764]]), [0xB0, 0x07, 0x64]);
+        assert_eq!(write_all(&mut w, &[&[0x20C0_0500]]), [0xC0, 0x05]);
+        assert_eq!(write_all(&mut w, &[&[0x10F6_0000]]), [0xF6]);
     }
 
     /// REQ-BS-016: with the feature off, the reader is the core reader alone.

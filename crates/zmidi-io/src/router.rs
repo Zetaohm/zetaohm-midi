@@ -251,6 +251,16 @@ mod tests {
         assert!(
             matches!(ci_address(&fbs, g(1), 0x7E), CiAddress::Group { group } if group == g(1))
         );
+        // The limits of the Channel range: 0x00 is Channel 1, 0x0F is Channel 16; 0x10 and 0x7D
+        // are not addresses.
+        assert!(
+            matches!(ci_address(&fbs, g(1), 0x00), CiAddress::Channel { channel, .. } if channel.into_bits() == 0)
+        );
+        assert!(
+            matches!(ci_address(&fbs, g(1), 0x0F), CiAddress::Channel { channel, .. } if channel.into_bits() == 15)
+        );
+        assert!(matches!(ci_address(&fbs, g(1), 0x10), CiAddress::Invalid));
+        assert!(matches!(ci_address(&fbs, g(1), 0x7D), CiAddress::Invalid));
         match ci_address(&fbs, g(1), 0x7F) {
             CiAddress::FunctionBlocks { group, blocks } => {
                 assert_eq!(group, g(1), "the reply goes on the Group of the message");
