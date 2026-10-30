@@ -206,6 +206,16 @@ static void round_trip_sysex(void) {
 static void sizes(void) {
   CHECK(zmidi_ble_reader_size() <= sizeof(ZmidiBleReader));
   CHECK(zmidi_ble_writer_size() <= sizeof(ZmidiBleWriter));
+  /* DEC-019 rule 6: storage of exactly the *_size() bytes is enough (ASan finds a write past the
+   * end of the heap block). */
+  {
+    ZmidiBleReader *r = (ZmidiBleReader *)malloc(zmidi_ble_reader_size());
+    ZmidiBleWriter *w = (ZmidiBleWriter *)malloc(zmidi_ble_writer_size());
+    CHECK(r != NULL && zmidi_ble_reader_init(r, 0, 1) == ZMIDI_STATUS_OK);
+    CHECK(w != NULL && zmidi_ble_writer_init(w, 23) == ZMIDI_STATUS_OK);
+    free(r);
+    free(w);
+  }
 }
 
 int main(void) {

@@ -263,6 +263,19 @@ static void init_checks(const ZmidiPeResource *table, size_t count) {
   /* No event in the ZmidiCi: no engine event. */
   CHECK(zmidi_pe_receive(&pb, &b, now, scratch, sizeof scratch, &pev) == ZMIDI_STATUS_OK);
   CHECK(pev.kind == ZMIDI_PE_EVENT_KIND_NONE);
+  /* REQ-FFI-PE-010: no Resource and no subscription: -1. */
+  CHECK(pev.resource_index == -1 && pev.subscription == -1 && pev.started == -1);
+  /* REQ-FFI-PE-009: canSet "partial" (2), and the encodings bits each alone. */
+  bad[0] = resource("X-Part");
+  bad[0].can_set = 2;
+  CHECK(zmidi_pe_init(&pb, bad, 1) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_pe_resource_list(&pb, body, sizeof body, &n) == ZMIDI_STATUS_OK);
+  CHECK(has(body, n, "\"canSet\":\"partial\"") && !has(body, n, "\"encodings\""));
+  bad[0].encodings = 1u << ZMIDI_PE_ENCODING_ZLIB_MCODED7;
+  CHECK(zmidi_pe_init(&pb, bad, 1) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_pe_resource_list(&pb, body, sizeof body, &n) == ZMIDI_STATUS_OK);
+  CHECK(has(body, n, "\"encodings\":[\"zlib+Mcoded7\"]"));
+  CHECK(zmidi_pe_init(&pb, table, count) == ZMIDI_STATUS_OK);
 }
 
 int main(void) {

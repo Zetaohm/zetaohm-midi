@@ -32,6 +32,12 @@ int main(void) {
   ZmidiUsbUmp u[2];
 
   CHECK(zmidi_usb_link_size() <= sizeof link);
+  /* DEC-019 rule 6: storage of exactly zmidi_usb_link_size() bytes is enough (ASan). */
+  {
+    ZmidiUsbLink *h = (ZmidiUsbLink *)malloc(zmidi_usb_link_size());
+    CHECK(h != NULL && zmidi_usb_link_init(h, &c) == ZMIDI_STATUS_OK);
+    free(h);
+  }
   CHECK(zmidi_usb_link_init(&link, &c) == ZMIDI_STATUS_OK);
   CHECK(zmidi_usb_link_setting(&link) == 0 && !zmidi_usb_link_is_ump(&link));
 

@@ -164,6 +164,14 @@ mod ble {
     }
 }
 
+/// The record size of zmidi_pe_write_pending: a record header (3), the MIDI-CI header and the
+/// SysEx framing (2 + 13), the Chunk fields (9) and 256 header bytes.
+#[cfg(feature = "ci")]
+#[test]
+fn pe_pending_buffer_size() {
+    assert_eq!(zmidi::pe::ZMIDI_PE_PENDING_MAX, 3 + 2 + 13 + 9 + 256);
+}
+
 #[cfg(feature = "file")]
 mod file {
     use proptest::prelude::*;

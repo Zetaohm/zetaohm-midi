@@ -103,6 +103,12 @@ int main(void) {
   ZmidiUsbBlock b;
 
   CHECK(zmidi_usb_function_size() <= sizeof fn);
+  /* DEC-019 rule 6: storage of exactly zmidi_usb_function_size() bytes is enough (ASan). */
+  {
+    ZmidiUsbFunction *h = (ZmidiUsbFunction *)malloc(zmidi_usb_function_size());
+    CHECK(h != NULL && zmidi_usb_function_init_default(h, 0, 1, false) == ZMIDI_STATUS_OK);
+    free(h);
+  }
 
   /* REQ-FFI-USB-006: the function writer gives the bytes of Appendix B. */
   appendix_b();

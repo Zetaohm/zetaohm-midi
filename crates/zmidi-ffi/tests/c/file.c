@@ -149,6 +149,49 @@ static void bad_input(void) {
   CHECK(zmidi_clip_reader_init(NULL, buf, sizeof buf, NULL) == ZMIDI_STATUS_INVALID_ARGUMENT);
   CHECK(zmidi_clip_reader_size() <= sizeof(ZmidiClipReader));
   CHECK(zmidi_clip_writer_size() <= sizeof(ZmidiClipWriter));
+  /* DEC-019 rule 6: storage of exactly the *_size() bytes is enough (ASan). */
+  {
+    uint8_t clip[128];
+    size_t len = 0;
+    ZmidiClipWriter *hw = (ZmidiClipWriter *)malloc(zmidi_clip_writer_size());
+    ZmidiClipReader *hr = (ZmidiClipReader *)malloc(zmidi_clip_reader_size());
+    c = config(96);
+    CHECK(hw != NULL && zmidi_clip_writer_init(hw, clip, sizeof clip, &c, &e) == ZMIDI_STATUS_OK);
+    CHECK(zmidi_clip_writer_start(hw, 0, false, 0, 0, &e) == ZMIDI_STATUS_OK);
+    CHECK(zmidi_clip_writer_finish(hw, 0, &len, &e) == ZMIDI_STATUS_OK);
+    CHECK(hr != NULL && zmidi_clip_reader_init(hr, clip, len, &e) == ZMIDI_STATUS_OK);
+    free(hw);
+    free(hr);
+  }
+  /* REQ-FFI-FILE-002: each Profile destination: 0 one Channel, 1 the Group, 2 the Function Block
+   * (M2-101 Table 24: Device ID 0x05, 0x7E, 0x7F). */
+  {
+    static const uint8_t dest_byte[3] = {0x05, 0x7E, 0x7F};
+    uint8_t d;
+    for (d = 0; d < 3; d++) {
+      uint8_t clip[256];
+      ZmidiClipWriter cw;
+      ZmidiClipProfileOn p;
+      ZmidiClipConfig cc = config(96);
+      memset(&p, 0, sizeof p);
+      p.profile_id[0] = 0x7E;
+      p.destination = d;
+      p.channel = 5;
+      p.channels = 1;
+      cc.profiles = &p;
+      cc.profile_count = 1;
+      CHECK(zmidi_clip_writer_init(&cw, clip, sizeof clip, &cc, &e) == ZMIDI_STATUS_OK);
+      /* The first word of the Set Profile On SysEx7 (Start, 6 bytes): 7E, then the Device ID. */
+      {
+        size_t i, found = 0;
+        for (i = 0; i < 12; i++) {
+          uint32_t w = word_at(clip + 8 + 4 * i);
+          if ((w >> 16) == 0x3016u) found += (w & 0xFFFFu) == (0x7E00u | dest_byte[d]);
+        }
+        CHECK(found == 1);
+      }
+    }
+  }
 }
 
 int main(void) {
