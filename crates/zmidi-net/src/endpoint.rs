@@ -3369,6 +3369,49 @@ mod tests {
         assert!(w.node_has(i, &Ev::Established(Some(Method::SharedSecret))));
     }
 
+    #[test]
+    fn backlog_is_a_ring_of_o_events() {
+        // O = 3: the events come out in order across the end of the array; a full ring
+        // drops and counts.
+        let mut b = Backlog::<3>::new();
+        let x = addr("10.0.0.2:6000");
+        let evs = [
+            SessionEvent::Reset,
+            SessionEvent::ResetStarted,
+            SessionEvent::Pending,
+            SessionEvent::Timeout,
+        ];
+        b.push(x, evs[0]);
+        b.push(x, evs[1]);
+        assert_eq!(b.pop().map(|e| e.1), Some(evs[0]));
+        b.push(x, evs[2]);
+        b.push(x, evs[3]);
+        b.push(x, evs[0]);
+        assert_eq!(b.dropped, 1);
+        let rest: Vec<_> = std::iter::from_fn(|| b.pop().map(|e| e.1)).collect();
+        assert_eq!(rest, [evs[1], evs[2], evs[3]]);
+        assert!(b.pop().is_none());
+    }
+
+    #[test]
+    fn first_poll_gives_the_timer_events() {
+        // The first poll call at the timeout gives its events, with no earlier call.
+        let mut c: Client = Client::new(client_cfg()).unwrap();
+        c.connect(0, addr("10.0.0.1:5673")).unwrap();
+        let log: Vec<_> = c.poll(20_000).map(|e| own(&e).1).collect();
+        assert_eq!(log, [Ev::Ending(0x80)]);
+    }
+
+    #[test]
+    fn session_ref_shows_a_refused_command() {
+        // REQ-NET-CMD-003 through the Endpoint.
+        let mut w = established_world(1);
+        let c = w.nodes[0].addr;
+        let nak = midi(&[0x8F, 0x02, 0x01, 0x00, 0x20, 0x00, 0x00, 0x00, 0, 0, 0, 0]);
+        let _ = w.host.rx(w.now, c, &nak, &mut Creds::default());
+        assert!(w.host.session(c).unwrap().is_refused(CommandCode::Ping));
+    }
+
     // ----- never panics -----
 
     #[test]

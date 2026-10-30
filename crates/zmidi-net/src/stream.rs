@@ -3131,8 +3131,13 @@ mod tests {
 
     #[test]
     fn nak_with_no_open_request_gives_no_loss() {
-        // REQ-NET-RTX-011: no request was written, so nothing is lost.
+        // REQ-NET-RTX-011: no request was written, so nothing is lost, also with a gap that
+        // waits for its request.
         let mut s = stream();
+        assert_eq!(s.on_retransmit_nak(), None);
+        let mut s = stream();
+        recv_seq(&mut s, 0, 0);
+        recv_seq(&mut s, 0, 2);
         assert_eq!(s.on_retransmit_nak(), None);
     }
 
