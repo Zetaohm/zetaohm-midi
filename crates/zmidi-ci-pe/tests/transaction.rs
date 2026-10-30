@@ -4430,3 +4430,112 @@ fn resource_list_states_replace_the_oldest_when_full() {
     assert!(e1.has_resource_list(c.muid()));
     assert!(!e1.has_resource_list(b.muid()));
 }
+
+#[test]
+fn chunk_totals_of_the_sender() {
+    // REQ-PE-DATA-001, M2-103 7.2: the "number of Chunks" field is the known total, the
+    // number of the last Chunk when the caller ends early or the total was not known, and 0
+    // before the end of an unknown total.
+    let (mut a, b) = pair(512);
+    let set = |a: &mut Side, len: Option<usize>| {
+        let msg = Outgoing {
+            total_len: len,
+            ..Outgoing::json(get("X-Patch"), 0)
+        };
+        a.eng
+            .request(&mut a.dev, b.muid(), TxnKind::Set, &msg, None, a.now)
+            .unwrap()
+            .request_id
+    };
+    let part = vec![b'1'; 400];
+    let send = |a: &mut Side, rid: u8, last: bool| {
+        let mut buf = [0u8; 600];
+        a.eng
+            .send(
+                &mut a.dev,
+                b.muid(),
+                rid,
+                Direction::Initiator,
+                &part,
+                last,
+                a.now,
+                &mut buf,
+            )
+            .map(|n| chunk(&buf[..n]).total)
+    };
+    // A known total of 2.
+    let rid = set(&mut a, Some(800));
+    assert_eq!(send(&mut a, rid, false), Ok(2));
+    assert_eq!(send(&mut a, rid, true), Ok(2));
+    a.pending();
+    // A known total of 3 that the caller ends at Chunk 2.
+    let rid = set(&mut a, Some(1200));
+    assert_eq!(send(&mut a, rid, false), Ok(3));
+    assert_eq!(send(&mut a, rid, true), Ok(2));
+    a.pending();
+    // An unknown total.
+    let rid = set(&mut a, None);
+    assert_eq!(send(&mut a, rid, false), Ok(0));
+    assert_eq!(send(&mut a, rid, true), Ok(2));
+    a.pending();
+    // The last Chunk of a known total must be marked as the last.
+    let rid = set(&mut a, Some(800));
+    assert_eq!(send(&mut a, rid, false), Ok(2));
+    assert_eq!(send(&mut a, rid, false), Err(TransactionError::State));
+}
+
+#[test]
+fn late_send_terminates_only_what_the_peer_knows() {
+    // REQ-PE-END-009: a late Chunk is not sent. A reply ends with NAK 0x20; an inquiry that
+    // was never sent ends with no message.
+    let (mut a, mut b) = pair(512);
+    let rid = open_get(&mut a, &b);
+    a.now += 3_001;
+    let mut buf = [0u8; 600];
+    let r = a.eng.send(
+        &mut a.dev,
+        b.muid(),
+        rid,
+        Direction::Initiator,
+        &[],
+        true,
+        a.now,
+        &mut buf,
+    );
+    assert_eq!(r, Err(TransactionError::Late));
+    assert!(a.pending().is_empty());
+    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    let ok = Header {
+        status: Some(Status::OK),
+        ..Default::default()
+    };
+    b.eng
+        .reply(&mut b.dev, a.muid(), rid, &Outgoing::json(ok, 2), b.now)
+        .unwrap();
+    b.now += 3_001;
+    let r = b.eng.send(
+        &mut b.dev,
+        a.muid(),
+        rid,
+        Direction::Responder,
+        b"{}",
+        true,
+        b.now,
+        &mut buf,
+    );
+    assert_eq!(r, Err(TransactionError::Late));
+    let out = b.pending();
+    assert_eq!(out.len(), 1);
+    assert_eq!(nak(&out[0]).status, terminate(false));
+}
+
+#[test]
+fn corrupt_needs_flow_control() {
+    // REQ-PE-FLOW-011: with no flow control there is no Chunk to ask for again.
+    let (mut a, mut b) = pair(512);
+    let (rid, _, _) = get_request(&mut a, &mut b, "DeviceInfo");
+    assert_eq!(
+        b.eng.corrupt(a.muid(), rid, Direction::Responder),
+        Err(TransactionError::State)
+    );
+}

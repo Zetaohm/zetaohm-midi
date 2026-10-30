@@ -778,4 +778,35 @@ mod tests {
             let _ = Link::parse(&bytes);
         });
     }
+
+    #[test]
+    fn link_res_id_of_36_and_selector_needs_its_resource() {
+        // REQ-PE-LINK-003, -006.
+        let a36 = "a".repeat(36);
+        let plain = Link {
+            resource: HeaderStr::Text("ProgramList"),
+            res_id: Some(HeaderStr::Text(&a36)),
+            title: None,
+            role: LinkRole::Plain,
+            prop_data: None,
+            confirm_msg: None,
+            confirm_type: None,
+            confirm_icon: None,
+            action_resource: None,
+            action_res_id: None,
+            selected_property: None,
+        };
+        let mut buf = [0u8; 200];
+        assert!(plain.write(&mut buf).is_ok());
+        let sel = Link {
+            res_id: None,
+            role: LinkRole::SelectorAction,
+            selected_property: Some(HeaderStr::Text("bankPC")),
+            ..plain
+        };
+        assert_eq!(
+            sel.write(&mut buf).err(),
+            Some(LinkError::Missing("actionResource"))
+        );
+    }
 }

@@ -1745,4 +1745,78 @@ mod tests {
             let _ = read::<8>(&[&bytes[..c], &bytes[c..]]);
         });
     }
+
+    // ----- limits found by mutation testing -----
+
+    fn one(entry: &str) -> std::string::String {
+        std::format!("[{{\"resource\":\"A\",{entry}}}]")
+    }
+
+    #[test]
+    fn reader_limits_of_media_types_and_columns() {
+        // REQ-PE-LIST-007: a media type of up to 75 characters; a text of S bytes fits.
+        let t75 = std::format!("a/{}", "b".repeat(73));
+        let t76 = std::format!("a/{}", "b".repeat(74));
+        let (ev, _) = read::<128>(&[one(&std::format!("\"mediaTypes\":[\"{t75}\"]")).as_bytes()]);
+        assert_eq!(ev[0], E::M(t75.clone()));
+        let (ev, _) = read::<128>(&[one(&std::format!("\"mediaTypes\":[\"{t76}\"]")).as_bytes()]);
+        assert_eq!(ev[0], E::I(ListError::Invalid("mediaTypes")));
+        let (ev, _) = read::<16>(&[one(r#""mediaTypes":["abcdefghij/klmno"]"#).as_bytes()]);
+        assert_eq!(ev[0], E::M(String::from("abcdefghij/klmno")));
+        // A column "property" of S bytes, and an unknown column property, are read.
+        let (ev, _) =
+            read::<16>(&[one(r#""columns":[{"property":"abcdefghijklmnop","x":[1]}]"#).as_bytes()]);
+        assert_eq!(ev[0], E::C(String::from("abcdefghijklmnop"), false, None));
+        // A value of another type in a list is an error of that Property only.
+        for (entry, name) in [
+            (r#""encodings":[1]"#, "encodings"),
+            (r#""columns":[1]"#, "columns"),
+        ] {
+            let (ev, end) = read::<32>(&[one(entry).as_bytes()]);
+            assert_eq!(ev[0], E::I(ListError::Invalid(name)), "{entry}");
+            assert!(end.is_ok());
+        }
+    }
+
+    #[test]
+    fn reader_can_set_none_and_long_names() {
+        // REQ-PE-LIST-004: "none" is a valid value, not a marked one.
+        let (ev, _) = read::<32>(&[one(r#""canSet":"none""#).as_bytes()]);
+        let E::R(_, caps, invalid, _) = &ev[0] else {
+            panic!("{ev:?}")
+        };
+        assert_eq!((caps.can_set, *invalid), (CanSet::None, false));
+        // A "resource" of 36 characters of 4 UTF-8 bytes each.
+        let name = "😀".repeat(36);
+        let list = std::format!("[{{\"resource\":\"{name}\"}}]");
+        let (ev, end) = read::<200>(&[list.as_bytes()]);
+        end.unwrap();
+        assert_eq!(ev, [E::R(name, DEFAULT_CAPS, false, false)]);
+    }
+
+    #[test]
+    fn one_fatal_error_ends_the_reader() {
+        // A list that is not an array: one error, then nothing more.
+        let (ev, end) = read::<32>(&[br#"{"resource":"A","canGet":true}"#]);
+        assert_eq!(ev, [E::I(ListError::NotArray)]);
+        assert!(end.is_err());
+    }
+
+    #[test]
+    fn get_check_and_writer_end() {
+        // REQ-PE-STAT-010: 405 for a Get of a Resource with "canGet": false.
+        let caps = ResourceCaps {
+            can_get: false,
+            ..DEFAULT_CAPS
+        };
+        let h = Header::default();
+        assert_eq!(caps.check(Operation::Get, &h), Err(Status::NOT_ALLOWED));
+        // The writer is done after its last byte only.
+        let t = table();
+        let mut w = ResourceListWriter::<256>::new(&t);
+        assert!(!w.is_done());
+        let mut buf = [0u8; 8];
+        assert_eq!(w.write_next(&mut buf), Ok(8));
+        assert!(!w.is_done());
+    }
 }

@@ -810,4 +810,40 @@ mod tests {
         let i = t.add_started(peer(6), &s, &reply(Some("b"))).unwrap();
         assert_eq!(t.get(i).unwrap().peer(), peer(6));
     }
+
+    #[test]
+    fn subscribe_ids_count_in_base_36() {
+        // REQ-PE-SUB-001: "s" and a counter in base 36: s0 to s9, sa to sz, then s10.
+        let mut t = SubscriptionTable::<1>::new();
+        let caps = ResourceCaps {
+            can_subscribe: true,
+            ..ResourceCaps::default()
+        };
+        let s = start_header(&get("X"));
+        let mut ids = Vec::new();
+        for _ in 0..38 {
+            let i = t.accept_start(peer(1), &s, &caps).unwrap();
+            ids.push(std::string::String::from(t.get(i).unwrap().subscribe_id()));
+            t.remove(i);
+        }
+        assert_eq!(&ids[..3], ["s0", "s1", "s2"]);
+        assert_eq!(&ids[9..12], ["s9", "sa", "sb"]);
+        assert_eq!(&ids[35..], ["sz", "s10", "s11"]);
+    }
+
+    #[test]
+    fn update_header_names_the_resource() {
+        // REQ-PE-SUB-008: an update gives "resource" and "resId" of the "start".
+        let mut t = SubscriptionTable::<1>::new();
+        let caps = ResourceCaps {
+            can_subscribe: true,
+            ..ResourceCaps::default()
+        };
+        let i = t
+            .accept_start(peer(1), &start_header(&get("X")), &caps)
+            .unwrap();
+        let h = t.get(i).unwrap().update_header(Command::Full).unwrap();
+        assert!(h.resource.is_some_and(|r| r.eq_str("X")));
+        assert!(h.res_id.is_some_and(|r| r.eq_str("r1")));
+    }
 }

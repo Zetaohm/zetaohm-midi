@@ -657,4 +657,223 @@ mod tests {
             }
         });
     }
+
+    // ----- hand-built deflate streams (RFC 1951) for the checks of the inflater -----
+
+    /// Bits in deflate order: values LSB first, Huffman codes MSB first.
+    #[derive(Default)]
+    struct Bits {
+        out: Vec<u8>,
+        n: u32,
+    }
+
+    impl Bits {
+        fn bit(&mut self, b: u32) {
+            if self.n.is_multiple_of(8) {
+                self.out.push(0);
+            }
+            if b & 1 != 0 {
+                *self.out.last_mut().unwrap() |= 1 << (self.n % 8);
+            }
+            self.n += 1;
+        }
+        fn value(&mut self, v: u32, bits: u32) {
+            for i in 0..bits {
+                self.bit(v >> i);
+            }
+        }
+        fn code(&mut self, c: u32, len: u32) {
+            for i in (0..len).rev() {
+                self.bit(c >> i);
+            }
+        }
+    }
+
+    fn adler32(data: &[u8]) -> [u8; 4] {
+        let (mut a, mut b) = (1u32, 0u32);
+        for &x in data {
+            a = (a + u32::from(x)) % 65521;
+            b = (b + a) % 65521;
+        }
+        ((b << 16) | a).to_be_bytes()
+    }
+
+    /// A zlib stream: header 78 01, the deflate bits, the Adler-32 of `text`.
+    fn zlib(deflate: Bits, text: &[u8]) -> Vec<u8> {
+        let mut z = std::vec![0x78, 0x01];
+        z.extend_from_slice(&deflate.out);
+        z.extend_from_slice(&adler32(text));
+        z
+    }
+
+    /// One dynamic block. `lit` and `dist` are the code lengths (0 to 3 here); the code length
+    /// code gives 2 bits to each of the lengths 0 to 3. `data` is the symbol sequence.
+    fn dynamic(lit: &[u8], dist: &[u8], data: &[(u32, u32)]) -> Bits {
+        let mut b = Bits::default();
+        b.value(1, 1); // BFINAL
+        b.value(2, 2); // BTYPE dynamic
+        b.value(lit.len() as u32 - 257, 5);
+        b.value(dist.len() as u32 - 1, 5);
+        // HCLEN: 19 code length codes in the order of RFC 1951 3.2.7.
+        b.value(15, 4);
+        for sym in [
+            16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15,
+        ] {
+            b.value(if sym <= 3 { 2 } else { 0 }, 3);
+        }
+        // Code length symbol k (0 to 3) is the 2-bit code k.
+        for &l in lit.iter().chain(dist) {
+            b.code(u32::from(l), 2);
+        }
+        for &(c, len) in data {
+            b.code(c, len);
+        }
+        b
+    }
+
+    fn lengths(n: usize, ones: &[usize]) -> Vec<u8> {
+        (0..n).map(|i| u8::from(ones.contains(&i))).collect()
+    }
+
+    fn with_len(mut l: Vec<u8>, len: u8) -> Vec<u8> {
+        for v in l.iter_mut().filter(|v| **v != 0) {
+            *v = len;
+        }
+        l
+    }
+
+    #[test]
+    fn hand_built_streams_follow_rfc_1950_and_1951() {
+        let mut window = [0u8; MAX_WINDOW];
+        // RFC 1950 2.2: a preset dictionary (FDICT) is not supported. 78 20 has a good FCHECK.
+        assert_eq!(
+            inflate_all(&[0x78, 0x20, 0x03, 0x00, 0, 0, 0, 1], &mut window, 8, 64),
+            Err(EncodingError::InvalidZlib)
+        );
+        // A fixed block: "a", then length 3 at distance 1, which is the whole output so far.
+        let mut f = Bits::default();
+        f.value(1, 1);
+        f.value(1, 2);
+        f.code(0x30 + 0x61, 8); // literal 'a'
+        f.code(1, 7); // length code 257: length 3
+        f.code(0, 5); // distance code 0: distance 1
+        f.code(0, 7); // end of block
+        assert_eq!(
+            inflate_all(&zlib(f, b"aaaa"), &mut window, 64, 64).as_deref(),
+            Ok(&b"aaaa"[..])
+        );
+        // A dynamic block with 'a' and the end code of 1 bit each, one distance code of
+        // 1 bit (a single code may be incomplete).
+        let lit = lengths(257, &[0x61, 256]);
+        let ok = dynamic(&lit, &[1], &[(0, 1), (0, 1), (1, 1)]);
+        assert_eq!(
+            inflate_all(&zlib(ok, b"aa"), &mut window, 64, 64).as_deref(),
+            Ok(&b"aa"[..])
+        );
+        // A single literal/length code (the end code) may also be incomplete.
+        let lit = lengths(257, &[256]);
+        let end_only = dynamic(&lit, &[1], &[(0, 1)]);
+        assert_eq!(
+            inflate_all(&zlib(end_only, b""), &mut window, 64, 64).as_deref(),
+            Ok(&b""[..])
+        );
+        let bad = |lit: Vec<u8>, dist: Vec<u8>| {
+            let z = zlib(dynamic(&lit, &dist, &[(1, 1)]), b"");
+            let mut window = [0u8; MAX_WINDOW];
+            inflate_all(&z, &mut window, 64, 64)
+        };
+        let invalid = Err(EncodingError::InvalidZlib);
+        // More than 286 literal/length codes or 30 distance codes (RFC 1951 3.2.7).
+        assert_eq!(bad(lengths(287, &[0x61, 256]), std::vec![1]), invalid);
+        assert_eq!(bad(lengths(257, &[0x61, 256]), lengths(31, &[0])), invalid);
+        // Over-subscribed codes: three codes of 1 bit.
+        assert_eq!(bad(lengths(257, &[0x61, 0x62, 256]), std::vec![1]), invalid);
+        assert_eq!(
+            bad(lengths(257, &[0x61, 256]), lengths(3, &[0, 1, 2])),
+            invalid
+        );
+        // Incomplete codes of more than one symbol: two codes of 2 bits.
+        let two = with_len(lengths(257, &[0x61, 256]), 2);
+        assert_eq!(bad(two, std::vec![1]), invalid);
+        assert_eq!(
+            bad(lengths(257, &[0x61, 256]), with_len(lengths(2, &[0, 1]), 2)),
+            invalid
+        );
+    }
+
+    #[test]
+    fn encoder_sizes_are_exact_and_overflow_writes_nothing() {
+        // A first call holds the 2-byte header and a 5-byte block header: 6 input bytes make 13
+        // zlib bytes, 1 whole Mcoded7 group of 8 bytes and 6 bytes that wait.
+        let mut e = ZlibMcoded7Encoder::new();
+        assert_eq!(
+            e.encode(&[1; 6], &mut [0u8; 7]),
+            Err(EncodingError::Overflow)
+        );
+        assert_eq!(e.encode(&[1; 6], &mut [0u8; 8]), Ok(8));
+        // 7 input bytes make 14 zlib bytes: 2 groups of 8 bytes.
+        let mut e = ZlibMcoded7Encoder::new();
+        assert_eq!(
+            e.encode(&[1; 7], &mut [0u8; 15]),
+            Err(EncodingError::Overflow)
+        );
+        assert_eq!(e.encode(&[1; 7], &mut [0u8; 16]), Ok(16));
+        // finish with no data: 2 + 5 + 4 = 11 zlib bytes, 13 Mcoded7 bytes. A failed call
+        // changes nothing: the next one writes the whole stream.
+        let mut e = ZlibMcoded7Encoder::new();
+        let mut out = [0u8; 13];
+        assert_eq!(e.finish(&mut out[..12]), Err(EncodingError::Overflow));
+        assert_eq!(e.finish(&mut out), Ok(13));
+        let mut window = [0u8; MAX_WINDOW];
+        let mut d = ZlibMcoded7Decoder::new(&mut window);
+        let mut buf = [0u8; 8];
+        assert_eq!(d.decode(&out, &mut buf).map(|p| p.written), Ok(0));
+        assert_eq!(d.finish(), Ok(()));
+        // After data: the last block and the Adler-32 only (no header).
+        let mut e = ZlibMcoded7Encoder::new();
+        let mut z = std::vec![0u8; 64];
+        let n = e.encode(b"abc", &mut z).unwrap();
+        let mut tail = [0u8; 32];
+        let need = mcoded7_len(e.mcoded7.pending() + 9);
+        assert_eq!(
+            e.finish(&mut tail[..need - 1]),
+            Err(EncodingError::Overflow)
+        );
+        let m = e.finish(&mut tail).unwrap();
+        assert_eq!(m, need);
+        z.truncate(n);
+        z.extend_from_slice(&tail[..m]);
+        let mut d = ZlibMcoded7Decoder::new(&mut window);
+        let mut got = Vec::new();
+        let mut rest = &z[..];
+        loop {
+            // One output byte for each call.
+            let mut one = [0u8; 1];
+            let r = d.decode(rest, &mut one).unwrap();
+            got.extend_from_slice(&one[..r.written]);
+            rest = &rest[r.consumed..];
+            if rest.is_empty() && r.written == 0 {
+                break;
+            }
+        }
+        assert_eq!(got, b"abc");
+        assert_eq!(d.finish(), Ok(()));
+    }
+
+    #[test]
+    fn inflater_state_and_an_incomplete_stream() {
+        let mut window = [0u8; MAX_WINDOW];
+        let mut inf = ZlibInflater::new(&mut window);
+        let dbg = std::format!("{inf:?}");
+        assert!(dbg.starts_with("ZlibInflater { window: 32768, started: false, done: false"));
+        let mut out = [0u8; 128];
+        inf.inflate(&Z15, &mut out).unwrap();
+        assert!(inf.is_done());
+        // REQ-PE-ENC-009: a Data Set whose zlib stream does not end is an error.
+        let half = mcoded7(&Z15[..20]);
+        let mut window = [0u8; MAX_WINDOW];
+        let mut d = ZlibMcoded7Decoder::new(&mut window);
+        let _ = d.decode(&half, &mut out).unwrap();
+        assert_eq!(d.finish(), Err(EncodingError::InvalidZlib));
+    }
 }

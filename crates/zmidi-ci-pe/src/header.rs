@@ -1687,4 +1687,117 @@ mod tests {
             Err(HeaderError::Invalid("mutualEncoding"))
         );
     }
+
+    // ----- limits found by mutation testing -----
+
+    fn raw_chars(raw: &[u8]) -> String {
+        HeaderStr::Raw(raw).chars().collect()
+    }
+
+    #[test]
+    fn received_text_decodes_each_escape_and_utf8_length() {
+        // REQ-PE-JSON-006: ECMA-404 escapes, UTF-8 of 2, 3 and 4 bytes, surrogate pairs.
+        assert_eq!(raw_chars(br#"\"\\\/\b\f\n\r\t"#), "\"\\/\u{8}\u{C}\n\r\t");
+        assert_eq!(raw_chars("é€😀".as_bytes()), "é€😀");
+        assert_eq!(raw_chars(br#"\ud834\udd1e\u00e9"#), "𝄞é");
+        assert_eq!(raw_chars(br#"\ud834x"#), "\u{FFFD}x");
+        // 0x7F is ASCII; 0x80 alone is no character.
+        assert_eq!(raw_chars(b"\x7f"), "\u{7F}");
+        assert_eq!(raw_chars(&[0x80]), "\u{FFFD}");
+    }
+
+    #[test]
+    fn escaped_length_of_each_class() {
+        // Section 6.1.1: 2 for a short escape, 6 for each UTF-16 unit of a \u escape.
+        for (t, n) in [
+            ("a", 1),
+            (" ", 1),
+            ("~", 1),
+            ("\u{1F}", 6),
+            ("\u{7F}", 6),
+            ("é", 6),
+            ("😀", 12),
+            ("\"", 2),
+        ] {
+            assert_eq!(HeaderStr::Text(t).escaped_len(), n, "{t:?}");
+        }
+        // REQ-PE-HDR-012: a "message" of MAX_MESSAGE escaped bytes is written.
+        let text = "m".repeat(MAX_MESSAGE);
+        let mut h = Header {
+            status: Some(Status::OK),
+            message: Some(HeaderStr::Text(&text)),
+            ..Default::default()
+        };
+        let mut buf = [0u8; 600];
+        assert!(h.write(HeaderKind::Reply, &mut buf).is_ok());
+        let long = "m".repeat(MAX_MESSAGE + 1);
+        h.message = Some(HeaderStr::Text(&long));
+        assert_eq!(
+            h.write(HeaderKind::Reply, &mut buf),
+            Err(HeaderError::Invalid("message"))
+        );
+    }
+
+    #[test]
+    fn cut_keeps_escapes_and_characters_whole() {
+        let raw = "\\u00e9\\u00e9".as_bytes();
+        assert_eq!(cut_escaped(raw, 8), &raw[..6]);
+        assert_eq!(cut_escaped(raw, 12), raw);
+        let raw = "aé€😀".as_bytes();
+        for (limit, n) in [(2, 1), (3, 3), (5, 3), (6, 6), (9, 6), (10, 10)] {
+            assert_eq!(cut_escaped(raw, limit), &raw[..n], "{limit}");
+        }
+        assert_eq!(cut_escaped(br#"a\nb"#, 2), b"a");
+    }
+
+    #[test]
+    fn media_type_rules() {
+        // RFC 6838 4.2: restricted names of 1 to 127 characters, the first one alphanumeric.
+        let long = "a".repeat(128);
+        for (t, ok) in [
+            ("text/plain", true),
+            ("application/vnd.a+json", true),
+            ("/plain", false),
+            ("text/", false),
+            ("-text/plain", false),
+            ("text/-plain", false),
+            ("te xt/plain", false),
+            ("textplain", false),
+        ] {
+            assert_eq!(media_type_ok(t), ok, "{t}");
+        }
+        assert!(!media_type_ok(&std::format!("{long}/x")));
+        assert!(media_type_ok(&std::format!("{}/x", &long[..127])));
+    }
+
+    #[test]
+    fn subscription_writer_needs_its_properties() {
+        // REQ-PE-SUB-003, -005, -008: "command"; "resource" for a start; "endedBy" for an
+        // end; "subscribeId" for the other commands.
+        let mut buf = [0u8; 200];
+        let w = |h: Header<'_>, buf: &mut [u8]| h.write(HeaderKind::Subscription, buf).map(drop);
+        let base = Header::default();
+        assert_eq!(w(base, &mut buf), Err(HeaderError::Missing("command")));
+        let start = Header {
+            command: Some(Command::Start),
+            ..base
+        };
+        assert_eq!(w(start, &mut buf), Err(HeaderError::Missing("resource")));
+        let end = Header {
+            command: Some(Command::End),
+            subscribe_id: Some(HeaderStr::Text("s1")),
+            ..base
+        };
+        assert_eq!(w(end, &mut buf), Err(HeaderError::Missing("endedBy")));
+        let full = Header {
+            command: Some(Command::Full),
+            ..base
+        };
+        assert_eq!(w(full, &mut buf), Err(HeaderError::Missing("subscribeId")));
+        let full = Header {
+            subscribe_id: Some(HeaderStr::Text("s1")),
+            ..full
+        };
+        assert_eq!(w(full, &mut buf), Ok(()));
+    }
 }

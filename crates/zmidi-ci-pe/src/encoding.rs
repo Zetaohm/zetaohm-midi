@@ -419,4 +419,39 @@ mod tests {
             let _ = decode_all(&data, p);
         });
     }
+
+    #[test]
+    fn encoder_overflow_consumes_nothing() {
+        // Two groups of 7 bytes need 16 bytes: with 15 the encoder refuses all of them.
+        let data: Vec<u8> = (0..14).map(|i| 0x80 | i).collect();
+        let mut e = Mcoded7Encoder::new();
+        let mut out = [0u8; 16];
+        assert_eq!(
+            e.encode(&data, &mut out[..15]),
+            Err(EncodingError::Overflow)
+        );
+        assert_eq!(e.encode(&data, &mut out), Ok(16));
+        assert_eq!(out[0], 0x7F);
+        assert_eq!(out[8], 0x7F);
+    }
+
+    #[test]
+    fn data_coders_finish_the_last_group() {
+        // REQ-PE-ENC-006: 0x7F is a 7-bit byte.
+        let mut a = DataEncoder::new(EncodingName::Ascii).unwrap();
+        let mut out = [0u8; 8];
+        assert_eq!(a.encode(&[0x7F], &mut out), Ok(1));
+        assert_eq!(a.finish(&mut out), Ok(0));
+        // Mcoded7: three bytes wait for the end, then go as one group of 4 bytes.
+        let mut m = DataEncoder::new(EncodingName::Mcoded7).unwrap();
+        assert_eq!(m.encode(&[1, 0x82, 3], &mut out), Ok(0));
+        assert_eq!(m.finish(&mut out), Ok(4));
+        assert_eq!(&out[..4], &[0x20, 1, 2, 3]);
+        // A decoder that finished a Data Set starts the next one at a group start.
+        let mut d = DataDecoder::new(EncodingName::Mcoded7).unwrap();
+        assert_eq!(d.decode(&[0x20, 1], &mut out), Ok(1));
+        assert_eq!(d.finish(), Ok(()));
+        assert_eq!(d.decode(&[0x20, 1, 2, 3], &mut out), Ok(3));
+        assert_eq!(&out[..3], &[1, 0x82, 3]);
+    }
 }

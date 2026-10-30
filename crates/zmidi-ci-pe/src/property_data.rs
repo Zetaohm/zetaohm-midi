@@ -564,4 +564,18 @@ mod tests {
             let _ = read_simple(&[&bytes[..c], &bytes[c..]]);
         });
     }
+
+    #[test]
+    fn key_of_k_bytes_and_one_value_only() {
+        // REQ-PE-TXN-004: a key of K bytes fits.
+        assert_eq!(
+            read_partial::<8>(&[br#"{"/abcdefg":1}"#]).unwrap(),
+            [(String::from("/abcdefg"), V::N(String::from("1")))]
+        );
+        // REQ-PE-RES-002: the first error is the one reported.
+        assert_eq!(
+            read_simple(&[b"null 2"]),
+            Err(PropertyDataError::InvalidValue)
+        );
+    }
 }

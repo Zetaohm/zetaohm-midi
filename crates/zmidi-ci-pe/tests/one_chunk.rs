@@ -115,7 +115,7 @@ impl Pair {
     /// Delivers `msg` to B and gives the status and the reply messages of `respond`.
     fn send(&mut self, msg: &[u8]) -> (Option<Status>, Vec<Vec<u8>>) {
         let mut sent = Vec::new();
-        let mut body = [0u8; 256];
+        let mut body = [0u8; 1024];
         let mut out = [0u8; 600];
         let r = self.b.receive(0, msg, 0, &mut || 7);
         let Some(ev) = r.event() else {
@@ -412,4 +412,44 @@ fn other_events_get_no_reply() {
         panic!("no reply")
     });
     assert_eq!(r, None);
+}
+
+#[test]
+fn long_reply_goes_in_chunks_of_the_peer_size() {
+    // A reply longer than one message of the peer goes in more Chunks.
+    let mut p = Pair::new();
+    let value = format!("\"{}\"", "x".repeat(998));
+    p.app.state = value.clone().into_bytes();
+    let m = p.chunk(
+        PeKind::GetInquiry,
+        1,
+        br#"{"resource":"X-State"}"#,
+        1,
+        1,
+        b"",
+    );
+    let (status, sent) = p.send(&m);
+    assert_eq!(status, Some(Status::OK));
+    let mut data = Vec::new();
+    let mut numbers = Vec::new();
+    for msg in &sent {
+        assert!(msg.len() <= 512);
+        let (h, body) = zmidi_ci::Header::parse(msg).unwrap();
+        let c = PeChunk::read(&h, body).unwrap();
+        numbers.push((c.number, c.total));
+        data.extend_from_slice(c.data);
+    }
+    assert_eq!(data, value.as_bytes());
+    let n = sent.len() as u16;
+    assert!(n > 2);
+    assert_eq!(numbers, (1..=n).map(|k| (k, n)).collect::<Vec<_>>());
+}
+
+#[test]
+fn empty_resource_name_gets_400() {
+    let mut p = Pair::new();
+    let m = p.chunk(PeKind::GetInquiry, 1, br#"{"resource":""}"#, 1, 1, b"");
+    let (status, sent) = p.send(&m);
+    assert_eq!(status, Some(Status::BAD_REQUEST));
+    assert_eq!(reply(&sent[0]).2, 400);
 }
