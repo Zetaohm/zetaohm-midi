@@ -997,6 +997,16 @@ mod tests {
             Midi1PolyPressure::try_new(g(), c(), 62, 0x7F).unwrap(),
         ));
         assert_eq!(to_midi1(&poly).as_slice(), &[poly1]);
+        // REQ-XLATE-007: the center and a low value.
+        for (v2, v1) in [(0x8000_0000u32, 0x40u8), (0x1400_0000, 0x0A)] {
+            let poly = m2(Midi2ChannelVoiceMessage::PolyPressure(
+                Midi2PolyPressure::try_new(g(), c(), 62, v2).unwrap(),
+            ));
+            let poly1 = m1(Midi1ChannelVoiceMessage::PolyPressure(
+                Midi1PolyPressure::try_new(g(), c(), 62, v1).unwrap(),
+            ));
+            assert_eq!(to_midi1(&poly).as_slice(), &[poly1], "{v2:#x}");
+        }
         let cc = m2(Midi2ChannelVoiceMessage::ControlChange(
             Midi2ControlChange::try_new(g(), c(), 7, 0x8000_0000).unwrap(),
         ));
@@ -1045,6 +1055,16 @@ mod tests {
         assert_eq!(
             to_midi1(&ac2(5, 6, 0xFFFF_FFFF)).as_slice(),
             &[cc1(99, 5), cc1(98, 6), cc1(6, 0x7F), cc1(38, 0x7F)]
+        );
+        // REQ-SCALE-005: 0x0403_0000 gives 0x0101 with Zero-Extension rounding, but 0x0100 with
+        // Min-Center-Max.
+        assert_eq!(
+            to_midi1(&rc2(1, 32, 0x0403_0000)).as_slice(),
+            &[cc1(101, 1), cc1(100, 32), cc1(6, 2), cc1(38, 0)]
+        );
+        assert_eq!(
+            to_midi1(&ac2(0, 0, 0x0403_0000)).as_slice(),
+            &[cc1(99, 0), cc1(98, 0), cc1(6, 2), cc1(38, 0)]
         );
     }
 
@@ -1350,6 +1370,19 @@ mod tests {
                 .with_pressure(0xFFFF_FFFF),
         ));
         assert_eq!(t.translate(&p1), Some(p2));
+        // REQ-XLATE-023: Min-Center-Max, not a repeat of the source bits from the top.
+        for (v1, v2) in [(0x40u8, 0x8000_0000u32), (0x50, 0xA082_0820)] {
+            let p1 = m1(Midi1ChannelVoiceMessage::ChannelPressure(
+                Midi1ChannelPressure::try_new(g(), c(), v1).unwrap(),
+            ));
+            let p2 = m2(Midi2ChannelVoiceMessage::ChannelPressure(
+                Midi2ChannelPressure::new()
+                    .with_group(g())
+                    .with_channel(c())
+                    .with_pressure(v2),
+            ));
+            assert_eq!(t.translate(&p1), Some(p2), "{v1:#x}");
+        }
     }
 
     /// D.3.6, D.1.2: Pitch Bend 14 bits to 32 bits; center 0x2000 gives 0x80000000.

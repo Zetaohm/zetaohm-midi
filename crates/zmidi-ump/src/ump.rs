@@ -129,7 +129,22 @@ impl Ump {
 /// A packet with a reserved Message Type or a Status the crate does not define (2.1.4).
 ///
 /// It keeps the received words unchanged, reserved bits included. Its length is always the
-/// Table 4 size of its Message Type. Only [`Ump::parse`] creates it.
+/// Table 4 size of its Message Type. Only [`Ump::parse`] creates it (REQ-UMP-007):
+///
+/// ```
+/// let (u, _) = zmidi_ump::Ump::parse(&[0x6000_0000, 0]).unwrap();
+/// assert!(matches!(u, zmidi_ump::Ump::Unknown(_)));
+/// ```
+///
+/// There is no public constructor and no struct literal:
+///
+/// ```compile_fail
+/// let u = zmidi_ump::UnknownPacket::from_packet(&[0x6000_0000, 0]);
+/// ```
+///
+/// ```compile_fail
+/// let u = zmidi_ump::UnknownPacket { words: [0x6000_0000, 0, 0, 0] };
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct UnknownPacket {
     /// Words 0 to 3; words after the packet size are zero.

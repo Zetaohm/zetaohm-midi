@@ -133,6 +133,12 @@ fn decode(words: &[u32], status: UmpStreamStatus, valid: u128) -> Result<u128, U
 /// Endpoint Discovery, Status 0x000 (7.1.1, Figures 11 and 12). The Filter bits request the
 /// replies: `e` Endpoint Info, `d` Device Identity, `n` Endpoint Name, `i` Product Instance Id,
 /// `s` Stream Configuration.
+///
+/// A UMP Stream message is Groupless (REQ-UMP-009): it has no Group accessor.
+///
+/// ```compile_fail
+/// let g = zmidi_ump::EndpointDiscovery::new().group();
+/// ```
 #[bitfield(u128, order = Msb, conversion = false, hash = true, new = false, default = false)]
 #[derive(PartialEq, Eq)]
 pub struct EndpointDiscovery {
@@ -1391,6 +1397,11 @@ mod tests {
     fn endpoint_discovery_matches_figures_11_12() {
         let m = EndpointDiscovery::new();
         assert_eq!(words(&m), [0xF000_0101, 0, 0, 0]);
+        // REQ-STREAM-002: UMP Version Major, then Minor.
+        let v = m.with_ump_version_major(1).with_ump_version_minor(2);
+        assert_eq!(words(&v), [0xF000_0102, 0, 0, 0]);
+        let r = EndpointDiscovery::from_words(&[0xF000_0203, 0, 0, 0]).unwrap();
+        assert_eq!((r.ump_version_major(), r.ump_version_minor()), (2, 3));
         assert_eq!(m.message_type(), MessageType::UmpStream);
         assert_eq!(m.format(), StreamFormat::Complete);
         let all = m
@@ -1438,6 +1449,32 @@ mod tests {
         assert!(m.static_function_blocks() && m.midi2() && m.midi1() && m.rxjr() && m.txjr());
         let m = EndpointInfoNotification::try_new(false, 3, true, false, false, true).unwrap();
         assert_eq!(words(&m), [0xF001_0101, 0x0300_0201, 0, 0]);
+        // REQ-STREAM-003: the reader gives each field.
+        let r = EndpointInfoNotification::from_words(&[0xF001_0102, 0x0300_0201, 0, 0]).unwrap();
+        assert_eq!(
+            (
+                r.ump_version_major(),
+                r.ump_version_minor(),
+                r.static_function_blocks(),
+                r.number_of_function_blocks(),
+            ),
+            (1, 2, false, 3)
+        );
+        assert_eq!(
+            (r.midi2(), r.midi1(), r.rxjr(), r.txjr()),
+            (true, false, false, true)
+        );
+        let r = EndpointInfoNotification::from_words(&[0xF001_0101, 0x8000_0102, 0, 0]).unwrap();
+        assert_eq!(
+            (
+                r.static_function_blocks(),
+                r.midi2(),
+                r.midi1(),
+                r.rxjr(),
+                r.txjr()
+            ),
+            (true, false, true, true, false)
+        );
         assert_eq!(
             EndpointInfoNotification::try_new(false, 0x21, true, false, false, false),
             Err(UmpError::OutOfRange)
@@ -1486,6 +1523,11 @@ mod tests {
         let n = StreamConfigurationNotification::new(StreamProtocol::Midi1, false, true);
         assert_eq!(words(&n), [0xF006_0101, 0, 0, 0]);
         assert_eq!(n.protocol(), StreamProtocol::Midi1);
+        // REQ-STREAM-007, -008: the reader gives RXJR and TXJR.
+        let r = StreamConfigurationRequest::from_words(&[0xF005_0202, 0, 0, 0]).unwrap();
+        assert_eq!((r.rxjr(), r.txjr()), (true, false));
+        let n = StreamConfigurationNotification::from_words(&[0xF006_0101, 0, 0, 0]).unwrap();
+        assert_eq!((n.rxjr(), n.txjr()), (false, true));
         assert_eq!(StreamProtocol::from_bits(0x03), None);
         assert_eq!(UmpStreamMessage::parse(&[0xF006_0303, 0, 0, 0]), None);
         assert_eq!(
@@ -1543,6 +1585,33 @@ mod tests {
         let m = FunctionBlockInfoNotification::try_new(port).unwrap();
         assert_eq!(words(&m)[0], 0xF011_8519);
         assert_eq!(m.info(), Some(port));
+        // REQ-STREAM-010: Direction and UI Hint with different values, an inactive block, MIDI 1.0
+        // Unrestricted, and Max SysEx8 Streams 0 and 255.
+        let out = FunctionBlockInfo {
+            active: false,
+            number: 3,
+            direction: FunctionBlockDirection::Output,
+            midi1: FunctionBlockMidi1::Unrestricted,
+            ui_hint: UiHint::Sender,
+            first_group: Group::new(0).unwrap(),
+            groups_spanned: 1,
+            zmidi_ci_version: 0x01,
+            max_sysex8_streams: 0,
+        };
+        // a=0, number 3 -> 0x03; reserved 00, ui 10, m1.0 01, dir 10 -> 0x26.
+        let m = FunctionBlockInfoNotification::try_new(out).unwrap();
+        assert_eq!(words(&m), [0xF011_0326, 0x0001_0100, 0, 0]);
+        assert_eq!(m.info(), Some(out));
+        let many = FunctionBlockInfo {
+            direction: FunctionBlockDirection::Input,
+            ui_hint: UiHint::Sender,
+            max_sysex8_streams: 255,
+            ..block()
+        };
+        // ui 10, m1.0 00, dir 01 -> 0x21.
+        let m = FunctionBlockInfoNotification::try_new(many).unwrap();
+        assert_eq!(words(&m), [0xF011_8521, 0x0204_02FF, 0, 0]);
+        assert_eq!(m.info(), Some(many));
     }
 
     /// 7.1.8: a MIDI 1.0 Port spans one Group (REQ-STREAM-011); Output with a Receiver hint is

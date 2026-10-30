@@ -1484,10 +1484,16 @@ mod tests {
         for s in 0x00..=0x04 {
             assert_eq!(PerformanceTextStatus::from_bits(s).unwrap().into_bits(), s);
         }
-        assert_eq!(
-            PerformanceTextStatus::from_bits(0x03),
-            Some(PerformanceTextStatus::Ruby)
-        );
+        // REQ-FLEX-010: each value has its name in Table 16.
+        for (b, name) in [
+            (0x00, PerformanceTextStatus::Unknown),
+            (0x01, PerformanceTextStatus::Lyrics),
+            (0x02, PerformanceTextStatus::LyricsLanguage),
+            (0x03, PerformanceTextStatus::Ruby),
+            (0x04, PerformanceTextStatus::RubyLanguage),
+        ] {
+            assert_eq!(PerformanceTextStatus::from_bits(b), Some(name));
+        }
         assert!((0x05..=0xFF).all(|s| PerformanceTextStatus::from_bits(s).is_none()));
         // A packet with a reserved text Status is not decoded.
         assert_eq!(
@@ -1911,9 +1917,9 @@ mod tests {
     /// 7.5.11, 7.5.13: Lyrics Language and Ruby Language hold a BCP 47 tag in ASCII.
     #[test]
     fn flex_language_tags_are_bcp47_ascii() {
-        for status in [
-            PerformanceTextStatus::LyricsLanguage,
-            PerformanceTextStatus::RubyLanguage,
+        for (status, byte) in [
+            (PerformanceTextStatus::LyricsLanguage, 0x02),
+            (PerformanceTextStatus::RubyLanguage, 0x04),
         ] {
             let status = FlexTextStatus::Performance(status);
             let try_tag = |text| {
@@ -1921,12 +1927,7 @@ mod tests {
             };
             assert_eq!(
                 try_tag("ja-JP"),
-                Ok(std::vec![[
-                    0xD000_0200 | status.status() as u32,
-                    0x6A61_2D4A,
-                    0x5000_0000,
-                    0
-                ]])
+                Ok(std::vec![[0xD000_0200 | byte, 0x6A61_2D4A, 0x5000_0000, 0]])
             );
             assert!(try_tag("en").is_ok());
             assert!(try_tag("zh-Hant-TW").is_ok());
@@ -1968,11 +1969,14 @@ mod tests {
     #[test]
     fn flex_lyrics_and_ruby_melisma() {
         let mut r = FlexTextReassembler::<384>::new(group(0));
-        for status in [PerformanceTextStatus::Lyrics, PerformanceTextStatus::Ruby] {
+        for (status, byte) in [
+            (PerformanceTextStatus::Lyrics, 0x01),
+            (PerformanceTextStatus::Ruby, 0x03),
+        ] {
             let packets = packet_words(
                 FlexTextPackets::melisma(group(0), FlexDestination::Group, status).unwrap(),
             );
-            let expected = 0xD010_0200 | status.into_bits() as u32;
+            let expected = 0xD010_0200 | byte;
             assert_eq!(packets, [[expected, 0, 0, 0]]);
             let p = FlexTextPacket::from_words(&packets[0]).unwrap();
             assert!(p.is_melisma());

@@ -1437,6 +1437,15 @@ mod tests {
                 None => assert!(t >= 0x04),
             }
         }
+        // REQ-CV2-016: each value has its name in Table 8.
+        for (t, a) in [
+            (0x00, AttributeType::None),
+            (0x01, AttributeType::ManufacturerSpecific),
+            (0x02, AttributeType::ProfileSpecific),
+            (0x03, AttributeType::Pitch7_9),
+        ] {
+            assert_eq!(AttributeType::from_bits(t), Some(a));
+        }
         // Type 0x00: the reader ignores Attribute Data; 0x04 and above are reserved.
         let m = Midi2NoteOn::from_words(&[0x4090_3C00, 0x8000_1234]).unwrap();
         assert_eq!(m.attribute(), NoteAttribute::None);
@@ -1527,6 +1536,19 @@ mod tests {
         assert_eq!((d.note(), d.detach(), d.reset()), (0x3C, true, false));
         let r = PerNoteManagement::from_words(&[0x40F0_3C01, 0]).unwrap();
         assert_eq!((r.detach(), r.reset()), (false, true));
+        // REQ-CV2-008, -009: bank, index and data of the Assignable and Relative Controllers.
+        let ac = AssignableController::from_words(&[0x4030_1234, 0x0000_0005]).unwrap();
+        assert_eq!((ac.bank(), ac.index(), ac.data()), (0x12, 0x34, 5));
+        let rrc = RelativeRegisteredController::from_words(&[0x4040_0102, 0xFFFF_FFFE]).unwrap();
+        assert_eq!((rrc.bank(), rrc.index(), rrc.data()), (1, 2, -2));
+        let rac = RelativeAssignableController::from_words(&[0x4050_7F03, 0x0000_0007]).unwrap();
+        assert_eq!((rac.bank(), rac.index(), rac.data()), (0x7F, 3, 7));
+        // REQ-CV2-011: Channel Pressure from words.
+        let cp = Midi2ChannelPressure::from_words(&[0x42D3_0000, 0x1234_5678]).unwrap();
+        assert_eq!(
+            (cp.group(), cp.channel(), cp.pressure()),
+            (g(2), c(3), 0x1234_5678)
+        );
     }
 
     #[test]
@@ -1611,6 +1633,26 @@ mod tests {
             AssignableController::try_new(g(0), c(0), 0, 128, 0),
             Err(UmpError::OutOfRange)
         );
+        // REQ-CV2-005: the 7-bit Note Number of the Per-Note Controllers.
+        assert_eq!(
+            RegisteredPerNoteController::try_new(g(0), c(0), 128, 3, 0),
+            Err(UmpError::OutOfRange)
+        );
+        assert_eq!(
+            AssignablePerNoteController::try_new(g(0), c(0), 128, 1, 0),
+            Err(UmpError::OutOfRange)
+        );
+        // REQ-CV2-009: the 7-bit bank and index of the Relative Controllers.
+        for (bank, index) in [(128, 0), (0, 128)] {
+            assert_eq!(
+                RelativeRegisteredController::try_new(g(0), c(0), bank, index, 0),
+                Err(UmpError::OutOfRange)
+            );
+            assert_eq!(
+                RelativeAssignableController::try_new(g(0), c(0), bank, index, 0),
+                Err(UmpError::OutOfRange)
+            );
+        }
         assert_eq!(
             PerNotePitchBend::try_new(g(0), c(0), 200, 0),
             Err(UmpError::OutOfRange)
@@ -1643,6 +1685,34 @@ mod tests {
                 }
                 None => assert!(!defined.contains(&i), "{i}"),
             }
+        }
+        // REQ-CV2-020: each defined index has its name in Table 22.
+        use RegisteredPerNoteControllerIndex as X;
+        for (i, x) in [
+            (1, X::Modulation),
+            (2, X::Breath),
+            (3, X::Pitch7_25),
+            (7, X::Volume),
+            (8, X::Balance),
+            (10, X::Pan),
+            (11, X::Expression),
+            (70, X::SoundController1),
+            (71, X::SoundController2),
+            (72, X::SoundController3),
+            (73, X::SoundController4),
+            (74, X::SoundController5),
+            (75, X::SoundController6),
+            (76, X::SoundController7),
+            (77, X::SoundController8),
+            (78, X::SoundController9),
+            (79, X::SoundController10),
+            (91, X::Effects1Depth),
+            (92, X::Effects2Depth),
+            (93, X::Effects3Depth),
+            (94, X::Effects4Depth),
+            (95, X::Effects5Depth),
+        ] {
+            assert_eq!(X::from_index(i), Some(x), "{i}");
         }
     }
 
@@ -1765,12 +1835,27 @@ mod tests {
     #[test]
     fn prop_midi2_reader_ignores_reserved_bits() {
         // 2.1.3: any reserved bits decode to the same message as the cleared packet.
-        proptest!(|(w0 in any::<u32>(), w1 in any::<u32>(), op in 0x8u32..=0xF)| {
+        // REQ-UMP-004: the cleared words are the words with the reserved bits of each opcode
+        // (Figures 46 to 67) set to zero.
+        proptest!(|(w0 in any::<u32>(), w1 in any::<u32>(), op in (0x0u32..=0xF).prop_filter("0x7 is reserved", |o| *o != 0x7))| {
             let w = [0x4000_0000 | (w0 & 0x0F0F_FFFF) | (op << 20), w1];
             let m = Midi2ChannelVoiceMessage::parse(&w).unwrap();
             let cleared = m.into_words();
             prop_assert_eq!(Midi2ChannelVoiceMessage::parse(&cleared), Some(m));
-            prop_assert_eq!(cleared[0] >> 16, w[0] >> 16);
+            let (r0, r1) = match op {
+                0x0 | 0x1 => (0x8000, 0),
+                0x2..=0x5 => (0x8080, 0),
+                0x6 | 0xA | 0xB => (0x80FF, 0),
+                // Attribute Type 0x00: the reader ignores the Attribute Data.
+                0x8 | 0x9 if w[0] & 0xFF == 0 => (0x8000, 0x0000_FFFF),
+                0x8 | 0x9 => (0x8000, 0),
+                // B = 0: the bank fields are zero.
+                0xC if w[0] & 1 == 0 => (0xFFFE, 0x80FF_FFFF),
+                0xC => (0xFFFE, 0x80FF_8080),
+                0xD | 0xE => (0xFFFF, 0),
+                _ => (0x80FC, 0xFFFF_FFFF),
+            };
+            prop_assert_eq!(cleared, [w[0] & !r0, w[1] & !r1], "opcode {:#x}", op);
         });
     }
 }

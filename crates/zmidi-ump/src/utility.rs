@@ -91,6 +91,23 @@ impl Noop {
 }
 
 /// JR Clock: the current time of the Sender (7.2.2.1, Figure 29). Status 0x1.
+///
+/// A Utility message is Groupless (REQ-UMP-009, REQ-UTIL-006): it has no Group accessor
+///
+/// ```
+/// let m = zmidi_ump::JrClock::new().with_time(1);
+/// assert_eq!(m.time(), 1);
+/// ```
+///
+/// ```compile_fail
+/// let g = zmidi_ump::JrClock::new().group();
+/// ```
+///
+/// and no Group parameter:
+///
+/// ```compile_fail
+/// let m = zmidi_ump::DeltaClockstamp::try_new(zmidi_ump::Group::new(0).unwrap(), 1);
+/// ```
 #[bitfield(u32, order = Msb, conversion = false, hash = true)]
 #[derive(PartialEq, Eq)]
 pub struct JrClock {
