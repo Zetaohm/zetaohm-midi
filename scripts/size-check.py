@@ -67,14 +67,15 @@ JOBS = {
     "pe_engine_no_subscriptions": ("ci,pe_nosub", "ci", 22608, 2576, 1500, None, "midi2 C99 PE part (about)"),
     # pe_one_chunk: 2026-10-29, about +64 B: the Responder stores the PE Capabilities of the peer, for
     # Subscription messages in both roles (DEC-CI-001).
-    "pe_one_chunk": ("ci,pe_one_chunk", "ci", 5008, 752, 1500, None, "midi2 C99 PE part (about)"),
-    "pe_one_chunk_flat": ("ci,pe_one_chunk_flat", "ci", 4416, 752, 1500, None, "midi2 C99 PE part (about)"),
+    # 2026-10-30, OPT-054: the one-chunk Responder writes its reply with write_chunks (REQ-CI-PEF-046), -284 B.
+    "pe_one_chunk": ("ci,pe_one_chunk", "ci", 4656, 752, 1500, None, "midi2 C99 PE part (about)"),
+    "pe_one_chunk_flat": ("ci,pe_one_chunk_flat", "ci", 4080, 752, 1500, None, "midi2 C99 PE part (about)"),
     # ci_one_chunk: the same job as the midi2 C99 number (CI with PE Get and Set), OPT-049.
-    "ci_one_chunk": ("ci,pe_one_chunk", "base", 11856, 1448, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
-    "ci_one_chunk_flat": ("ci,pe_one_chunk_flat", "base", 11264, 1448, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
+    "ci_one_chunk": ("ci,pe_one_chunk", "base", 11664, 1448, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
+    "ci_one_chunk_flat": ("ci,pe_one_chunk_flat", "base", 11072, 1448, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
     # ci_like_c: ci_one_chunk with the categories that midi2 C99 CI answers (docs/c-comparison.md).
-    "ci_like_c": ("ci,ci_c", "base", 15248, 1504, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
-    "ci_like_c_flat": ("ci,ci_c_flat", "base", 14672, 1504, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
+    "ci_like_c": ("ci,ci_c", "base", 14944, 1504, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
+    "ci_like_c_flat": ("ci,ci_c_flat", "base", 14368, 1504, 4615, 736, "midi2 C99 CI (with its PE Get and Set)"),
     "full": ("usb2,rx_lean,tx_cv2,flex,stream,bytes1,bytes_out,down,ci,pe", "base", 63792, 5392,
              None, None, "no single library does all of it"),
     # BLE-MIDI, Network MIDI 2.0 and the file formats (2026-10-27, OPT-044). No other library measured yet.

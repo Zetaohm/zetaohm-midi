@@ -39,5 +39,5 @@ pub use profile::{
     ProfileReport, ProfileSpecificData, ProfileTable, SetProfileOff, SetProfileOn,
 };
 pub use property::{
-    ChunkEnd, ChunkWriter, Direction, PeCapabilities, PeChunk, PeKind, RequestTable,
+    write_chunks, ChunkEnd, ChunkWriter, Direction, PeCapabilities, PeChunk, PeKind, RequestTable,
 };

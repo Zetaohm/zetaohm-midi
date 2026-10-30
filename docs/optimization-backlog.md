@@ -741,7 +741,40 @@ Other sizes measured at the same time, no action proposed: `SendOrder` 96, `JrRe
   3. OPT-039: `zmidi-file` still asks for `zmidi-ump/full`.
 - Constraints: DEC-001 (M2-116 rules), DEC-018 (word paths), DEC-021; option 2 adds public API.
 
+### OPT-055 — A responder-only PE engine still links the Initiator reply path
+
+- Area: `crates/zmidi-ci-pe/src/transaction.rs` (`PeEngine::receive`, `on_reply`).
+- Measurement: after OPT-053 the frame of `on_reply` is 760 B. A FLXS1 firmware report (2026-10-30) gives about
+  700 B of stack for this path in a Responder that sends no Get or Set inquiries; its run-time stack has 2,312 B free.
+  Not measured here yet (`scripts/stack-check.py`, a responder-only probe).
+- Cause: `receive` gives each reply Chunk to `on_reply`, and `on_reply` is not behind the feature `initiator` of
+  zmidi-ci-pe. A Responder still needs part of it: it sends Subscription messages and receives the Reply to
+  Subscription (DEC-CI-001 addendum of 2026-10-29).
+- Options: (1) move the Get and Set reply part of `on_reply` behind `initiator`, and keep the Reply to Subscription
+  part; (2) put the Get and Set reply part in a function with `#[inline(never)]`, so that a Responder does not pay its
+  frame. First measure the stack of each part.
+
 ## Done
+
+### OPT-054 — The one-chunk PE Responder links the streaming Chunk writer (done 2026-10-30)
+
+- Area: `crates/zmidi-ci-pe/src/one_chunk.rs` (`respond`, `respond_flat`), `crates/zmidi-ci/src/property.rs`
+  (`ChunkWriter`).
+- Measurement (`scripts/size-check.py`): `pe_one_chunk` 4,848 B, `pe_one_chunk_flat` 4,260 B, `ci_one_chunk`
+  11,708 B, `ci_one_chunk_flat` 11,120 B flash. `ChunkWriter` and its call loop were about 586 B of the flat PE part
+  (OPT-049).
+- Cause: the one-chunk Responder (DEC-PE-005) has the whole reply in one buffer, but it wrote it through
+  `ChunkWriter`, which keeps state for a stream: unknown totals, a smaller Chunk size, `finish`, and a call for
+  each Chunk.
+- Options measured: (A) a reply in one Chunk only, with status 413 when it does not fit the peer, −416 B; it changes
+  DEC-PE-005, because M2-101 8.3 and M2-103 5.2 need Chunks for a message larger than the peer's Receivable
+  Maximum SysEx Message Size. (B) a stateless writer of the whole message, with the same Chunks, −284 B. B taken.
+- Done: `zmidi_ci::write_chunks` and `CiDevice::pe_reply_each` (REQ-CI-PEF-046); `ChunkWriter::new` and
+  `write_chunks` share the Chunk count calculation; a property test gives the same bytes and errors as `ChunkWriter`
+  for each receiver size, header length and data length. A header that does not fit one Chunk is an error with no
+  Chunk sent (REQ-CI-PEF-047, AMB-M2-101-28). No change on the wire. `pe_one_chunk` 4,848 -> 4,564 B,
+  `pe_one_chunk_flat` 4,260 -> 3,988 B, `ci_one_chunk` 11,708 -> 11,424 B, `ci_one_chunk_flat` 11,120 -> 10,848 B,
+  `ci_like_c` 14,964 -> 14,648 B; `pe_engine` does not change. RAM and stack do not change.
 
 ### OPT-053 — The PE reply path copies the transaction (done 2026-10-29)
 

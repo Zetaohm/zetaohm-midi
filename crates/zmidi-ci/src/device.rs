@@ -38,7 +38,9 @@ use crate::profile::{
     ProfileTable, SetProfileOff, SetProfileOn,
 };
 #[cfg_attr(not(feature = "full"), allow(unused_imports))]
-use crate::property::{ChunkWriter, Direction, PeCapabilities, PeChunk, PeKind, RequestTable};
+use crate::property::{
+    write_chunks, ChunkWriter, Direction, PeCapabilities, PeChunk, PeKind, RequestTable,
+};
 
 /// Discovery window: replies are accepted for at least 3 s (5.5, REQ-CI-DISC-011).
 #[cfg(feature = "initiator")]
@@ -1780,6 +1782,38 @@ impl<'a, const PEERS: usize, const PROFILES: usize, const REQUESTS: usize>
             self.muid,
             peer,
             self.config.framing,
+        )?)
+    }
+
+    /// Responder: writes a whole reply with the Request ID of the inquiry in Chunks that fit the
+    /// peer's Receivable Maximum SysEx Message Size, and gives each Chunk to `send`
+    /// (REQ-CI-PEF-035, -037, -041, -046). The Chunks are the ones of [`Self::pe_reply`] with a
+    /// known total; this call keeps no writer state, so it needs less code where the Responder
+    /// has all the Property Data in one slice (the one-chunk Responder of zmidi-ci-pe). Notify is
+    /// refused (REQ-CI-PEF-042).
+    #[allow(clippy::too_many_arguments)]
+    pub fn pe_reply_each(
+        &mut self,
+        peer: Muid,
+        kind: PeKind,
+        request_id: u8,
+        header: &[u8],
+        data: &[u8],
+        out: &mut [u8],
+        send: impl FnMut(&[u8]),
+    ) -> Result<(), DeviceError> {
+        // DEC-017 addendum of 2026-10-22: a call of a category that this build does not have.
+        if !cfg!(feature = "property-exchange") {
+            return Err(DeviceError::NotSupported);
+        }
+        if kind == PeKind::Notify || matches!(kind, PeKind::GetInquiry | PeKind::SetInquiry) {
+            return Err(DeviceError::NotSupported);
+        }
+        let max = self.peer_max(peer).unwrap_or(DEFAULT_MAX_SYSEX);
+        self.used = true;
+        let (source, framing) = (self.muid, self.config.framing);
+        Ok(write_chunks(
+            kind, request_id, header, data, max, source, peer, framing, out, send,
         )?)
     }
 

@@ -169,7 +169,7 @@ fn respond_with<const PEERS: usize, const PROFILES: usize, const REQUESTS: usize
     resources: &mut impl Resources,
     body: &mut [u8],
     out: &mut [u8],
-    mut send: impl FnMut(&[u8]),
+    send: impl FnMut(&[u8]),
     flat: bool,
 ) -> Option<Status> {
     let Event::PeChunk { muid, kind, chunk } = *event else {
@@ -221,22 +221,16 @@ fn respond_with<const PEERS: usize, const PROFILES: usize, const REQUESTS: usize
         }
     };
     let header = status_header(status);
-    let Ok(mut writer) = dev.pe_reply(muid, reply, chunk.request_id, &header, Some(len), None)
-    else {
-        return Some(status);
-    };
-    let mut at = 0;
-    loop {
-        let room = writer.data_room().min(len - at);
-        match writer.write_next(&body[at..at + room], out) {
-            Ok(n) => send(&out[..n]),
-            Err(_) => break,
-        }
-        at += room;
-        if at >= len {
-            break;
-        }
-    }
+    // The whole reply in Chunks of the peer's size, with no writer state (REQ-CI-PEF-046).
+    let _ = dev.pe_reply_each(
+        muid,
+        reply,
+        chunk.request_id,
+        &header,
+        &body[..len],
+        out,
+        send,
+    );
     Some(status)
 }
 

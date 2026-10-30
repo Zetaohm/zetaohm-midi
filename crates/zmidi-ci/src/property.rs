@@ -292,27 +292,13 @@ impl<'h> ChunkWriter<'h> {
         if let Some(c) = chunk_size {
             limit = limit.min(c);
         }
-        let overhead = Header::LEN + CHUNK_FIXED + if framing == Framing::SysEx { 2 } else { 0 };
+        let overhead = chunk_overhead(framing);
         let first = limit
             .checked_sub(overhead + header.len())
             .ok_or(WriteError::InvalidValue)?;
         let total = match total_len {
             None => None,
-            Some(0) => Some(1),
-            Some(n) => {
-                let rest = n.saturating_sub(first);
-                let room = limit - overhead;
-                if room == 0 && rest > 0 || (first == 0 && rest == n && room == 0) {
-                    return Err(WriteError::InvalidValue);
-                }
-                let extra = if rest == 0 { 0 } else { rest.div_ceil(room) };
-                Some(
-                    u16::try_from(1 + extra)
-                        .ok()
-                        .filter(|t| *t <= 0x3FFF)
-                        .ok_or(WriteError::InvalidValue)?,
-                )
-            }
+            Some(n) => Some(chunk_total(first, limit - overhead, n)?),
         };
         Ok(ChunkWriter {
             kind,
@@ -382,6 +368,80 @@ impl<'h> ChunkWriter<'h> {
             ChunkEnd::Incomplete => self.chunk(part, count, 0, out),
             ChunkEnd::More => Err(WriteError::InvalidValue),
         }
+    }
+}
+
+/// The fixed bytes of each Chunk: the MIDI-CI header, the Chunk fields and, in a byte stream,
+/// `0xF0` and `0xF7`.
+fn chunk_overhead(framing: Framing) -> usize {
+    Header::LEN + CHUNK_FIXED + if framing == Framing::SysEx { 2 } else { 0 }
+}
+
+/// Number of Chunks in Message for `len` bytes of Property Data, with `first` bytes of room in
+/// Chunk 1 and `room` bytes in each later Chunk (REQ-CI-PEF-015, -017). [`ChunkWriter::new`] and
+/// [`write_chunks`] both use it, so they give the same Chunks.
+fn chunk_total(first: usize, room: usize, len: usize) -> Result<u16, WriteError> {
+    let rest = len.saturating_sub(first);
+    if room == 0 && rest > 0 {
+        return Err(WriteError::InvalidValue);
+    }
+    let extra = if rest == 0 { 0 } else { rest.div_ceil(room) };
+    u16::try_from(1 + extra)
+        .ok()
+        .filter(|t| *t <= 0x3FFF)
+        .ok_or(WriteError::InvalidValue)
+}
+
+/// Writes a whole Property Exchange message of known length in Chunks that each fit
+/// `max_sysex_size`, the Receivable Maximum SysEx Message Size of the receiver, and gives each
+/// Chunk to `send` (REQ-CI-PEF-046). The Chunks are the ones of a [`ChunkWriter`] with a known
+/// total and no smaller Chunk size; this function keeps no writer state, so it needs less code
+/// where the caller has all the Property Data in one slice. It returns an error before the first
+/// Chunk when the Header Data does not fit one Chunk (REQ-CI-PEF-047), and at the first Chunk
+/// that `out` cannot hold.
+#[allow(clippy::too_many_arguments)]
+pub fn write_chunks(
+    kind: PeKind,
+    request_id: u8,
+    header: &[u8],
+    data: &[u8],
+    max_sysex_size: u32,
+    source: Muid,
+    destination: Muid,
+    framing: Framing,
+    out: &mut [u8],
+    mut send: impl FnMut(&[u8]),
+) -> Result<(), WriteError> {
+    let limit = max_sysex_size as usize;
+    let overhead = chunk_overhead(framing);
+    let first = limit
+        .checked_sub(overhead + header.len())
+        .ok_or(WriteError::InvalidValue)?;
+    let room = limit - overhead;
+    let total = chunk_total(first, room, data.len())?;
+    let (mut at, mut number) = (0, 1u16);
+    loop {
+        // Header Data in Chunk 1 only (REQ-CI-PEF-024).
+        let (h, cap) = if number == 1 {
+            (header, first)
+        } else {
+            (&[][..], room)
+        };
+        let take = cap.min(data.len() - at);
+        let n = PeChunk {
+            request_id,
+            header: h,
+            total,
+            number,
+            data: &data[at..at + take],
+        }
+        .write(kind, source, destination, framing, out)?;
+        send(&out[..n]);
+        at += take;
+        if number == total {
+            return Ok(());
+        }
+        number += 1;
     }
 }
 
@@ -1015,6 +1075,102 @@ mod tests {
             let joined: Vec<u8> = chunks.iter().flat_map(|c| c.2.clone()).collect();
             prop_assert_eq!(joined, data);
         });
+    }
+
+    /// The Chunks of `write_chunks`, or its error.
+    fn each(
+        data: &[u8],
+        header: &[u8],
+        limit: u32,
+        framing: Framing,
+    ) -> (Result<(), WriteError>, Vec<Vec<u8>>) {
+        let mut sent = Vec::new();
+        let mut buf = [0u8; 2048];
+        let r = write_chunks(
+            PeKind::GetReply,
+            7,
+            header,
+            data,
+            limit,
+            SRC,
+            DST,
+            framing,
+            &mut buf,
+            |m| sent.push(m.to_vec()),
+        );
+        (r, sent)
+    }
+
+    #[test]
+    fn prop_write_chunks_matches_chunk_writer() {
+        // REQ-CI-PEF-046: the same Chunks, the same bytes and the same errors as ChunkWriter
+        // with a known total, for each receiver size, header length and data length.
+        proptest!(|(len in 0usize..3000, limit in 0u32..1200, hlen in 0usize..80, sysex in any::<bool>())| {
+            let framing = if sysex { Framing::SysEx } else { Framing::Bare };
+            let data: Vec<u8> = (0..len).map(|i| (i % 128) as u8).collect();
+            let header = std::vec![b'h'; hlen];
+            let (r, sent) = each(&data, &header, limit, framing);
+            let mut buf = [0u8; 2048];
+            let mut expect = Vec::new();
+            let w = ChunkWriter::new(PeKind::GetReply, 7, &header, limit, None, Some(len), SRC, DST, framing);
+            let e = match w {
+                Err(e) => Err(e),
+                Ok(mut w) => {
+                    let mut rest = &data[..];
+                    loop {
+                        let take = w.data_room().min(rest.len());
+                        match w.write_next(&rest[..take], &mut buf) {
+                            Ok(n) => expect.push(buf[..n].to_vec()),
+                            Err(e) => break Err(e),
+                        }
+                        rest = &rest[take..];
+                        if rest.is_empty() && expect.len() as u16 == w.total.unwrap_or(0) {
+                            break Ok(());
+                        }
+                    }
+                }
+            };
+            prop_assert_eq!(r, e);
+            prop_assert_eq!(sent, expect);
+        });
+    }
+
+    #[test]
+    fn header_larger_than_one_chunk_is_an_error() {
+        // REQ-CI-PEF-047 (AMB-M2-101-28): Header Data is in Chunk 1 only (M2-101 8.3.1), so a
+        // header that does not fit one Chunk of the receiver gives an error and no Chunk. With
+        // SysEx framing a Chunk has 24 fixed bytes, so 104 header bytes fit a receiver of 128.
+        let fits = std::vec![b'h'; 104];
+        let (r, sent) = each(&[], &fits, 128, Framing::SysEx);
+        assert_eq!(r, Ok(()));
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].len(), 128);
+        let big = std::vec![b'h'; 105];
+        assert_eq!(
+            each(&[1, 2], &big, 128, Framing::SysEx),
+            (Err(WriteError::InvalidValue), Vec::new())
+        );
+        let w = ChunkWriter::new(
+            PeKind::GetReply,
+            7,
+            &big,
+            128,
+            None,
+            Some(2),
+            SRC,
+            DST,
+            Framing::SysEx,
+        );
+        assert_eq!(w.err(), Some(WriteError::InvalidValue));
+        // 22 fixed bytes in UMP (no 0xF0 and 0xF7).
+        assert_eq!(
+            each(&[], &std::vec![b'h'; 106], 128, Framing::Bare).0,
+            Ok(())
+        );
+        assert_eq!(
+            each(&[], &std::vec![b'h'; 107], 128, Framing::Bare).0,
+            Err(WriteError::InvalidValue)
+        );
     }
 
     #[test]
