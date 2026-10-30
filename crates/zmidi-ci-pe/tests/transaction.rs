@@ -3768,3 +3768,665 @@ fn subscription_update_that_the_caller_can_not_apply() {
         r#"{"resource":"X-Patch","mutualEncoding":"Mcoded7"}"#
     );
 }
+
+// ----- limits found by mutation testing -----
+
+#[test]
+fn default_message_of_each_status() {
+    // REQ-PE-STAT-006: the "message" of each status other than 200.
+    for (s, m) in [
+        (201, "Accepted"),
+        (341, "Resource currently unavailable"),
+        (342, "Bad data or unexpected end of data"),
+        (343, "Too many requests"),
+        (400, "Bad request"),
+        (403, "Not authorized"),
+        (404, "Resource not found"),
+        (405, "Resource not allowed"),
+        (406, "Flow Control not supported"),
+        (407, "Flow Control is required"),
+        (413, "Payload too large"),
+        (415, "Unsupported media type or encoding"),
+        (445, "Invalid version of data"),
+        (500, "Internal device error"),
+        (299, "Internal device error"),
+    ] {
+        assert_eq!(zmidi_ci_pe::default_message(Status(s)), m, "{s}");
+    }
+}
+
+#[test]
+fn schema_ref_id_of_36_characters() {
+    // REQ-PE-HDR-007: 1 to 36 characters.
+    let id = "a".repeat(36);
+    let v = format!("midi+jsonschema://{id}");
+    assert_eq!(schema_ref(&v), Ok((id.as_str(), None)));
+    let v = format!("midi+jsonschema://{}", "a".repeat(37));
+    assert_eq!(schema_ref(&v), Err(TransactionError::InvalidRef));
+}
+
+/// Gives a Chunk to B with a scratch buffer of `scratch` bytes.
+fn rx_scratch(b: &mut Side, msg: &[u8], scratch: usize) -> Result<Option<Ev>, TransactionError> {
+    let ev = b
+        .dev
+        .receive(0, msg, b.now * 1000, &mut rng(7))
+        .event()
+        .unwrap();
+    let mut buf = vec![0u8; scratch];
+    b.eng
+        .receive(&mut b.dev, &ev, b.now, &mut buf)
+        .map(|e| e.map(own))
+}
+
+#[test]
+fn scratch_of_the_data_length_and_header_of_h_bytes() {
+    // The scratch buffer needs the length of the Property Data, no more.
+    let (a, mut b) = pair(512);
+    let data = br#"{"v":1}"#;
+    let m = raw(
+        PeKind::SetInquiry,
+        a.muid(),
+        b.muid(),
+        1,
+        br#"{"resource":"X-Patch"}"#,
+        1,
+        1,
+        data,
+    );
+    assert_eq!(
+        rx_scratch(&mut b, &m, data.len() - 1),
+        Err(TransactionError::Size)
+    );
+    let e = rx_scratch(&mut b, &m, data.len()).unwrap();
+    assert!(matches!(e, Some(Ev::Msg { .. })), "{e:?}");
+    // REQ-PE-STAT-011: a header of H = 128 bytes is read; 129 bytes get 413.
+    for (len, refused) in [(128, false), (129, true)] {
+        let (a, mut b) = pair(512);
+        let fixed = r#"{"resource":"DeviceInfo","x":""}"#.len();
+        let h = format!(
+            r#"{{"resource":"DeviceInfo","x":"{}"}}"#,
+            "p".repeat(len - fixed)
+        );
+        assert_eq!(h.len(), len);
+        let m = raw(
+            PeKind::GetInquiry,
+            a.muid(),
+            b.muid(),
+            1,
+            h.as_bytes(),
+            1,
+            1,
+            b"",
+        );
+        let (e, out) = b.rx(&m);
+        if refused {
+            assert_eq!((e, status(&out[0])), (None, 413));
+        } else {
+            assert!(
+                matches!(
+                    e,
+                    Some(Ev::Msg {
+                        resource: Some(0),
+                        ..
+                    })
+                ),
+                "{e:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn json_media_type_on_a_resource_with_no_media_types() {
+    // REQ-PE-ENC-001, REQ-PE-STAT-012: with no "mediaTypes" a Resource takes
+    // "application/json" only.
+    for (media, ok) in [("application/json", true), ("text/plain", false)] {
+        let (a, mut b) = pair(512);
+        let h = format!(r#"{{"resource":"X-Patch","mediaType":"{media}"}}"#);
+        let m = raw(
+            PeKind::SetInquiry,
+            a.muid(),
+            b.muid(),
+            1,
+            h.as_bytes(),
+            1,
+            1,
+            b"{}",
+        );
+        let (e, out) = b.rx(&m);
+        if ok {
+            assert!(
+                matches!(
+                    e,
+                    Some(Ev::Msg {
+                        resource: Some(1),
+                        ..
+                    })
+                ),
+                "{e:?}"
+            );
+        } else {
+            assert_eq!((e, status(&out[0])), (None, 415));
+        }
+    }
+}
+
+#[test]
+fn request_rules_of_the_initiator() {
+    let (mut a, b) = pair(512);
+    let end_with_data = Header {
+        command: Some(Command::End),
+        subscribe_id: text("s1"),
+        ..get("X-Patch")
+    };
+    // REQ-PE-SUB-005: an "end" has no Property Data.
+    let r = a.eng.request(
+        &mut a.dev,
+        b.muid(),
+        TxnKind::Subscription,
+        &Outgoing::json(end_with_data, 3),
+        None,
+        a.now,
+    );
+    assert_eq!(
+        r.err(),
+        Some(TransactionError::Subscription(
+            SubscriptionError::NotPermitted
+        ))
+    );
+    // REQ-PE-FLOW-008: "fcOnSet" sets "flowControl" on a Set only.
+    let fc = ResourceCaps {
+        fc_on_set: true,
+        ..caps()
+    };
+    let info = a
+        .eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Get,
+            &Outgoing::json(get("X-Flow"), 0),
+            Some(&fc),
+            a.now,
+        )
+        .unwrap();
+    let m = a.send(b.muid(), info.request_id, Direction::Initiator, &[], true);
+    assert_eq!(header_text(&m), r#"{"resource":"X-Flow"}"#);
+    // A ResourceList request is not missing the ResourceList.
+    let (mut a, b) = pair(512);
+    let info = a
+        .eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Get,
+            &Outgoing::json(get("ResourceList"), 0),
+            None,
+            a.now,
+        )
+        .unwrap();
+    assert!(!info.resource_list_missing);
+}
+
+/// Discovery and the PE Capabilities between `a` and `b`, as `pair` does.
+fn link(a: &mut Side, b: &mut Side) {
+    let mut buf = [0u8; 600];
+    let n = a.dev.discovery(0, 0, &mut buf).unwrap();
+    let (_, r) = b.rx(&buf[..n]);
+    a.rx(&r[0]);
+    let n = a.dev.pe_capabilities_inquiry(b.muid(), &mut buf).unwrap();
+    let (_, r) = b.rx(&buf[..n]);
+    a.rx(&r[0]);
+    let n = b.dev.pe_capabilities_inquiry(a.muid(), &mut buf).unwrap();
+    let (_, r) = a.rx(&buf[..n]);
+    b.rx(&r[0]);
+}
+
+/// A gets the ResourceList of `b` (an empty list).
+fn list_from(a: &mut Side, b: &mut Side) {
+    let mut buf = [0u8; 600];
+    let (rid, n) = a
+        .eng
+        .request_resource_list(&mut a.dev, b.muid(), a.now, &mut buf)
+        .unwrap();
+    b.rx(&buf[..n]);
+    let ok = Header {
+        status: Some(Status::OK),
+        ..Default::default()
+    };
+    b.eng
+        .reply(&mut b.dev, a.muid(), rid, &Outgoing::json(ok, 2), b.now)
+        .unwrap();
+    let m = b.send(a.muid(), rid, Direction::Responder, b"[]", true);
+    a.rx(&m);
+    assert!(a.eng.has_resource_list(b.muid()));
+}
+
+/// An open Get of A to `b`; gives its Request ID.
+fn open_get(a: &mut Side, b: &Side) -> u8 {
+    a.eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Get,
+            &Outgoing::json(get("DeviceInfo"), 0),
+            None,
+            a.now,
+        )
+        .unwrap()
+        .request_id
+}
+
+#[test]
+fn invalidation_closes_the_transactions_of_its_muid_only() {
+    // REQ-PE-SUB-019, REQ-CI-INV-005: a peer MUID ends that peer's transactions and
+    // ResourceList state; a new MUID of this Device ends all of them.
+    let (mut a, mut b) = pair(512);
+    let mut c = Side::new(0x43, 0x0333_3333, 512, 1024);
+    link(&mut a, &mut c);
+    list_from(&mut a, &mut b);
+    list_from(&mut a, &mut c);
+    let rb = open_get(&mut a, &b);
+    open_get(&mut a, &c);
+    assert_eq!(a.eng.open(), 2);
+    let mut buf = [0u8; 64];
+    let n = c.dev.invalidate(&mut rng(9), &mut buf).unwrap();
+    let old_c = zmidi_ci::Header::parse(&buf[..n]).unwrap().0.source;
+    let (e, _) = a.rx(&buf[..n]);
+    assert_eq!(e, Some(Ev::Invalidated(0)));
+    assert_eq!(a.eng.open(), 1);
+    assert!(a.eng.has_resource_list(b.muid()));
+    assert!(!a.eng.has_resource_list(old_c));
+    // B's transaction is the one still open.
+    assert!(a
+        .eng
+        .abort(&mut a.dev, b.muid(), rb, Direction::Initiator)
+        .is_ok());
+    open_get(&mut a, &b);
+    // A new MUID of A (REQ-CI-INV-005): all transactions and ResourceList states end.
+    let n = zmidi_ci::InvalidateMuid { target: a.muid() }
+        .write(b.muid(), Framing::Bare, &mut buf)
+        .unwrap();
+    let (e, _) = a.rx(&buf[..n]);
+    assert_eq!(e, Some(Ev::Invalidated(0)));
+    assert_eq!(a.eng.open(), 0);
+    assert!(!a.eng.has_resource_list(b.muid()));
+}
+
+#[test]
+fn open_request_limit_is_for_each_peer() {
+    // REQ-PE-GEN-003: the Number of Simultaneous Requests of one peer.
+    let (mut a, b) = pair(512);
+    let mut c = Side::new(0x43, 0x0333_3333, 512, 1024);
+    link(&mut a, &mut c);
+    let mut host = Limited(&mut a.dev, 1);
+    let req = |eng: &mut Eng, host: &mut Limited<'_>, peer| {
+        eng.request(
+            host,
+            peer,
+            TxnKind::Get,
+            &Outgoing::json(get("DeviceInfo"), 0),
+            None,
+            1_000,
+        )
+        .map(|_| ())
+    };
+    assert_eq!(req(&mut a.eng, &mut host, b.muid()), Ok(()));
+    assert_eq!(
+        req(&mut a.eng, &mut host, b.muid()),
+        Err(TransactionError::PeerBusy)
+    );
+    assert_eq!(req(&mut a.eng, &mut host, c.muid()), Ok(()));
+}
+
+#[test]
+fn unsent_request_times_out_with_no_message() {
+    // Nothing was sent: the peer does not know the transaction, so no NAK goes out.
+    let (mut a, b) = pair(512);
+    let rid = open_get(&mut a, &b);
+    a.now += zmidi_ci_pe::transaction::TIMEOUT_MS;
+    assert_eq!(a.poll(), (None, vec![]));
+    a.now += 1;
+    let (e, out) = a.poll();
+    assert_eq!(
+        e,
+        Some(Ev::Closed(rid, Direction::Initiator, CloseReason::Timeout))
+    );
+    assert!(out.is_empty(), "{out:?}");
+}
+
+#[test]
+fn each_retransmit_waits_a_full_timeout() {
+    // REQ-PE-FLOW-013, -014: the Chunk goes again after each timeout with no ACK.
+    let (mut a, mut b) = pair(512);
+    let (rid, parts) = flow_set(&mut a, &mut b);
+    a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
+    for _ in 0..2 {
+        a.now += zmidi_ci_pe::transaction::TIMEOUT_MS;
+        assert_eq!(a.poll().0, None);
+        a.now += 1;
+        assert_eq!(a.poll().0, Some(Ev::Resend(rid, 1)));
+        a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
+    }
+}
+
+/// A host of `dev` with SysEx framing.
+struct SysExHost<'d>(&'d mut Dev);
+
+impl PeHost for SysExHost<'_> {
+    fn muid(&self) -> Muid {
+        PeHost::muid(&*self.0)
+    }
+    fn framing(&self) -> Framing {
+        Framing::SysEx
+    }
+    fn peer_max_sysex(&self, peer: Muid) -> u32 {
+        self.0.peer_max_sysex(peer)
+    }
+    fn peer_simultaneous(&self, peer: Muid) -> Option<u8> {
+        self.0.peer_simultaneous(peer)
+    }
+    fn allocate(&mut self, peer: Muid, kind: PeKind) -> Result<u8, zmidi_ci::DeviceError> {
+        self.0.allocate(peer, kind)
+    }
+    fn end(&mut self, peer: Muid, rid: u8, d: Direction) {
+        PeHost::end(self.0, peer, rid, d)
+    }
+    fn write_ack(
+        &self,
+        p: Muid,
+        a: &Ack<'_>,
+        o: &mut [u8],
+    ) -> Result<usize, zmidi_ci::DeviceError> {
+        self.0.write_ack(p, a, o)
+    }
+    fn write_nak(
+        &self,
+        p: Muid,
+        n: &Nak<'_>,
+        o: &mut [u8],
+    ) -> Result<usize, zmidi_ci::DeviceError> {
+        self.0.write_nak(p, n, o)
+    }
+}
+
+#[test]
+fn chunk_count_follows_the_room_of_the_framing() {
+    // A message of 512 bytes holds 512 - 22 bytes of header and data, 2 fewer with the
+    // SysEx framing bytes. Header {"resource":"X-Patch"} is 22 bytes.
+    let (mut a, b) = pair(512);
+    fn chunks<D: PeHost>(eng: &mut Eng, host: &mut D, peer: Muid, len: usize) -> u16 {
+        let msg = Outgoing::json(get("X-Patch"), len);
+        let rid = eng
+            .request(host, peer, TxnKind::Set, &msg, None, 1_000)
+            .unwrap()
+            .request_id;
+        let room = eng
+            .data_room(host, peer, rid, Direction::Initiator)
+            .unwrap();
+        let mut buf = [0u8; 600];
+        let part = vec![b'1'; room.min(len)];
+        let n = eng
+            .send(
+                host,
+                peer,
+                rid,
+                Direction::Initiator,
+                &part,
+                len <= room,
+                1_000,
+                &mut buf,
+            )
+            .unwrap();
+        eng.abort(host, peer, rid, Direction::Initiator).ok();
+        let mut out = [0u8; 600];
+        while eng.write_pending(host, 1_000, &mut out).is_some() {}
+        let (h, body) = zmidi_ci::Header::parse(&buf[..n]).unwrap();
+        PeChunk::read(&h, body).unwrap().total
+    }
+    let peer = b.muid();
+    let total = |a: &mut Side, sysex: bool, len: usize| {
+        if sysex {
+            chunks(&mut a.eng, &mut SysExHost(&mut a.dev), peer, len)
+        } else {
+            chunks(&mut a.eng, &mut a.dev, peer, len)
+        }
+    };
+    assert_eq!(total(&mut a, false, 468), 1);
+    assert_eq!(total(&mut a, false, 469), 2);
+    assert_eq!(total(&mut a, true, 466), 1);
+    assert_eq!(total(&mut a, true, 467), 2);
+    assert_eq!(total(&mut a, false, 468 + 2 * 490), 3);
+    assert_eq!(total(&mut a, false, 468 + 2 * 490 + 1), 4);
+}
+
+#[test]
+fn nak_finds_the_transaction_of_its_role_only() {
+    // REQ-PE-END-001, -003: NAK 0x20 "by responder" and NAK 0x12 of a Get reply are for the
+    // Initiator and the data sender: a transaction in the other role keeps going.
+    let (mut a, mut b) = pair(512);
+    let (rid, _, _) = get_request(&mut b, &mut a, "DeviceInfo");
+    assert_eq!(a.eng.open(), 1);
+    let m = nak_from(&b, a.muid(), 0x34, terminate(false), rid, 0);
+    assert_eq!(a.rx(&m), (None, vec![]));
+    assert_eq!(a.eng.open(), 1);
+    // A Get with flow control that A did not send yet: a NAK 0x12 for the Get data is for
+    // the Responder, so A's request stays.
+    let g = Header {
+        flow_control: true,
+        ..get("X-Flow")
+    };
+    let rid = a
+        .eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Get,
+            &Outgoing::json(g, 0),
+            None,
+            a.now,
+        )
+        .unwrap()
+        .request_id;
+    let m = nak_from(&b, a.muid(), 0x34, NakStatus::FlowControlResend, rid, 0);
+    assert_eq!(a.rx(&m), (None, vec![]));
+    assert_eq!(a.eng.open(), 2);
+}
+
+#[test]
+fn ack_counts_once_for_the_last_chunk() {
+    // REQ-PE-FLOW-002: the ACK of the last Chunk sent, once.
+    let (mut a, mut b) = pair(512);
+    let (rid, parts) = flow_set(&mut a, &mut b);
+    let c1 = a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
+    let (_, out) = b.rx(&c1);
+    assert_eq!(a.rx(&out[0]).0, Some(Ev::Ready(rid)));
+    assert_eq!(a.rx(&out[0]).0, None, "the same ACK again");
+    a.send(b.muid(), rid, Direction::Initiator, &parts[1], false);
+    let other = ack_from(&b, a.muid(), 0x36, AckStatus::FlowControlSendNext, rid, 3);
+    assert_eq!(a.rx(&other).0, None, "the ACK of another Chunk");
+}
+
+#[test]
+fn resend_nak_needs_flow_control() {
+    // REQ-PE-FLOW-010, -012: NAK 0x12 is for a transaction with flow control. With no flow
+    // control it is ignored.
+    let (mut a, b) = pair(512);
+    let data = vec![b'1'; 700];
+    let info = a
+        .eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Set,
+            &Outgoing::json(get("X-Patch"), data.len()),
+            None,
+            a.now,
+        )
+        .unwrap();
+    let rid = info.request_id;
+    let room = a
+        .eng
+        .data_room(&a.dev, b.muid(), rid, Direction::Initiator)
+        .unwrap();
+    a.send(b.muid(), rid, Direction::Initiator, &data[..room], false);
+    let m = nak_from(&b, a.muid(), 0x36, NakStatus::FlowControlResend, rid, 0);
+    assert_eq!(a.rx(&m), (None, vec![]));
+    assert_eq!(a.eng.open(), 1);
+}
+
+#[test]
+fn chunk_1_again_after_the_inquiry_is_ignored() {
+    // REQ-PE-FLOW-007: a Chunk of a transaction that is not receiving changes nothing.
+    let (mut a, mut b) = pair(512);
+    let info = a
+        .eng
+        .request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Get,
+            &Outgoing::json(get("DeviceInfo"), 0),
+            None,
+            a.now,
+        )
+        .unwrap();
+    let m = a.send(b.muid(), info.request_id, Direction::Initiator, &[], true);
+    assert!(matches!(b.rx(&m).0, Some(Ev::Msg { .. })));
+    assert_eq!(b.rx(&m), (None, vec![]));
+    assert_eq!(b.eng.open(), 1);
+}
+
+#[test]
+fn get_after_notify_waits_for_a_free_request_of_that_peer() {
+    // REQ-PE-SUB-014: the Get waits while the peer has its maximum of open requests from
+    // this Device; requests to other peers and requests of the peer do not count.
+    let (mut a, mut b) = pair(512);
+    let mut c = Side::new(0x43, 0x0333_3333, 512, 1024);
+    link(&mut a, &mut c);
+    let (_, bi) = subscribed(&mut a, &mut b);
+    // A request of B to A (A is its Responder) and a request of A to C.
+    get_request(&mut b, &mut a, "DeviceInfo");
+    open_get(&mut a, &c);
+    let rid_b = open_get(&mut a, &b);
+    let info = b
+        .eng
+        .update(
+            &mut b.dev,
+            bi,
+            Command::Notify,
+            EncodingName::Ascii,
+            Some(0),
+            b.now,
+        )
+        .unwrap();
+    let m = b.send(a.muid(), info.request_id, Direction::Initiator, &[], true);
+    let ev = a
+        .dev
+        .receive(0, &m, a.now * 1000, &mut rng(7))
+        .event()
+        .unwrap();
+    let mut s = [0u8; 600];
+    let e = a
+        .eng
+        .receive(&mut Limited(&mut a.dev, 1), &ev, a.now, &mut s)
+        .unwrap()
+        .map(own);
+    assert!(matches!(e, Some(Ev::Msg { .. })), "{e:?}");
+    let pending = |a: &mut Side| {
+        let mut out = Vec::new();
+        let mut buf = [0u8; 600];
+        let mut host = Limited(&mut a.dev, 1);
+        while let Some(r) = a.eng.write_pending(&mut host, a.now, &mut buf) {
+            out.push(sub_id2(&buf[..r.unwrap()]));
+        }
+        out
+    };
+    assert_eq!(pending(&mut a), [0x39], "the 200 reply; the Get waits");
+    a.eng
+        .abort(&mut a.dev, b.muid(), rid_b, Direction::Initiator)
+        .unwrap();
+    assert_eq!(
+        pending(&mut a).last(),
+        Some(&0x34),
+        "the Get after the abort"
+    );
+}
+
+#[test]
+fn engine_host_framing_is_the_device_framing() {
+    let cfg = DeviceConfig {
+        framing: Framing::SysEx,
+        ..config(0x41, 512)
+    };
+    let dev: Dev = CiDevice::new(cfg, &mut rng(1)).unwrap();
+    assert_eq!(PeHost::framing(&dev), Framing::SysEx);
+}
+
+#[test]
+fn subscription_commands_with_data_are_refused() {
+    // REQ-PE-SUB-005, -013: "start" and "notify" carry no Property Data.
+    let (mut a, b) = pair(512);
+    for (command, sub_id) in [(Command::Start, None), (Command::Notify, text("s1"))] {
+        let h = Header {
+            command: Some(command),
+            subscribe_id: sub_id,
+            ..get("X-Patch")
+        };
+        let r = a.eng.request(
+            &mut a.dev,
+            b.muid(),
+            TxnKind::Subscription,
+            &Outgoing::json(h, 3),
+            None,
+            a.now,
+        );
+        assert_eq!(
+            r.err(),
+            Some(TransactionError::Subscription(
+                SubscriptionError::NotPermitted
+            )),
+            "{command:?}"
+        );
+    }
+}
+
+#[test]
+fn resource_list_states_replace_the_oldest_when_full() {
+    // The engine keeps the ResourceList state of P peers; with P = 1 the next peer takes the
+    // place.
+    type Eng1 = PeEngine<'static, 4, 128, 4, 1>;
+    fn list1(e1: &mut Eng1, a: &mut Side, b: &mut Side) {
+        let mut buf = [0u8; 600];
+        let (rid, n) = e1
+            .request_resource_list(&mut a.dev, b.muid(), a.now, &mut buf)
+            .unwrap();
+        b.rx(&buf[..n]);
+        let ok = Header {
+            status: Some(Status::OK),
+            ..Default::default()
+        };
+        b.eng
+            .reply(&mut b.dev, a.muid(), rid, &Outgoing::json(ok, 2), b.now)
+            .unwrap();
+        let m = b.send(a.muid(), rid, Direction::Responder, b"[]", true);
+        let ev = a
+            .dev
+            .receive(0, &m, a.now * 1000, &mut rng(7))
+            .event()
+            .unwrap();
+        let mut s = [0u8; 600];
+        e1.receive(&mut a.dev, &ev, a.now, &mut s).unwrap();
+    }
+    let (mut a, mut b) = pair(512);
+    let mut c = Side::new(0x43, 0x0333_3333, 512, 1024);
+    link(&mut a, &mut c);
+    let mut e1 = Eng1::new(EngineConfig {
+        resources: resources(),
+        zlib_window: 0,
+    });
+    list1(&mut e1, &mut a, &mut b);
+    assert!(e1.has_resource_list(b.muid()));
+    list1(&mut e1, &mut a, &mut c);
+    assert!(e1.has_resource_list(c.muid()));
+    assert!(!e1.has_resource_list(b.muid()));
+}

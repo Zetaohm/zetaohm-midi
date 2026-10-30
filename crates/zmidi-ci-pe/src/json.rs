@@ -1733,9 +1733,274 @@ mod tests {
         proptest!(ProptestConfig::with_cases(30_000), |(m in proptest::collection::vec(0u8..0x80, 0..40))| {
             prop_assert_eq!(members(&m, true), members(&m, false));
         });
+        // JSON pieces instead of single bytes: escapes, hex digits of both cases, numbers,
+        // literals, names of 24 and 25 bytes, nesting and misplaced separators.
+        const PIECES: [&str; 44] = [
+            "{",
+            "}",
+            "[",
+            "]",
+            "\"",
+            ":",
+            ",",
+            " ",
+            "\\",
+            "\\b",
+            "\\f",
+            "\\n",
+            "\\r",
+            "\\t",
+            "\\/",
+            "\\\"",
+            "\\u004A",
+            "\\u004a",
+            "\\u00",
+            "\\u0G41",
+            "0",
+            "1",
+            "12",
+            "-",
+            ".",
+            "e",
+            "E",
+            "+",
+            "true",
+            "false",
+            "null",
+            "tru",
+            "a",
+            "\"a\"",
+            "\"b\":",
+            "{\"a\":",
+            "1.",
+            "1e",
+            "1e+5",
+            "-0.5",
+            "-.5",
+            "1E-2",
+            "\"abcdefghijklmnopqrstuvwx\":",
+            "\"abcdefghijklmnopqrstuvwxy\":",
+        ];
+        proptest!(ProptestConfig::with_cases(20_000), |(
+            ix in proptest::collection::vec(0usize..PIECES.len(), 0..16),
+            open in any::<bool>(),
+        )| {
+            let mut m = std::string::String::from(if open { "{" } else { "" });
+            for i in ix {
+                m.push_str(PIECES[i]);
+            }
+            prop_assert_eq!(members(m.as_bytes(), true), members(m.as_bytes(), false), "{}", m);
+        });
         assert_eq!(
             members(b"{ \"a\" : [1, {\"b\": null}], \"c\":\"\\u0041\" }", true),
             members(b"{ \"a\" : [1, {\"b\": null}], \"c\":\"\\u0041\" }", false)
         );
+    }
+
+    #[test]
+    fn walkers_on_vectors() {
+        // REQ-PE-JSON-006: each escape and hex digit case in a name; numbers and the empty
+        // object; the flat walker of M2-103 7.1.1.
+        let mut got = Vec::new();
+        for_each_member_slice(
+            br#"{"\b\f\n\r\t\u004A\u004a\u004F":1e+5,"a":-0.5}"#,
+            |n: Option<&[u8]>, raw: &[u8]| -> Result<(), JsonError> {
+                got.push((n.map(<[u8]>::to_vec), raw.to_vec()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            got,
+            [
+                (Some(b"\x08\x0c\n\r\tJJO".to_vec()), b"1e+5".to_vec()),
+                (Some(b"a".to_vec()), b"-0.5".to_vec()),
+            ]
+        );
+        let none = |_: Option<&[u8]>, _: &[u8]| -> Result<(), JsonError> { Ok(()) };
+        assert_eq!(for_each_member_slice(b"{}", none), Ok(()));
+        assert_eq!(for_each_member_slice(b" { } ", none), Ok(()));
+        for bad in [
+            &b"{\"a\":1.}"[..],
+            b"{\"a\":1e}",
+            b"{\"a\":-.5}",
+            b"{\"a\":01}",
+        ] {
+            assert_eq!(for_each_member_slice(bad, none), Err(JsonError::Syntax));
+        }
+        // The flat walker: values up to the next , or } with no check, no whitespace.
+        let mut got = Vec::new();
+        for_each_flat_member(
+            br#"{"a":12,"b":true,"c":"x"}"#,
+            |n: Option<&[u8]>, raw: &[u8]| -> Result<(), JsonError> {
+                got.push((n.map(<[u8]>::to_vec), raw.to_vec()));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            got,
+            [
+                (Some(b"a".to_vec()), b"12".to_vec()),
+                (Some(b"b".to_vec()), b"true".to_vec()),
+                (Some(b"c".to_vec()), b"\"x\"".to_vec()),
+            ]
+        );
+        assert_eq!(for_each_flat_member(b"{}", none), Ok(()));
+        for bad in [
+            &b"{\"a\": 1}"[..],
+            b"{\"a\":}",
+            b"{\"a\":{}}",
+            b"{\"a\":[1]}",
+            b"{}x",
+        ] {
+            assert_eq!(for_each_flat_member(bad, none), Err(JsonError::Syntax));
+        }
+        // A string with a character that is not ASCII is not a known name.
+        assert_eq!(Scan::decode_into("\"é\"".as_bytes(), &mut [0; 8]), None);
+        assert_eq!(Scan::decode_into(br#""\u00e9""#, &mut [0; 8]), None);
+        assert_eq!(Scan::decode_into(br#""\u0100""#, &mut [0; 8]), None);
+        let mut out = [0u8; 8];
+        assert_eq!(Scan::decode_into(br#""\u004A\u004f""#, &mut out), Some(2));
+        assert_eq!(&out[..2], b"JO");
+    }
+
+    #[test]
+    fn reader_rules_and_state() {
+        // A value needs its place: after [ or a comma, or after a colon in an object.
+        for bad in [
+            &b"[,1]"[..],
+            b"[1:2]",
+            b"[\"a\" \"b\"]",
+            b"[1 2]",
+            b"{\"a\"::1}",
+            b"[-.5]",
+            b"[1.]",
+            b"[1e]",
+            b"[1e+]",
+        ] {
+            let mut r = JsonReader::<16>::new();
+            assert!(
+                read(&mut r, &[bad]).is_err(),
+                "{:?}",
+                core::str::from_utf8(bad)
+            );
+        }
+        let mut r = JsonReader::<16>::new();
+        assert_eq!(
+            read(&mut r, &[b"[1e+5,1E-5,-0.5,0]"]).unwrap(),
+            [
+                T::Ba,
+                T::Num(s("1e+5")),
+                T::Num(s("1E-5")),
+                T::Num(s("-0.5")),
+                T::Num(s("0")),
+                T::Ea
+            ]
+        );
+        // A name of exactly S bytes is not cut.
+        let mut r = JsonReader::<4>::new();
+        let t = read(&mut r, &[br#"{"abcd":1,"abcde":2}"#]).unwrap();
+        assert_eq!(t[1], T::N(s("abcd"), false));
+        assert_eq!(t[3], T::N(s("abcd"), true));
+        // The depth.
+        let mut r = JsonReader::<16>::new();
+        {
+            let mut t = r.push(b"[[{");
+            while let Some(x) = t.next_token() {
+                x.unwrap();
+            }
+        }
+        assert_eq!(r.depth(), 3);
+        // After an error, each new piece with bytes gives the error once.
+        let mut r = JsonReader::<16>::new();
+        {
+            let mut t = r.push(b"[,");
+            assert_eq!(t.next_token().map(|x| x.is_ok()), Some(true));
+            assert_eq!(
+                t.next_token().map(|x| x.err()),
+                Some(Some(JsonError::Syntax))
+            );
+            assert!(t.next_token().is_none());
+        }
+        {
+            let mut t = r.push(b"1]");
+            assert_eq!(
+                t.next_token().map(|x| x.err()),
+                Some(Some(JsonError::Syntax))
+            );
+            assert!(t.next_token().is_none());
+        }
+        assert!(r.push(b"").next_token().is_none());
+    }
+
+    #[test]
+    fn writer_limits_and_state_rules() {
+        use JsonError::{InvalidName, InvalidValue};
+        // DEC-010 D-4: a string that fits the limit exactly is not cut.
+        let mut buf = [0u8; 64];
+        let mut w = JsonWriter::new(&mut buf);
+        assert!(w.is_empty());
+        assert_eq!(w.len(), 0);
+        assert_eq!(w.string_limited("abé", 8), Ok(false));
+        assert!(!w.is_empty());
+        assert_eq!(w.len(), 10);
+        let n = w.finish().unwrap();
+        assert_eq!(&buf[..n], b"\"ab\\u00e9\"");
+        // Nothing written is no JSON value; one top-level value only.
+        assert_eq!(JsonWriter::new(&mut buf).finish(), Err(InvalidValue));
+        let two = write(|w| {
+            w.number_u64(1)?;
+            w.number_u64(2)
+        });
+        assert_eq!(two, Err(InvalidValue));
+        // An array after an object at the same depth takes values with no name.
+        let nested = write(|w| {
+            w.begin_array()?;
+            w.begin_object()?;
+            w.end_object()?;
+            w.begin_array()?;
+            w.number_u64(1)?;
+            w.end_array()?;
+            w.end_array()
+        });
+        assert_eq!(nested.as_deref(), Ok("[{},[1]]"));
+        // Close rules.
+        assert_eq!(write(|w| w.end_object()), Err(InvalidValue));
+        assert_eq!(write(|w| w.end_array()), Err(InvalidValue));
+        let wrong = write(|w| {
+            w.begin_object()?;
+            w.end_array()
+        });
+        assert_eq!(wrong, Err(InvalidValue));
+        let wrong = write(|w| {
+            w.begin_array()?;
+            w.end_object()
+        });
+        assert_eq!(wrong, Err(InvalidValue));
+        let no_value = write(|w| {
+            w.begin_object()?;
+            w.key("a")?;
+            w.end_object()
+        });
+        assert_eq!(no_value, Err(InvalidValue));
+        // Name rules.
+        let in_array = write(|w| {
+            w.begin_array()?;
+            w.key("a")
+        });
+        assert_eq!(in_array, Err(InvalidName));
+        let two_names = write(|w| {
+            w.begin_object()?;
+            w.key("a")?;
+            w.key("b")
+        });
+        assert_eq!(two_names, Err(InvalidName));
+        // Numbers and raw text.
+        assert_eq!(write(|w| w.number_i64(0)).as_deref(), Ok("0"));
+        assert_eq!(write(|w| w.number_i64(-1)).as_deref(), Ok("-1"));
+        assert_eq!(write(|w| w.raw(b"")), Err(InvalidValue));
+        assert_eq!(write(|w| w.raw(&[b'1', 0x80])), Err(InvalidValue));
+        assert_eq!(write(|w| w.raw(b"\"\x7f\"")).as_deref(), Ok("\"\x7f\""));
     }
 }
