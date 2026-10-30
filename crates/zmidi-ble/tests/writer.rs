@@ -401,3 +401,94 @@ fn held_bytes_go_first_in_the_next_packet() {
     w.reset();
     assert_eq!(w.write_packet(&mut it, &mut buf), Ok(0));
 }
+
+#[test]
+fn units_that_fill_the_packet_exactly_stay_in_it() {
+    // A packet of 20 bytes (ATT_MTU 23): header, 4 messages of 4 bytes, then 3 bytes.
+    const PROGRAM: [u32; 1] = [0x20C0_0500];
+    let mut w = PacketWriter::default();
+    assert_eq!(w.packet_len(), 20);
+    let p = packets(
+        &mut w,
+        &[
+            (0, &NOTE_ON),
+            (1, &NOTE_OFF),
+            (2, &NOTE_ON),
+            (3, &NOTE_OFF),
+            (4, &PROGRAM),
+        ],
+    );
+    assert_eq!(p.len(), 1);
+    assert_eq!(p[0].len(), 20);
+    assert_eq!(&p[0][17..], &[ts(4), 0xC0, 0x05]);
+    // The last unit by running status: a timestamp byte and 2 data bytes.
+    let mut w = PacketWriter::default();
+    let p = packets(
+        &mut w,
+        &[
+            (0, &NOTE_ON),
+            (1, &NOTE_OFF),
+            (2, &NOTE_ON),
+            (3, &NOTE_OFF),
+            (4, &NOTE_OFF),
+        ],
+    );
+    assert_eq!(p.len(), 1);
+    assert_eq!(&p[0][13..], &[ts(3), 0x80, 0x3C, 0x00, ts(4), 0x3C, 0x00]);
+}
+
+#[test]
+fn reset_forgets_the_held_bytes_and_the_open_sysex_only() {
+    let mut w = PacketWriter::new(30).unwrap();
+    w.set_running_status(false);
+    // A SysEx longer than one packet: bytes are held for the next packet.
+    let start = [0x3016_0102u32, 0x0304_0506];
+    let cont = [0x3026_0708u32, 0x090A_0B0C];
+    let mut it = [
+        TimedUmp {
+            millis: 0,
+            words: &start,
+        },
+        TimedUmp {
+            millis: 0,
+            words: &cont,
+        },
+        TimedUmp {
+            millis: 0,
+            words: &cont,
+        },
+        TimedUmp {
+            millis: 0,
+            words: &cont,
+        },
+        TimedUmp {
+            millis: 0,
+            words: &cont,
+        },
+    ]
+    .into_iter()
+    .peekable();
+    let mut buf = [0u8; 27];
+    assert_eq!(w.write_packet(&mut it, &mut buf), Ok(27));
+    assert!(w.has_held());
+    w.reset();
+    assert!(!w.has_held());
+    // The ATT_MTU and the running status setting stay.
+    assert_eq!(w.packet_len(), 27);
+    assert_eq!(
+        packets(&mut w, &[(7, &NOTE_ON), (7, &NOTE_ON_2)]),
+        vec![vec![
+            hdr(7),
+            ts(7),
+            0x90,
+            0x3C,
+            0x64,
+            ts(7),
+            0x90,
+            0x40,
+            0x64
+        ]]
+    );
+    // No SysEx is open: Continue data is dropped.
+    assert!(packets(&mut w, &[(8, &cont)]).is_empty());
+}

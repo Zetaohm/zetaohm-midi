@@ -330,3 +330,15 @@ fn reset_forgets_an_open_sysex() {
         vec![Err(ReadError::NoRunningStatus); 2]
     );
 }
+
+#[test]
+fn a_timestamp_byte_0x80_cuts_a_message() {
+    // Time 0x100: the timestamp byte is 0x80. It cuts the Note On after one data byte.
+    let mut r = PacketReader::default();
+    let t = 0x0100;
+    assert_eq!(ts(t), 0x80);
+    assert_eq!(
+        read(&mut r, &[hdr(t), ts(t), 0x90, 0x3C, ts(t), 0xF8]),
+        vec![Err(ReadError::Incomplete), ok(t, &[0x10F8_0000])]
+    );
+}
