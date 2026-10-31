@@ -6,6 +6,15 @@ name: ci
 on:
   push:
   pull_request:
+  # Weekly: the fuzz job, and the other jobs against new toolchains and new security advisories.
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+# A new push stops the run of the previous push on the same branch.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   gates:
@@ -131,17 +140,20 @@ jobs:
         with:
           command: check
 
-  # Fuzz targets of every reader of external data (fuzz/): 60 s each with libFuzzer. A crash,
-  # a panic or a timeout fails the job; the input is in the artifact.
+  # Fuzz targets of every reader of external data (fuzz/): 10 min each with libFuzzer, on the
+  # weekly schedule and on a manual run only (a long run finds more than many short ones). A
+  # crash, a panic or a timeout fails the job; the input is in the artifact.
   fuzz:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@nightly
       - name: cargo-fuzz
         run: cargo install --locked cargo-fuzz
       - name: fuzz
-        run: sh scripts/fuzz.sh 60
+        run: sh scripts/fuzz.sh 600
       - name: crash inputs
         if: failure()
         uses: actions/upload-artifact@v4
