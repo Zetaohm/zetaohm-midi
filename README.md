@@ -53,7 +53,8 @@ browsers too.
 | Specification for MIDI over Bluetooth Low Energy (BLE-MIDI) | 1.0 | [`zmidi-ble`](crates/zmidi-ble) |
 
 Where a specification is ambiguous or contradicts itself, the doc comment of the rule gives the chosen
-behavior and the section of the specification. A public register of these ambiguities will follow.
+behavior and the section of the specification. [`docs/ambiguities.md`](docs/ambiguities.md) lists each
+ambiguity (the AMB ids in the code) with the reading that the code follows.
 
 ## Crates
 
