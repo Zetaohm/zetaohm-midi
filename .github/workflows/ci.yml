@@ -121,3 +121,30 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.89
       - name: rust 1.89
         run: cargo +1.89 check -p zmidi-ble-trouble --all-features
+
+  # Licenses, security advisories, doubled or wildcard dependencies and crate sources (deny.toml).
+  deny:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+
+  # Fuzz targets of every reader of external data (fuzz/): 60 s each with libFuzzer. A crash,
+  # a panic or a timeout fails the job; the input is in the artifact.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - name: cargo-fuzz
+        run: cargo install --locked cargo-fuzz
+      - name: fuzz
+        run: sh scripts/fuzz.sh 60
+      - name: crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts

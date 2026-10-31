@@ -1,0 +1,85 @@
+# Fuzz targets for every reader of external data (release plan: fuzz tests before 0.1.0).
+# A separate workspace, as the examples: run `cargo +nightly fuzz run <target>` here, or
+# `sh scripts/fuzz.sh` from the repository root. Needs `cargo install cargo-fuzz`.
+[package]
+name = "zmidi-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+license = "MIT"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+members = ["."]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+zmidi-ump = { path = "../crates/zmidi-ump" }
+zmidi-io = { path = "../crates/zmidi-io" }
+zmidi-ci = { path = "../crates/zmidi-ci" }
+zmidi-ci-pe = { path = "../crates/zmidi-ci-pe", features = ["zlib"] }
+zmidi-net = { path = "../crates/zmidi-net", features = ["auth"] }
+zmidi-ble = { path = "../crates/zmidi-ble" }
+zmidi-usb = { path = "../crates/zmidi-usb" }
+zmidi-file = { path = "../crates/zmidi-file" }
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ump"
+path = "fuzz_targets/ump.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "byte_stream"
+path = "fuzz_targets/byte_stream.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ci"
+path = "fuzz_targets/ci.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "net"
+path = "fuzz_targets/net.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ble"
+path = "fuzz_targets/ble.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "usb"
+path = "fuzz_targets/usb.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "clip"
+path = "fuzz_targets/clip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "smf"
+path = "fuzz_targets/smf.rs"
+test = false
+doc = false
+bench = false
