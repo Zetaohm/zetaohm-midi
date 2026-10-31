@@ -5,7 +5,7 @@
 //!   (bit 7 of the first byte in bit 6), then the low 7 bits of each byte. A last group of n
 //!   bytes becomes n + 1 bytes (REQ-PE-ENC-008). Encoder and decoder are streams with a state of
 //!   at most 8 bytes (DEC-007); a group can cross a Chunk boundary.
-//! - "zlib+Mcoded7" is in the `zlib` module (Cargo feature `zlib`, DEC-PE-001): this module gives
+//! - "zlib+Mcoded7" is in the `zlib` module (Cargo feature `zlib`, DEC-PE-004): this module gives
 //!   `Unsupported` for it.
 
 use crate::header::EncodingName;
@@ -27,7 +27,7 @@ pub enum EncodingError {
     #[error("invalid zlib data")]
     InvalidZlib,
     /// The encoding is not supported here: "zlib+Mcoded7" uses the `zlib` module (Cargo feature
-    /// `zlib`, DEC-PE-001).
+    /// `zlib`, DEC-PE-004).
     #[error("encoding not supported")]
     Unsupported,
 }

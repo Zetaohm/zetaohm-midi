@@ -233,15 +233,15 @@ Other sizes measured at the same time, no action proposed: `SendOrder` 96, `JrRe
 - Cause: the `miniz_oxide` decompressor keeps full Huffman fast-lookup tables. The window size is set by the sender.
 - Options:
   1. A smaller inflate core (a "tinf"-style decoder keeps about 1-2 KB of tables, and is slower).
-  2. Keep `miniz_oxide`, and document the RAM need of the `zlib` feature (it is off by default, DEC-PE-001).
-- Constraints: DEC-PE-001 chose `miniz_oxide`; option 1 needs a new decision and the zlib tests as the check.
+  2. Keep `miniz_oxide`, and document the RAM need of the `zlib` feature (it is off by default, DEC-PE-004).
+- Constraints: the first zlib decision chose `miniz_oxide`; option 1 needs a new decision and the zlib tests as the check.
 - Status (2026-10-18): option 2 done: the `zlib` module documents the RAM need (decoder 10596 bytes, window up to
   32768, about 21 KB of stack when a function makes and uses a decoder on its stack, because `new` moves it).
   `scripts/stack-check.py --features zlib` measures `probe_pe_zlib_decode`. Option 1 is open.
   `ZlibInflater::reset` and `ZlibMcoded7Decoder::reset` (2026-10-18) reuse a decoder in place: reset and decode
   584 bytes of stack. An `init` into a caller slot was measured and not kept: 21220 bytes, because
   `DecompressorOxide::new` builds its state by value.
-- Status (2026-10-18): option 1 done (DEC-PE-004, which supersedes DEC-PE-001): an own streaming inflater in the
+- Status (2026-10-18): option 1 done (DEC-PE-004, which replaces the first zlib decision): an own streaming inflater in the
   private module `inflate` (puff-style canonical Huffman decoding, no alloc, no `unsafe`, no dependency).
   `ZlibInflater` 10516 -> 1072, `ZlibMcoded7Decoder` 10596 -> 1152 bytes; a decoder made and used on the stack
   2768 bytes of stack (was 21584); the probe code about 4.3 KB smaller. Differential tests against miniz_oxide
