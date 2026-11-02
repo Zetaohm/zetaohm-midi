@@ -29,7 +29,9 @@ thiserror = { version = "2", default-features = false }
 
 [features]
 # DEC-002: no alloc.
-default = []
+default = ["midi2-protocol"]
+# Forwards the zmidi-ble feature (DEC-022): the MIDI 2.0 Protocol in the codec. Off: a MIDI 1.0-only build.
+midi2-protocol = ["zmidi-ble/midi2-protocol"]
 
 [dev-dependencies]
 # The host tests use the attribute table only; these give the embassy-time driver and the

@@ -77,7 +77,7 @@ fn main() -> ! {
         inject::run(&w);
         #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words"))]
         lean::run(&w);
-        #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
+        #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1", feature = "ble_tx_midi1", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
         transport::run(&w);
         black_box(&w);
     }
@@ -932,17 +932,17 @@ mod sz {
 }
 
 // ---------------------------------------------------------------- BLE-MIDI, Network MIDI 2.0, files
-#[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
+#[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1", feature = "ble_tx_midi1", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
 mod transport {
     use super::*;
 
     #[inline(never)]
     pub fn run(w: &[u32; 64]) {
-        #[cfg(feature = "ble_rx")]
+        #[cfg(any(feature = "ble_rx", feature = "ble_rx_midi1"))]
         ble_rx();
-        #[cfg(feature = "ble_rx_words")]
+        #[cfg(any(feature = "ble_rx_words", feature = "ble_rx_words_midi1"))]
         ble_rx_words();
-        #[cfg(feature = "ble_tx")]
+        #[cfg(any(feature = "ble_tx", feature = "ble_tx_midi1"))]
         ble_tx(w);
         #[cfg(feature = "net_client")]
         net_client(w);
@@ -957,22 +957,24 @@ mod transport {
         black_box(w);
     }
 
-    #[cfg(any(feature = "ble_rx", feature = "ble_rx_words"))]
-    const PROTOCOL: zmidi_ble::zmidi_ump::StreamProtocol = if cfg!(feature = "ble_midi1") {
-        zmidi_ble::zmidi_ump::StreamProtocol::Midi1
-    } else {
-        zmidi_ble::zmidi_ump::StreamProtocol::Midi2
-    };
+    /// The reader of the BLE jobs: MIDI 2.0 Protocol output, or a MIDI 1.0-only reader (`ble_midi1`).
+    #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1"))]
+    fn reader() -> zmidi_ble::PacketReader {
+        #[cfg(not(feature = "ble_midi1"))]
+        return zmidi_ble::PacketReader::new(zmidi_ble::zmidi_ump::Group::default(), zmidi_ble::zmidi_ump::StreamProtocol::Midi2);
+        #[cfg(feature = "ble_midi1")]
+        return zmidi_ble::PacketReader::midi1(zmidi_ble::zmidi_ump::Group::default());
+    }
 
-    #[cfg(feature = "ble_rx")]
+    #[cfg(any(feature = "ble_rx", feature = "ble_rx_midi1"))]
     fn ble_rx() {
-        use zmidi_ble::zmidi_ump::{Group, Ump};
+        use zmidi_ble::zmidi_ump::Ump;
         static mut R: core::mem::MaybeUninit<zmidi_ble::PacketReader> = core::mem::MaybeUninit::uninit();
         static mut INIT: bool = false;
         // SAFETY: one thread, no interrupt.
         let r = unsafe {
             if !INIT {
-                (*(&raw mut R)).write(zmidi_ble::PacketReader::new(Group::default(), PROTOCOL));
+                (*(&raw mut R)).write(reader());
                 INIT = true;
             }
             (*(&raw mut R)).assume_init_mut()
@@ -995,15 +997,14 @@ mod transport {
         });
     }
 
-    #[cfg(feature = "ble_rx_words")]
+    #[cfg(any(feature = "ble_rx_words", feature = "ble_rx_words_midi1"))]
     fn ble_rx_words() {
-        use zmidi_ble::zmidi_ump::Group;
         static mut R: core::mem::MaybeUninit<zmidi_ble::PacketReader> = core::mem::MaybeUninit::uninit();
         static mut INIT: bool = false;
         // SAFETY: one thread, no interrupt.
         let r = unsafe {
             if !INIT {
-                (*(&raw mut R)).write(zmidi_ble::PacketReader::new(Group::default(), PROTOCOL));
+                (*(&raw mut R)).write(reader());
                 INIT = true;
             }
             (*(&raw mut R)).assume_init_mut()
@@ -1019,7 +1020,7 @@ mod transport {
         });
     }
 
-    #[cfg(feature = "ble_tx")]
+    #[cfg(any(feature = "ble_tx", feature = "ble_tx_midi1"))]
     fn ble_tx(w: &[u32; 64]) {
         static mut W: core::mem::MaybeUninit<zmidi_ble::PacketWriter> = core::mem::MaybeUninit::uninit();
         static mut INIT: bool = false;

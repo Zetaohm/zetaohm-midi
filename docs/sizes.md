@@ -32,6 +32,8 @@ the goal is 1.0x for the smallest build of each job (OPT-052).
 | `din_in_feed` | DIN bytes to UMP, callback form (`BytesToUmpCore::feed`) | 676 | 852 | 0.8x | 24 | 52 | 0.5x | 48 | - | midi2 C99 midi2_conv |
 | `din_out_each` | UMP to DIN bytes, callback form (`UmpToBytes::write_each`) | 936 | 1,160 | 0.8x | 4 | 104 | 0.0x | 72 | - | AM_MIDI2.0Lib umpToBytestream |
 | `din_out` | UMP to DIN bytes, value form (`UmpToBytes::write`) | 1,276 | 1,160 | 1.1x | 4 | 104 | 0.0x | 40 | - | AM_MIDI2.0Lib umpToBytestream |
+| `din_out_each_midi1` | din_out_each in a MIDI 1.0-only build (no MIDI 2.0 family, DEC-022) | 352 | 1,160 | 0.3x | 4 | 104 | 0.0x | 40 | - | AM_MIDI2.0Lib umpToBytestream |
+| `din_out_midi1` | din_out in a MIDI 1.0-only build (no MIDI 2.0 family, DEC-022) | 576 | 1,160 | 0.5x | 4 | 104 | 0.0x | 40 | - | AM_MIDI2.0Lib umpToBytestream |
 | `usb_class` | USB MIDI 2.0 class on usb-device, run-time `FunctionConfig` | 17,176 | 3,556 | 4.8x | 644 | 666 | 1.0x | 2,424 | - | tusb_ump class driver (object) |
 | `usb_class_fixed` | USB MIDI 2.0 class on usb-device, fixed function from the build script | 8,052 | 3,556 | 2.3x | 464 | 666 | 0.7x | 1,520 | - | tusb_ump class driver (object) |
 | `usb_class_lean` | usb_class_fixed with the feature alt0 off: empty Alternate Setting 0, no USB-MIDI 1.0 data path | 4,872 | 3,556 | 1.4x | 364 | 666 | 0.5x | 1,224 | - | tusb_ump class driver (object), with Alt 0 |
@@ -52,6 +54,9 @@ the goal is 1.0x for the smallest build of each job (OPT-052).
 | `ble_rx` | BLE-MIDI packet reader (`PacketReader::read`, typed `Ump`, MIDI 2.0 Protocol output) | 9,128 | - | - | 168 | - | - | 96 | - | not measured yet |
 | `ble_rx_words` | BLE-MIDI packet reader, word form (`PacketReader::read_words`, DEC-BLE-002) | 3,508 | - | - | 168 | - | - | 88 | - | not measured yet |
 | `ble_tx` | BLE-MIDI packet writer (`PacketWriter::write_packet`, ATT MTU 23) | 2,916 | - | - | 60 | - | - | 216 | - | not measured yet |
+| `ble_rx_midi1` | ble_rx in a MIDI 1.0-only build (zmidi-ble with no feature, `PacketReader::midi1`, DEC-022) | 3,912 | - | - | 32 | - | - | 96 | - | not measured yet |
+| `ble_rx_words_midi1` | ble_rx_words in a MIDI 1.0-only build (DEC-022) | 1,724 | - | - | 32 | - | - | 88 | - | not measured yet |
+| `ble_tx_midi1` | ble_tx in a MIDI 1.0-only build (DEC-022) | 2,172 | - | - | 60 | - | - | 216 | - | not measured yet |
 | `net_client` | Network MIDI 2.0 Client, one session, no authentication: connect, receive, poll, send | 29,376 | - | - | 4,328 | - | - | 2,584 | - | not measured yet |
 | `net_host` | Network MIDI 2.0 Host, one session, no authentication: receive, poll, send | 27,872 | - | - | 4,328 | - | - | 2,392 | - | not measured yet |
 | `smf_read` | Standard MIDI File reader, all tracks (`SmfReader`, `TrackReader`) | 1,192 | - | - | 0 | - | - | 120 | - | not measured yet |

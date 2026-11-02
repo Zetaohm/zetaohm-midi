@@ -492,3 +492,30 @@ fn reset_forgets_the_held_bytes_and_the_open_sysex_only() {
     // No SysEx is open: Continue data is dropped.
     assert!(packets(&mut w, &[(8, &cont)]).is_empty());
 }
+
+#[test]
+fn midi2_protocol_feature_gates_the_midi2_path() {
+    // REQ-BLE-FEAT-001 (DEC-022): with the zmidi-ump family channel-voice2 off (a MIDI 1.0-only build
+    // with no feature midi2-protocol), the writer gives no byte for a MIDI 2.0 Channel Voice UMP; with
+    // it on, the bytes of its MIDI 1.0 translation (M2-104 D.2).
+    let mut w = zmidi_ble::PacketWriter::new(23).unwrap();
+    let note_on = [0x4090_3C00u32, 0xFFFF_0000];
+    let mut umps = [zmidi_ble::TimedUmp {
+        millis: 1,
+        words: &note_on,
+    }]
+    .into_iter()
+    .peekable();
+    let mut out = [0u8; 20];
+    let n = w.write_packet(&mut umps, &mut out).unwrap();
+    if zmidi_ble::zmidi_ump::MessageType::Midi2ChannelVoice.is_decoded() {
+        assert_eq!(&out[2..n], &[0x90, 0x3C, 0x7F], "{:02x?}", &out[..n]);
+    } else {
+        assert_eq!(n, 0, "{:02x?}", &out[..n]);
+    }
+    let manifest = include_str!("../Cargo.toml");
+    assert!(
+        manifest.contains("default = [\"midi2-protocol\"]"),
+        "{manifest}"
+    );
+}

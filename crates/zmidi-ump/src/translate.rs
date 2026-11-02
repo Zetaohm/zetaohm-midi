@@ -148,7 +148,19 @@ impl Midi1Words {
 /// (another Message Type, opcode 0x7, or fewer than 2 words): the caller passes such a packet on
 /// unchanged, as [`to_midi1`] does (D.2.6). A message with no MIDI 1.0 equivalent gives an empty
 /// list (D.2.8). Reserved bits are not used (2.1.3). Never panics.
+///
+/// Without the feature `channel-voice2` the crate does not decode MIDI 2.0 Channel Voice packets
+/// (DEC-017), so it gives `None` for every packet and links no translation code (DEC-022).
 pub fn midi2_to_midi1(words: &[u32]) -> Option<Midi1Words> {
+    if !cfg!(feature = "channel-voice2") {
+        return None;
+    }
+    translate_words(words)
+}
+
+/// The word translation of [`midi2_to_midi1`] in every build; [`to_midi1`] uses it for a typed MIDI
+/// 2.0 Channel Voice message, which the caller can make also without the feature `channel-voice2`.
+fn translate_words(words: &[u32]) -> Option<Midi1Words> {
     let (&w0, &w1) = (words.first()?, words.get(1)?);
     let opcode = (w0 >> 20) & 0xF;
     if w0 >> 28 != 0x4 || opcode == 0x7 {
@@ -225,7 +237,7 @@ pub fn to_midi1(ump: &Ump) -> Translated {
         return Translated::one(*ump);
     };
     let mut out = Translated::EMPTY;
-    for &w in midi2_to_midi1(&m.into_words())
+    for &w in translate_words(&m.into_words())
         .unwrap_or_default()
         .as_slice()
     {
@@ -1681,6 +1693,16 @@ mod tests {
                 (_, r) => prop_assert_eq!(r, None),
             }
         });
+    }
+
+    #[test]
+    fn midi2_to_midi1_follows_the_channel_voice2_family() {
+        // REQ-XLATE-027 (DEC-022): with the family off, no packet is translated.
+        let note_on = [0x4090_3C00, 0xFFFF_0000];
+        assert_eq!(
+            midi2_to_midi1(&note_on).is_some(),
+            cfg!(feature = "channel-voice2")
+        );
     }
 
     #[test]

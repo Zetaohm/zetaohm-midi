@@ -51,7 +51,7 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
 | Feature | Default | Description |
 |---|---|---|
 | `full` | yes | Same as `midi2-protocol`. |
-| `midi2-protocol` | via `full` | MIDI 2.0 Protocol output in `BytesToUmp` (MIDI 1.0 → 2.0 translation). |
+| `midi2-protocol` | via `full` | MIDI 2.0 Protocol output in `BytesToUmp` (MIDI 1.0 → 2.0 translation), and the zmidi-ump family `channel-voice2`, so that `UmpToBytes` translates a MIDI 2.0 Channel Voice UMP to bytes. Without it and without that family, a MIDI 1.0-only build: `UmpToBytes` skips a MIDI 2.0 UMP (the DIN writer is 576 B of flash instead of 1,276 B on Thumb-2). |
 
 ## License
 

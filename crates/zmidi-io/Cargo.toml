@@ -28,7 +28,9 @@ default = ["full"]
 full = ["midi2-protocol"]
 # BytesToUmp::new with StreamProtocol::Midi2: MIDI 2.0 Protocol output through the translator
 # (M2-104 D.3). Off: BytesToUmp holds no translator (BytesToUmp::midi1 only).
-midi2-protocol = []
+# Also the MIDI 2.0 Channel Voice family of zmidi-ump: `UmpToBytes` translates a MIDI 2.0 Channel Voice
+# UMP to MIDI 1.0 bytes only with it (DEC-022); without it, such a UMP gives no byte.
+midi2-protocol = ["zmidi-ump/channel-voice2"]
 
 [dev-dependencies]
 proptest = "1"

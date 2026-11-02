@@ -93,6 +93,9 @@ down = ["ump_full"]
 up = ["ump_full"]
 bytes1 = ["io"]
 bytes_out = ["io"]
+# With bytes_out or bytes_out_each: the MIDI 2.0 Channel Voice family, so UmpToBytes translates a
+# MIDI 2.0 UMP to bytes (DEC-022: without it, a MIDI 1.0-only build).
+midi2_out = ["zmidi-ump/channel-voice2"]
 rx_assign = ["ump_full"]
 down_words = ["ump_full"]
 bytes_core = ["io"]
@@ -102,12 +105,15 @@ up_lean = ["ump_full"]
 up_words = ["ump_full"]
 bytes_out_each = ["io"]
 # zmidi-ble: BLE-MIDI packet reader (MIDI 2.0 Protocol output) and writer (ATT MTU 23).
-ble_rx = ["dep:zmidi-ble"]
+ble_rx = ["dep:zmidi-ble", "zmidi-ble/midi2-protocol"]
 # ble_rx with the word form PacketReader::read_words (DEC-BLE-002).
-ble_rx_words = ["dep:zmidi-ble"]
-ble_tx = ["dep:zmidi-ble"]
-# ble_rx and ble_rx_words with MIDI 1.0 Protocol output (StreamProtocol::Midi1).
+ble_rx_words = ["dep:zmidi-ble", "zmidi-ble/midi2-protocol"]
+ble_tx = ["dep:zmidi-ble", "zmidi-ble/midi2-protocol"]
+# The MIDI 1.0-only BLE jobs (DEC-022): zmidi-ble with no feature, the reader from PacketReader::midi1.
 ble_midi1 = []
+ble_rx_midi1 = ["dep:zmidi-ble", "ble_midi1"]
+ble_rx_words_midi1 = ["dep:zmidi-ble", "ble_midi1"]
+ble_tx_midi1 = ["dep:zmidi-ble", "ble_midi1"]
 # zmidi-net: a Network MIDI 2.0 Client with one session, and a Host with one session (no auth).
 net_client = ["dep:zmidi-net"]
 net_host = ["dep:zmidi-net"]

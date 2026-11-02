@@ -61,7 +61,7 @@ fn main() -> Result<(), zmidi_ump::UmpError> {
 | `utility` | via `full` | Message Type 0x0: NOOP, JR Clock and Timestamp, Delta Clockstamps. |
 | `system-common` | via `full` | Message Type 0x1: System Common and System Real Time. |
 | `channel-voice1` | via `full` | Message Type 0x2: MIDI 1.0 Channel Voice. |
-| `channel-voice2` | via `full` | Message Type 0x4: MIDI 2.0 Channel Voice. |
+| `channel-voice2` | via `full` | Message Type 0x4: MIDI 2.0 Channel Voice, and its word translation to MIDI 1.0 (`midi2_to_midi1` gives `None` without it). |
 | `sysex7` | via `full` | Message Type 0x3: System Exclusive (7-bit). |
 | `data128` | via `full` | Message Type 0x5: System Exclusive 8 and Mixed Data Set. |
 | `flex-data` | via `full` | Message Type 0xD: Flex Data. |

@@ -35,7 +35,7 @@ ci-pe = ["dep:zmidi-ci-pe", "zmidi-ci-pe/initiator"]
 file = ["dep:zmidi-file", "zmidi-file/full"]
 net = ["dep:zmidi-net"]
 usb = ["dep:zmidi-usb", "zmidi-usb/alt0"]
-ble = ["dep:zmidi-ble"]
+ble = ["dep:zmidi-ble", "zmidi-ble/midi2-protocol"]
 # "zlib+Mcoded7" Property Data (zmidi-ci-pe, DEC-PE-004); off by default.
 zlib = ["ci-pe", "zmidi-ci-pe/zlib"]
 # Network MIDI 2.0 authentication (zmidi-net, DEC-013); off by default.

@@ -28,7 +28,8 @@ A complete BLE-MIDI peripheral on an ESP32-S3 is in
 
 ## Cargo features
 
-None.
+- `midi2-protocol` (on by default): forwards the zmidi-ble feature of the same name. Without it, a MIDI 1.0-only
+  build.
 
 ## License
 

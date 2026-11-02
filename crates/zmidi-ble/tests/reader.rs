@@ -1,7 +1,9 @@
 //! Packet reader tests: the figures of BLE-MIDI v1.0 sections 7 and 8 and the readings of
 //! DEC-BLE-001.
 
-use zmidi_ble::zmidi_ump::{Group, StreamProtocol};
+use zmidi_ble::zmidi_ump::Group;
+#[cfg(feature = "midi2-protocol")]
+use zmidi_ble::zmidi_ump::StreamProtocol;
 use zmidi_ble::{PacketReader, ReadError};
 
 /// The timestamp and words of each UMP, or the error.
@@ -307,12 +309,21 @@ fn malformed_parts_are_dropped_and_reported() {
 
 #[test]
 fn group_and_protocol_of_the_caller() {
-    let mut r = PacketReader::new(Group::new(3).unwrap(), StreamProtocol::Midi2);
-    let got = read(&mut r, &[hdr(1), ts(1), 0x90, 0x3C, 0x64]);
-    let Ok((t, w)) = &got[0] else { panic!() };
-    assert_eq!(*t, 1);
-    assert_eq!(w[0] >> 24, 0x43, "Message Type 0x4 on Group 3");
-    let mut r = PacketReader::new(Group::new(3).unwrap(), StreamProtocol::Midi1);
+    #[cfg(feature = "midi2-protocol")]
+    {
+        let mut r = PacketReader::new(Group::new(3).unwrap(), StreamProtocol::Midi2);
+        let got = read(&mut r, &[hdr(1), ts(1), 0x90, 0x3C, 0x64]);
+        let Ok((t, w)) = &got[0] else { panic!() };
+        assert_eq!(*t, 1);
+        assert_eq!(w[0] >> 24, 0x43, "Message Type 0x4 on Group 3");
+        let mut r = PacketReader::new(Group::new(3).unwrap(), StreamProtocol::Midi1);
+        assert_eq!(
+            read(&mut r, &[hdr(1), ts(1), 0x90, 0x3C, 0x64]),
+            vec![ok(1, &[0x2390_3C64])]
+        );
+    }
+    // The MIDI 1.0 reader of every build (DEC-022).
+    let mut r = PacketReader::midi1(Group::new(3).unwrap());
     assert_eq!(
         read(&mut r, &[hdr(1), ts(1), 0x90, 0x3C, 0x64]),
         vec![ok(1, &[0x2390_3C64])]

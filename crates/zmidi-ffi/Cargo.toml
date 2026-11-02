@@ -33,11 +33,11 @@ zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features =
 # DEC-002, DEC-019: the C ABI needs no alloc. The parts of the C ABI are opt-in features.
 default = []
 # MIDI 1.0 byte stream to UMP and back (module Io, zmidi-io).
-io = ["dep:zmidi-io", "dep:zmidi-ump"]
+io = ["dep:zmidi-io", "dep:zmidi-ump", "zmidi-ump/channel-voice2"]
 # UMP word count, parse, MIDI 2.0 Channel Voice writers, translation and scaling (module Ump).
 ump = ["dep:zmidi-ump", "zmidi-ump/full"]
 # BLE-MIDI packets to UMP and back (module Ble, zmidi-ble).
-ble = ["dep:zmidi-ble"]
+ble = ["dep:zmidi-ble", "zmidi-ble/midi2-protocol"]
 # MIDI Clip File reader and writer (module File, zmidi-file).
 file = ["dep:zmidi-file", "zmidi-file/full", "dep:zmidi-ump"]
 # MIDI-CI (module Ci, zmidi-ci, zmidi-ci-pe): all of the Device, as before the split (OPT-023,

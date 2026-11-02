@@ -46,8 +46,11 @@ JOBS = {
     "din_in": ("bytes1", "base", 1072, 32, 852, 52, "midi2 C99 midi2_conv"),
     "din_in_core": ("bytes_core", "base", 2416, 32, 852, 52, "midi2 C99 midi2_conv"),
     "din_in_feed": ("bytes_feed", "base", 704, 32, 852, 52, "midi2 C99 midi2_conv"),
-    "din_out_each": ("bytes_out_each", "base", 1152, 16, 1160, 104, "AM_MIDI2.0Lib umpToBytestream"),
-    "din_out": ("bytes_out", "base", 1424, 16, 1160, 104, "AM_MIDI2.0Lib umpToBytestream"),
+    "din_out_each": ("bytes_out_each,midi2_out", "base", 1152, 16, 1160, 104, "AM_MIDI2.0Lib umpToBytestream"),
+    "din_out": ("bytes_out,midi2_out", "base", 1424, 16, 1160, 104, "AM_MIDI2.0Lib umpToBytestream"),
+    # MIDI 1.0-only builds (DEC-022): zmidi-ump with no MIDI 2.0 family, so a MIDI 2.0 UMP gives no byte.
+    "din_out_each_midi1": ("bytes_out_each", "base", 368, 16, 1160, 104, "AM_MIDI2.0Lib umpToBytestream"),
+    "din_out_midi1": ("bytes_out", "base", 592, 16, 1160, 104, "AM_MIDI2.0Lib umpToBytestream"),
     "usb_class": ("usb2", "usb_core", 17488, 672, 3556, 666, "tusb_ump class driver (object)"),
     # ci_device: Discovery and management, no category feature (DEC-017), with a 64 B reply buffer
     # (tests/reply_len.rs of zmidi-ci); pe_engine includes the PE message framing of zmidi-ci (feature
@@ -82,6 +85,10 @@ JOBS = {
     "ble_rx": ("ble_rx", "base", 9328, 192, None, None, "not measured yet"),
     "ble_rx_words": ("ble_rx_words", "base", 3584, 192, None, None, "not measured yet"),
     "ble_tx": ("ble_tx", "base", 2976, 80, None, None, "not measured yet"),
+    # MIDI 1.0-only BLE builds (DEC-022): zmidi-ble with no feature, PacketReader::midi1.
+    "ble_rx_midi1": ("ble_rx_midi1", "base", 4000, 48, None, None, "not measured yet"),
+    "ble_rx_words_midi1": ("ble_rx_words_midi1", "base", 1760, 48, None, None, "not measured yet"),
+    "ble_tx_midi1": ("ble_tx_midi1", "base", 2224, 80, None, None, "not measured yet"),
     "net_client": ("net_client", "base", 29856, 4448, None, None, "not measured yet"),
     "net_host": ("net_host", "base", 28400, 4448, None, None, "not measured yet"),
     "smf_read": ("smf_read", "base", 1216, 16, None, None, "not measured yet"),
@@ -104,6 +111,8 @@ WHAT = {
     "din_in_core": "DIN bytes to UMP, `BytesToUmpCore::push_with`, each packet read as words",
     "din_in_feed": "DIN bytes to UMP, callback form (`BytesToUmpCore::feed`)",
     "din_out_each": "UMP to DIN bytes, callback form (`UmpToBytes::write_each`)",
+    "din_out_each_midi1": "din_out_each in a MIDI 1.0-only build (no MIDI 2.0 family, DEC-022)",
+    "din_out_midi1": "din_out in a MIDI 1.0-only build (no MIDI 2.0 family, DEC-022)",
     "din_out": "UMP to DIN bytes, value form (`UmpToBytes::write`)",
     "usb_class": "USB MIDI 2.0 class on usb-device, run-time `FunctionConfig`",
     "usb_class_fixed": "USB MIDI 2.0 class on usb-device, fixed function from the build script",
@@ -125,6 +134,9 @@ WHAT = {
     "ble_rx": "BLE-MIDI packet reader (`PacketReader::read`, typed `Ump`, MIDI 2.0 Protocol output)",
     "ble_rx_words": "BLE-MIDI packet reader, word form (`PacketReader::read_words`, DEC-BLE-002)",
     "ble_tx": "BLE-MIDI packet writer (`PacketWriter::write_packet`, ATT MTU 23)",
+    "ble_rx_midi1": "ble_rx in a MIDI 1.0-only build (zmidi-ble with no feature, `PacketReader::midi1`, DEC-022)",
+    "ble_rx_words_midi1": "ble_rx_words in a MIDI 1.0-only build (DEC-022)",
+    "ble_tx_midi1": "ble_tx in a MIDI 1.0-only build (DEC-022)",
     "net_client": "Network MIDI 2.0 Client, one session, no authentication: connect, receive, poll, send",
     "net_host": "Network MIDI 2.0 Host, one session, no authentication: receive, poll, send",
     "smf_read": "Standard MIDI File reader, all tracks (`SmfReader`, `TrackReader`)",

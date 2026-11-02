@@ -1,7 +1,9 @@
 //! Writer to reader round trip, and "never panics" for any input (REQ-BLE-GEN-001).
 
 use proptest::prelude::*;
-use zmidi_ble::zmidi_ump::{Group, StreamProtocol, Ump};
+#[cfg(feature = "midi2-protocol")]
+use zmidi_ble::zmidi_ump::StreamProtocol;
+use zmidi_ble::zmidi_ump::{Group, Ump};
 use zmidi_ble::{PacketReader, PacketWriter, Received, TimedUmp};
 use zmidi_io::BytesToUmp;
 
@@ -100,10 +102,29 @@ fn prop_writer_packets_read_back_as_the_same_umps_and_times() {
     });
 }
 
+/// A reader on Group 0: MIDI 2.0 Protocol output when `midi2` is true and the build has the feature
+/// `midi2-protocol`, else MIDI 1.0 Protocol output.
+fn reader(midi2: bool) -> PacketReader {
+    #[cfg(feature = "midi2-protocol")]
+    {
+        let protocol = if midi2 {
+            StreamProtocol::Midi2
+        } else {
+            StreamProtocol::Midi1
+        };
+        PacketReader::new(Group::default(), protocol)
+    }
+    #[cfg(not(feature = "midi2-protocol"))]
+    {
+        let _ = midi2;
+        PacketReader::midi1(Group::default())
+    }
+}
+
 #[test]
 fn prop_reader_never_panics() {
     proptest!(|(packets in prop::collection::vec(prop::collection::vec(any::<u8>(), 0..64), 0..8))| {
-        let mut r = PacketReader::new(Group::default(), StreamProtocol::Midi2);
+        let mut r = reader(true);
         for p in &packets {
             r.read(p, |_| {});
         }
@@ -199,9 +220,8 @@ fn prop_read_words_matches_read() {
         packets in prop::collection::vec((0x80u8..=0xBF, prop::collection::vec(any::<u8>(), 0..40)), 0..8),
         midi2 in any::<bool>(),
     )| {
-        let protocol = if midi2 { StreamProtocol::Midi2 } else { StreamProtocol::Midi1 };
-        let mut typed = PacketReader::new(Group::default(), protocol);
-        let mut words = PacketReader::new(Group::default(), protocol);
+        let mut typed = reader(midi2);
+        let mut words = reader(midi2);
         for (header, rest) in &packets {
             let mut p = vec![*header];
             p.extend_from_slice(rest);

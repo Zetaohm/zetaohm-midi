@@ -22,7 +22,9 @@
 //!   only `read_words` does not link `Ump::parse` (OPT-044).
 
 use zmidi_io::BytesToUmp;
-use zmidi_ump::{Group, StreamProtocol, Ump};
+#[cfg(feature = "midi2-protocol")]
+use zmidi_ump::StreamProtocol;
+use zmidi_ump::{Group, Ump};
 
 use crate::timestamp::{header_high, is_header, Timestamp};
 
@@ -72,6 +74,8 @@ pub struct ReceivedWords<'w> {
 #[derive(Debug, Clone)]
 pub struct PacketReader {
     group: Group,
+    /// Only with the feature `midi2-protocol`; without it the Protocol is MIDI 1.0.
+    #[cfg(feature = "midi2-protocol")]
     protocol: StreamProtocol,
     bytes: BytesToUmp,
     /// True while a SysEx message is open.
@@ -83,7 +87,7 @@ pub struct PacketReader {
 impl Default for PacketReader {
     /// Group 0, MIDI 1.0 Protocol.
     fn default() -> Self {
-        Self::new(Group::default(), StreamProtocol::Midi1)
+        Self::midi1(Group::default())
     }
 }
 
@@ -107,6 +111,8 @@ fn data_len(status: u8) -> usize {
 impl PacketReader {
     /// A reader that gives UMPs on `group` with `protocol`: [`StreamProtocol::Midi1`] gives
     /// Message Type 0x2, [`StreamProtocol::Midi2`] Message Type 0x4 (zmidi-io `BytesToUmp`).
+    /// Needs the feature `midi2-protocol` (on by default); without it, use [`Self::midi1`].
+    #[cfg(feature = "midi2-protocol")]
     pub fn new(group: Group, protocol: StreamProtocol) -> Self {
         Self {
             group,
@@ -117,9 +123,29 @@ impl PacketReader {
         }
     }
 
+    /// A reader that gives MIDI 1.0 Protocol UMPs (Message Type 0x2) on `group`, in every build.
+    /// Without the feature `midi2-protocol` it holds no translator and links none (DEC-022).
+    pub fn midi1(group: Group) -> Self {
+        Self {
+            group,
+            #[cfg(feature = "midi2-protocol")]
+            protocol: zmidi_ump::StreamProtocol::Midi1,
+            bytes: BytesToUmp::midi1(group),
+            sysex: false,
+            time: Timestamp::default(),
+        }
+    }
+
     /// Forgets an open SysEx message, for example after a new connection.
     pub fn reset(&mut self) {
-        *self = Self::new(self.group, self.protocol);
+        #[cfg(feature = "midi2-protocol")]
+        {
+            *self = Self::new(self.group, self.protocol);
+        }
+        #[cfg(not(feature = "midi2-protocol"))]
+        {
+            *self = Self::midi1(self.group);
+        }
     }
 
     /// True while a SysEx message is open (it continues in the next packet).

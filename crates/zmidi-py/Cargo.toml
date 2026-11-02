@@ -23,7 +23,7 @@ crate-type = ["cdylib", "rlib"]
 pyo3 = { version = "0.30.1", features = ["abi3-py39"] }
 zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false, features = ["full"] }
 zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features = false, features = ["midi2-protocol"] }
-zmidi-ble = { path = "../zmidi-ble", version = "0.1.0-alpha.1", default-features = false }
+zmidi-ble = { path = "../zmidi-ble", version = "0.1.0-alpha.1", default-features = false, features = ["midi2-protocol"] }
 zmidi-file = { path = "../zmidi-file", version = "0.1.0-alpha.1", default-features = false, features = ["clip"] }
 zmidi-ci = { path = "../zmidi-ci", version = "0.1.0-alpha.1", default-features = false, features = ["full"] }
 zmidi-ci-pe = { path = "../zmidi-ci-pe", version = "0.1.0-alpha.1", default-features = false, features = ["initiator"] }

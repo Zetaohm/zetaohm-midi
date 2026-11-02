@@ -47,7 +47,11 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
 
 ## Cargo features
 
-None.
+- `midi2-protocol` (on by default): `PacketReader::new` with a choice of Protocol (MIDI 2.0 Protocol UMPs
+  through the zmidi-io translator), every zmidi-ump message family, and the MIDI 2.0 to 1.0 translation of the
+  writer. Without it (`default-features = false`), the build has no MIDI 2.0 code: `PacketReader::midi1` gives
+  MIDI 1.0 Protocol UMPs, and the writer skips a MIDI 2.0 UMP. Measured on Thumb-2: the typed reader 3,912 B
+  of flash instead of 9,128 B, the writer 2,172 B instead of 2,916 B.
 
 ## License
 

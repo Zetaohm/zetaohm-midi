@@ -17,13 +17,24 @@ name = "zmidi_ble"
 path = "src/lib.rs"
 
 [dependencies]
-zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false, features = ["full"] }
-zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features = false, features = ["midi2-protocol"] }
+# The MIDI 1.0 families of the typed reader (System Common and Real Time, MIDI 1.0 Channel Voice,
+# SysEx7). The other families and the translators come with `midi2-protocol` (DEC-022).
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false, features = [
+    "system-common",
+    "channel-voice1",
+    "sysex7",
+] }
+zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features = false }
 thiserror = { version = "2", default-features = false }
 
 [features]
 # DEC-002, DEC-016: the core API needs no alloc and no BLE stack.
-default = []
+default = ["midi2-protocol"]
+# The MIDI 2.0 Protocol (DEC-022, on by default): `PacketReader::new` with `StreamProtocol::Midi2` (the
+# 1.0 to 2.0 translator of zmidi-io), every zmidi-ump family for the typed reader, and the 2.0 to 1.0
+# translation of the writer (zmidi-ump `channel-voice2`). Off: a MIDI 1.0-only build with no MIDI 2.0
+# code; `PacketReader::midi1` gives MIDI 1.0 Protocol UMPs, and the writer skips a MIDI 2.0 UMP.
+midi2-protocol = ["zmidi-io/midi2-protocol", "zmidi-ump/full"]
 
 [dev-dependencies]
 proptest = "1"
