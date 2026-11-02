@@ -77,6 +77,51 @@ target_link_libraries(app PRIVATE zmidi::zmidi)
 For bare metal, set `Rust_CARGO_TARGET` (for example `thumbv7em-none-eabihf`) in your toolchain
 file. The package then builds the `no_std` library with its own panic handler.
 
+## Build with Meson
+
+The repository root is a Meson project: `meson.build` builds the Rust library with Cargo and gives
+the dependency `zmidi`, with the header, the `ZMIDI_<PART>` macros of the parts that you select and
+the system libraries that the library needs. It needs Meson 1.1 or later, Cargo and Python 3. Add
+the repository as a subproject with a wrap file, `subprojects/zetaohm-midi.wrap`:
+
+```ini
+[wrap-git]
+url = https://github.com/Zetaohm/zetaohm-midi.git
+revision = main
+depth = 1
+
+[provide]
+dependency_names = zmidi
+```
+
+Then use it in your `meson.build`:
+
+```meson
+zmidi = dependency('zmidi', default_options: ['features=io,ump,ci'])
+executable('app', 'main.c', dependencies: zmidi)
+```
+
+Set `revision` to a tag or a commit for a reproducible build. Meson applies the `default_options`
+of a subproject only at the first setup: after you change them, run `meson setup --wipe`. The options:
+
+| Option | Default | Use |
+|---|---|---|
+| `features` | `io` | The parts of the C ABI (the Cargo features below), for example `io,ump,ci,net,net-auth`. |
+| `cargo_target` | (host) | The Rust target triple. A cross build needs it, for example `thumbv7em-none-eabihf`. |
+| `runtime` | `auto` | `std` for a host, `panic-handler` for bare metal and `wasm32-unknown-unknown`. `auto` selects by `cargo_target`. |
+| `tests` | `false` | Builds the C tests (`meson test`) on a host, or the bare-metal link checks in a cross build. |
+
+For bare metal, give the target in your cross file:
+
+```ini
+[project options]
+cargo_target = 'thumbv7em-none-eabihf'
+```
+
+`tests/meson/thumbv7em.ini` is a complete cross file for a Cortex-M4F with `arm-none-eabi-gcc`. A
+build of the repository on its own (not as a subproject) also installs the library, the headers
+and a `zmidi.pc` file for pkg-config, so another build system can find it with `pkg-config zmidi`.
+
 ## Build with Cargo
 
 ```sh

@@ -86,7 +86,7 @@ Each crate has its own README with an example and its Cargo features.
 
 | Crate or package | What it does |
 |---|---|
-| [`zmidi-ffi`](crates/zmidi-ffi) | C ABI with one header, `zmidi.h`, and a CMake package. |
+| [`zmidi-ffi`](crates/zmidi-ffi) | C ABI with one header, `zmidi.h`, and CMake and Meson packages. |
 | [`zmidi-py`](crates/zmidi-py) | The native extension of the Python package (PyO3). |
 | [`bindings/python`](bindings/python) | Python package `zetaohm-midi`. |
 | [`bindings/ts`](bindings/ts) | TypeScript package `zetaohm-midi` over the WASM build of the C ABI. |
@@ -168,6 +168,13 @@ All the bindings use the same Rust code.
 set(ZMIDI_FEATURES io ump)
 add_subdirectory(path/to/zetaohm-midi/crates/zmidi-ffi zmidi)
 target_link_libraries(app PRIVATE zmidi::zmidi)
+```
+
+Or with Meson, with this repository as a subproject (see [`crates/zmidi-ffi`](crates/zmidi-ffi/README.md#build-with-meson)):
+
+```meson
+zmidi = dependency('zmidi', default_options: ['features=io,ump'])
+executable('app', 'main.c', dependencies: zmidi)
 ```
 
 **Python**

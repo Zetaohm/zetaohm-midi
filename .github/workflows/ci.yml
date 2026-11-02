@@ -38,7 +38,7 @@ jobs:
       - name: C ABI tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi
+          sudo apt-get install -y --no-install-recommends gcc-arm-none-eabi libnewlib-arm-none-eabi meson ninja-build
           cargo install --locked cbindgen --version 0.26.0  # the version that writes include/zmidi.h
       - name: C ABI
         run: sh scripts/ffi-check.sh
