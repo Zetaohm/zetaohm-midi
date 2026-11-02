@@ -26,7 +26,7 @@ zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features =
 zmidi-ble = { path = "../zmidi-ble", version = "0.1.0-alpha.1", default-features = false }
 zmidi-file = { path = "../zmidi-file", version = "0.1.0-alpha.1", default-features = false }
 zmidi-ci = { path = "../zmidi-ci", version = "0.1.0-alpha.1", default-features = false, features = ["full"] }
-zmidi-ci-pe = { path = "../zmidi-ci-pe", version = "0.1.0-alpha.1", default-features = false }
+zmidi-ci-pe = { path = "../zmidi-ci-pe", version = "0.1.0-alpha.1", default-features = false, features = ["initiator"] }
 # The feature auth (SHA-256, DEC-013): the Host and the Client of the package have authentication.
 zmidi-net = { path = "../zmidi-net", version = "0.1.0-alpha.1", default-features = false, features = ["auth"] }
 zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1", default-features = false, features = ["alt0"] }

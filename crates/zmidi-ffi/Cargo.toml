@@ -48,7 +48,7 @@ ci = ["ci-device", "ci-initiator", "ci-profiles", "ci-property-exchange", "ci-pr
 # features do (DEC-017, DEC-CI-001).
 ci-device = ["dep:zmidi-ci"]
 # The Initiator role: Discovery, the inquiries and requests, and the replies to them.
-ci-initiator = ["ci-device", "zmidi-ci/initiator"]
+ci-initiator = ["ci-device", "zmidi-ci/initiator", "zmidi-ci-pe?/initiator"]
 # Profile Configuration (M2-101 7, M2-102).
 ci-profiles = ["ci-device", "zmidi-ci/profiles"]
 # Property Exchange with the zmidi-ci-pe one-chunk Responder (M2-101 8, M2-103).
