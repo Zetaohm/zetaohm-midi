@@ -37,6 +37,8 @@ the goal is 1.0x for the smallest build of each job (OPT-052).
 | `usb_class` | USB MIDI 2.0 class on usb-device, run-time `FunctionConfig` | 17,176 | 3,556 | 4.8x | 644 | 666 | 1.0x | 2,424 | - | tusb_ump class driver (object) |
 | `usb_class_fixed` | USB MIDI 2.0 class on usb-device, fixed function from the build script | 8,052 | 3,556 | 2.3x | 464 | 666 | 0.7x | 1,520 | - | tusb_ump class driver (object) |
 | `usb_class_lean` | usb_class_fixed with the feature alt0 off: empty Alternate Setting 0, no USB-MIDI 1.0 data path | 4,872 | 3,556 | 1.4x | 364 | 666 | 0.5x | 1,224 | - | tusb_ump class driver (object), with Alt 0 |
+| `usb_class_midi1` | USB-MIDI 1.0-only class (zmidi-usb with no `alt1`, fixed descriptors, DEC-022) | 6,064 | 1,552 | 3.9x | 420 | 28 | 15.0x | 1,376 | - | usbd-midi 0.5 class (USB-MIDI 1.0) |
+| `usb_class_rt_midi1` | USB-MIDI 1.0-only class, descriptors made at run time (DEC-022) | 10,088 | 1,552 | 6.5x | 600 | 28 | 21.4x | 2,112 | - | usbd-midi 0.5 class (USB-MIDI 1.0) |
 | `emb_class` | USB MIDI 2.0 class on embassy-usb, run-time `FunctionConfig` | 19,600 | 3,556 | 5.5x | 532 | 666 | 0.8x | 2,624 | - | tusb_ump class driver (object) |
 | `emb_class_fixed` | USB MIDI 2.0 class on embassy-usb, fixed function from the build script | 9,268 | 3,556 | 2.6x | 352 | 666 | 0.5x | 1,648 | - | tusb_ump class driver (object) |
 | `emb_class_lean` | emb_class_fixed with the feature alt0 off: empty Alternate Setting 0, no USB-MIDI 1.0 data path | 6,156 | 3,556 | 1.7x | 252 | 666 | 0.4x | 1,512 | - | tusb_ump class driver (object), with Alt 0 |

@@ -366,7 +366,8 @@ pub fn read_answer<const B: usize, E: EndpointBlocks>(
     read_set(answer, endpoints)
 }
 
-#[cfg(test)]
+// The requests of the tests are Group Terminal Block requests of a USB MIDI 2.0 setting (feature `alt1`).
+#[cfg(all(test, feature = "alt1"))]
 mod tests {
     extern crate std;
     use super::*;

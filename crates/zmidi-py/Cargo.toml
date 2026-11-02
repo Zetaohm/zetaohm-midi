@@ -29,6 +29,6 @@ zmidi-ci = { path = "../zmidi-ci", version = "0.1.0-alpha.1", default-features =
 zmidi-ci-pe = { path = "../zmidi-ci-pe", version = "0.1.0-alpha.1", default-features = false, features = ["initiator"] }
 # The feature auth (SHA-256, DEC-013): the Host and the Client of the package have authentication.
 zmidi-net = { path = "../zmidi-net", version = "0.1.0-alpha.1", default-features = false, features = ["auth"] }
-zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1", default-features = false, features = ["alt0"] }
+zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1", default-features = false, features = ["alt0", "alt1"] }
 # Clears the secret, the passwords and the random bytes of NetHost and NetClient (REQ-PY-NET-005).
 zeroize = { version = "1.9.1", default-features = false, features = ["alloc"] }

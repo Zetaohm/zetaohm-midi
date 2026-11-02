@@ -40,16 +40,19 @@ ump_full = ["zmidi-ump/full"]
 io = ["dep:zmidi-io"]
 usb1 = ["dep:usbd-midi"]
 # usb2_any and emb2_any: the class code; usb2 and emb2 add Alternate Setting 0 (feature alt0, DEC-014 addendum).
-usb2_any = ["dep:zmidi-usb-device", "dep:zmidi-usb", "ump_full"]
-usb2 = ["usb2_any", "zmidi-usb-device/alt0"]
-# usb2 with a USB-MIDI 1.0-only function (FunctionConfig::midi1_only: Alternate Setting 0 only).
-usb2_midi1 = ["usb2"]
+usb2_any = ["dep:zmidi-usb-device", "dep:zmidi-usb"]
+# The USB MIDI 2.0 Alternate Settings (zmidi-usb alt1, DEC-022) and every zmidi-ump family.
+usb2_alt1 = ["zmidi-usb-device/alt1", "ump_full"]
+usb2 = ["usb2_any", "usb2_alt1", "zmidi-usb-device/alt0"]
+# A USB-MIDI 1.0-only class (DEC-022): FunctionConfig::midi1_only, zmidi-usb with alt0 and no alt1. With
+# usb2_fixed_any: the fixed form.
+usb2_midi1 = ["usb2_any", "zmidi-usb-device/alt0"]
 # The usb-device core with no class: the class cost is usb1 or usb2 minus this.
 usb_core = []
 # The embassy-usb device with no class (stub driver, src/edriver.rs): an embassy class costs
 # emb2 or emb2_fixed minus this.
 emb_core = ["dep:embassy-usb", "dep:embassy-sync"]
-emb2_any = ["emb_core", "dep:zmidi-usb-embassy", "dep:zmidi-usb", "ump_full"]
+emb2_any = ["emb_core", "dep:zmidi-usb-embassy", "dep:zmidi-usb", "zmidi-usb-embassy/alt1", "ump_full"]
 emb2 = ["emb2_any", "zmidi-usb-embassy/alt0"]
 # emb2 with the descriptors made when the probe is built (DEC-USB-002).
 emb2_fixed_any = ["emb2_any"]
@@ -60,7 +63,7 @@ emb2_lean = ["emb2_fixed_any"]
 usb2_fixed_any = ["usb2_any"]
 usb2_fixed = ["usb2", "usb2_fixed_any"]
 # usb2_fixed with no Alternate Setting 0 data path and an empty Alternate Setting 0 (feature alt0 off).
-usb2_lean = ["usb2_fixed_any"]
+usb2_lean = ["usb2_fixed_any", "usb2_alt1"]
 rx_cv2 = ["ump_full"]
 # rx_cv2 with only the families it handles: MIDI 2.0 Channel Voice and System (the decode tier).
 rx_cv2_tier = ["zmidi-ump/channel-voice2", "zmidi-ump/system-common"]

@@ -866,5 +866,5 @@ impl<
 }
 
 // The tests use Alternate Setting 0 with ports (feature `alt0`).
-#[cfg(all(test, feature = "alt0"))]
+#[cfg(all(test, feature = "alt0", feature = "alt1"))]
 mod tests;

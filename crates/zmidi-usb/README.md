@@ -64,9 +64,10 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
 | Feature | Default | Description |
 |---|---|---|
 | `alt0` | yes | The USB-MIDI 1.0 data path of Alternate Setting 0. Without it, Alternate Setting 0 has no Jack and no endpoint: about 3 KB less flash, but a host with only a USB-MIDI 1.0 driver shows no port. |
+| `alt1` | yes | The USB MIDI 2.0 Alternate Settings: their data path (UMP packets), their descriptors and Group Terminal Blocks, and every zmidi-ump message family. Without it, a USB-MIDI 1.0-only function with no MIDI 2.0 code: `FunctionConfig::new` gives Alternate Setting 0 only. Measured on Thumb-2 (usb-device adapter): 6,064 B of class flash with fixed descriptors instead of 7,868 B for the same USB-MIDI 1.0 function with `alt1` on. |
 
-A crate that depends on `zmidi-usb` with `default-features = false` must name `features = ["alt0"]`
-to keep the USB-MIDI 1.0 data path.
+A crate that depends on `zmidi-usb` with `default-features = false` must name `features = ["alt0", "alt1"]`
+to keep both data paths.
 
 ## License
 

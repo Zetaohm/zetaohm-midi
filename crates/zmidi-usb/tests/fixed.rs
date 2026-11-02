@@ -4,8 +4,9 @@
 //!
 //! The fixtures are the output of `write_rust` for two configurations. To make them again:
 //! `UPDATE_FIXTURES=1 cargo test -p zmidi-usb --test fixed`.
-//! The fixtures have an Alternate Setting 0 with ports (feature `alt0`).
-#![cfg(feature = "alt0")]
+//! The fixtures have an Alternate Setting 0 with ports (feature `alt0`) and a USB MIDI 2.0 setting
+//! (feature `alt1`).
+#![cfg(all(feature = "alt0", feature = "alt1"))]
 
 use zmidi_usb::device::SettingEndpoint;
 use zmidi_usb::device::{
@@ -235,9 +236,13 @@ fn fixed_function_gives_the_run_time_descriptors_and_answers() {
 
 #[test]
 fn alt0_is_a_default_feature() {
-    // REQ-USB-GEN-014: Alternate Setting 0 with ports is on by default.
+    // REQ-USB-GEN-014: Alternate Setting 0 with ports is on by default. REQ-USB-GEN-015: so are the USB
+    // MIDI 2.0 settings.
     let manifest = include_str!("../Cargo.toml");
-    assert!(manifest.contains("default = [\"alt0\"]"), "{manifest}");
+    assert!(
+        manifest.contains("default = [\"alt0\", \"alt1\"]"),
+        "{manifest}"
+    );
 }
 
 #[test]

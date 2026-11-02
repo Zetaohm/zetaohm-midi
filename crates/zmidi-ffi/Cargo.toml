@@ -61,7 +61,7 @@ net = ["dep:zmidi-net"]
 # zmidi-net auth; off by default as DEC-013 keeps it).
 net-auth = ["net", "zmidi-net/auth"]
 # USB-MIDI 1.0 Event Packets and USB MIDI 2.0 UMP words (module Usb, zmidi-usb MidiLink).
-usb = ["dep:zmidi-usb", "zmidi-usb/alt0"]
+usb = ["dep:zmidi-usb", "zmidi-usb/alt0", "zmidi-usb/alt1"]
 # A `#[panic_handler]` for bare-metal (`target_os = "none"`) and WASM builds of the staticlib
 # (DEC-019). It has no effect on other targets.
 panic-handler = []

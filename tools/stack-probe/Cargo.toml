@@ -18,7 +18,7 @@ zmidi-io = { path = "../../crates/zmidi-io", default-features = false, features 
 zmidi-ci = { path = "../../crates/zmidi-ci", default-features = false, features = ["property-exchange"] }
 zmidi-ci-pe = { path = "../../crates/zmidi-ci-pe", default-features = false }
 zmidi-net = { path = "../../crates/zmidi-net", default-features = false }
-zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false, features = ["alt0"] }
+zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false, features = ["alt0", "alt1"] }
 
 [features]
 auth = ["zmidi-net/auth"]

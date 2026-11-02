@@ -19,7 +19,7 @@ defmt-rtt = "1"
 panic-probe = { version = "1", features = ["print-defmt"] }
 zmidi-ump = { path = "../../crates/zmidi-ump", default-features = false, features = ["full"] }
 zmidi-io = { path = "../../crates/zmidi-io", default-features = false, features = ["midi2-protocol"] }
-zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false, features = ["alt0"] }
+zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false, features = ["alt0", "alt1"] }
 zmidi-ble = { path = "../../crates/zmidi-ble", default-features = false, features = ["midi2-protocol"] }
 zmidi-file = { path = "../../crates/zmidi-file", default-features = false, features = ["clip"] }
 zmidi-net = { path = "../../crates/zmidi-net", default-features = false }

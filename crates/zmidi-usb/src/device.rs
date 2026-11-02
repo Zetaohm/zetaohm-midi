@@ -82,7 +82,8 @@ pub enum DeviceError {
     #[error("Alternate Setting 0: wMaxPacketSize {0} not permitted at this bus speed")]
     Midi1PacketSize(u16),
     /// More USB MIDI 2.0 Alternate Settings than the capacity `S`, or than bAlternateSetting
-    /// can number (255) (REQ-USB-GEN-005).
+    /// can number (255) (REQ-USB-GEN-005); any USB MIDI 2.0 setting without the feature `alt1`
+    /// (REQ-USB-GEN-015).
     #[error("too many USB MIDI 2.0 Alternate Settings (REQ-USB-GEN-005)")]
     TooManySettings,
     /// The Alternate Setting number is 0 or names no USB MIDI 2.0 setting (REQ-USB-GTB-015).
@@ -545,7 +546,7 @@ impl<'a, const J: usize, const S: usize, const E: usize, const B: usize>
         if !cfg!(feature = "alt0") {
             cfg.midi1 = Some(Midi1Setting::cables(CableCounts::new(0, 0, speed)));
         }
-        if S > 0 {
+        if S > 0 && cfg!(feature = "alt1") {
             cfg.add_midi2_setting(Midi2Setting::new(speed)?)?;
         }
         Ok(cfg)
@@ -566,7 +567,12 @@ impl<'a, const J: usize, const S: usize, const E: usize, const B: usize>
 
     /// Adds a USB MIDI 2.0 Alternate Setting at the end and gives its number: 1 for the first,
     /// then 2 and higher (REQ-USB-GEN-004, REQ-USB-GEN-005).
+    /// Without the feature `alt1`, [`DeviceError::TooManySettings`]: the build has no USB MIDI 2.0
+    /// setting (DEC-022, REQ-USB-GEN-015).
     pub fn add_midi2_setting(&mut self, setting: Midi2Setting<E, B>) -> Result<u8, DeviceError> {
+        if !cfg!(feature = "alt1") {
+            return Err(DeviceError::TooManySettings);
+        }
         let alt = u8::try_from(self.midi2.len() + 1).map_err(|_| DeviceError::TooManySettings)?;
         self.midi2
             .push(setting)
@@ -576,12 +582,22 @@ impl<'a, const J: usize, const S: usize, const E: usize, const B: usize>
 
     /// The USB MIDI 2.0 setting with bAlternateSetting `alt` (1 or more).
     pub fn midi2_setting(&self, alt: u8) -> Option<&Midi2Setting<E, B>> {
-        self.midi2.get(usize::from(alt).checked_sub(1)?)
+        self.midi2_list().get(usize::from(alt).checked_sub(1)?)
     }
 
     /// The number of Alternate Settings that the writer writes: 1 + the USB MIDI 2.0 ones.
     pub fn alternate_settings(&self) -> usize {
-        1 + self.midi2.len()
+        1 + self.midi2_list().len()
+    }
+
+    /// The USB MIDI 2.0 settings that this build writes and serves: none without the feature
+    /// `alt1` (DEC-022, REQ-USB-GEN-015), so a USB-MIDI 1.0-only build links no USB MIDI 2.0 code.
+    fn midi2_list(&self) -> &[Midi2Setting<E, B>] {
+        if cfg!(feature = "alt1") {
+            self.midi2.as_slice()
+        } else {
+            &[]
+        }
     }
 
     fn ac_header(&self) -> Result<AcHeader<1>, DeviceError> {
@@ -620,20 +636,22 @@ impl<'a, const J: usize, const S: usize, const E: usize, const B: usize>
             t.endpoints()
                 .map(move |e| alt0(e.direction, e.number, e.max_packet_size))
         });
-        let from_midi2 = (1..=u8::MAX).zip(self.midi2.iter()).flat_map(|(alt, s)| {
-            s.endpoints.iter().map(move |e| SettingEndpoint {
-                alternate_setting: alt,
-                direction: e.direction,
-                number: e.number,
-                transfer: e.transfer,
-                max_packet: e.max_packet,
-                // The writer writes 0 for a bulk endpoint.
-                interval: match e.transfer {
-                    TransferType::Interrupt => e.interval,
-                    _ => 0,
-                },
-            })
-        });
+        let from_midi2 = (1..=u8::MAX)
+            .zip(self.midi2_list().iter())
+            .flat_map(|(alt, s)| {
+                s.endpoints.iter().map(move |e| SettingEndpoint {
+                    alternate_setting: alt,
+                    direction: e.direction,
+                    number: e.number,
+                    transfer: e.transfer,
+                    max_packet: e.max_packet,
+                    // The writer writes 0 for a bulk endpoint.
+                    interval: match e.transfer {
+                        TransferType::Interrupt => e.interval,
+                        _ => 0,
+                    },
+                })
+            });
         from_cables.chain(from_jacks).chain(from_midi2)
     }
 
@@ -644,12 +662,17 @@ impl<'a, const J: usize, const S: usize, const E: usize, const B: usize>
             return Err(DeviceError::SameInterfaceNumber(self.ms_interface));
         }
         let mut total = audio_control_len(&self.ac_header()?);
-        midi1.check(self.speed, !self.midi2.is_empty())?;
-        total += midi1.len();
-        if self.midi2.len() > usize::from(u8::MAX) {
+        // Without the feature `alt1`, no USB MIDI 2.0 setting (REQ-USB-GEN-015).
+        if !cfg!(feature = "alt1") && !self.midi2.is_empty() {
             return Err(DeviceError::TooManySettings);
         }
-        for (i, s) in self.midi2.iter().enumerate() {
+        let midi2 = self.midi2_list();
+        midi1.check(self.speed, !midi2.is_empty())?;
+        total += midi1.len();
+        if midi2.len() > usize::from(u8::MAX) {
+            return Err(DeviceError::TooManySettings);
+        }
+        for (i, s) in midi2.iter().enumerate() {
             // At most 255 settings: the number fits in a byte.
             let alt = (i + 1) as u8;
             let ms2 = s.ms2(self.ms_interface, alt, self.speed);
@@ -801,7 +824,7 @@ where
     let header = cfg.ac_header()?;
     em.piece(|b| Ok(write_audio_control(&ac, &header, b)?))?;
     midi1.emit(cfg.ms_interface, &mut em)?;
-    for (alt, s) in (1..=u8::MAX).zip(cfg.midi2.iter()) {
+    for (alt, s) in (1..=u8::MAX).zip(cfg.midi2_list().iter()) {
         let ms2 = s.ms2(cfg.ms_interface, alt, cfg.speed);
         let interface = ms2.interface().map_err(midi2_error(alt))?;
         em.piece(|b| interface.write(b).map_err(midi2_error(alt)))?;
@@ -979,7 +1002,9 @@ pub fn gtb_set<const J: usize, const S: usize, const E: usize, const B: usize>(
     s.blocks.write(&s.endpoints, out).map_err(gtb_error(alt))
 }
 
-#[cfg(test)]
+// The tests use the default function with a USB MIDI 2.0 setting; `link::no_alt1_tests` covers the build
+// without the feature `alt1`.
+#[cfg(all(test, feature = "alt1"))]
 mod tests {
     extern crate std;
     use super::*;

@@ -1536,6 +1536,8 @@ mod tests {
         assert_eq!(buf, [0x07, 0xF0, 0x01, 0xF7, 0x09, 0x90, 0x3C, 0x64]);
     }
 
+    // A MIDI 2.0 UMP: its translation needs the zmidi-ump family that `alt1` turns on.
+    #[cfg(feature = "alt1")]
     #[test]
     fn writer_largest_ump_gives_five_packets() {
         // REQ-USB-EVT-021: an open SysEx and a MIDI 2.0 Registered Controller (4 Control

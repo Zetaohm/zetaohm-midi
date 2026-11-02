@@ -59,6 +59,10 @@ JOBS = {
     # Initiator role of zmidi-ci that the engine needs (feature initiator, DEC-CI-001).
     "usb_class_fixed": ("usb2_fixed", "usb_core", 8192, 480, 3556, 666, "tusb_ump class driver (object)"),
     "usb_class_lean": ("usb2_lean", "usb_core", 4976, 384, 3556, 666, "tusb_ump class driver (object), with Alt 0"),
+    # MIDI 1.0-only USB class (DEC-022): FunctionConfig::midi1_only, zmidi-usb with alt0 and no alt1; the
+    # other library is usbd-midi 0.5 (probe feature usb1, measured 2026-11-02).
+    "usb_class_midi1": ("usb2_midi1,usb2_fixed_any", "usb_core", 6192, 432, 1552, 28, "usbd-midi 0.5 class (USB-MIDI 1.0)"),
+    "usb_class_rt_midi1": ("usb2_midi1", "usb_core", 10304, 624, 1552, 28, "usbd-midi 0.5 class (USB-MIDI 1.0)"),
     # The embassy-usb adapter, with a stub driver (tools/size-probe/src/edriver.rs); emb_core is the
     # embassy-usb device with no class.
     "emb_class": ("emb2", "emb_core", 19936, 544, 3556, 666, "tusb_ump class driver (object)"),
@@ -112,6 +116,8 @@ WHAT = {
     "din_in_core": "DIN bytes to UMP, `BytesToUmpCore::push_with`, each packet read as words",
     "din_in_feed": "DIN bytes to UMP, callback form (`BytesToUmpCore::feed`)",
     "din_out_each": "UMP to DIN bytes, callback form (`UmpToBytes::write_each`)",
+    "usb_class_midi1": "USB-MIDI 1.0-only class (zmidi-usb with no `alt1`, fixed descriptors, DEC-022)",
+    "usb_class_rt_midi1": "USB-MIDI 1.0-only class, descriptors made at run time (DEC-022)",
     "din_out_each_midi1": "din_out_each in a MIDI 1.0-only build (no MIDI 2.0 family, DEC-022)",
     "din_out_midi1": "din_out in a MIDI 1.0-only build (no MIDI 2.0 family, DEC-022)",
     "din_out": "UMP to DIN bytes, value form (`UmpToBytes::write`)",
@@ -191,10 +197,16 @@ def tool(name):
     sys.exit(f"size-check: no {name} (rustup component add llvm-tools)")
 
 
-# A job whose name ends in `_midi1` is a MIDI 1.0-only build (DEC-022): it fails when a symbol of a
-# MIDI 2.0 module is in its ELF.
+# The MIDI 1.0-only jobs (DEC-022): each fails when a symbol of a MIDI 2.0 module is in its ELF.
+MIDI1_ONLY = {
+    "din_out_midi1", "din_out_each_midi1", "usb_class_midi1", "usb_class_rt_midi1",
+    "ble_rx_midi1", "ble_rx_words_midi1", "ble_tx_midi1",
+}
+# `ms2::check_max_packet` is the USB 2.0 wMaxPacketSize rule that Alternate Setting 0 uses too, so it is not
+# MIDI 2.0 code.
 MIDI2_SYMBOLS = re.compile(
-    r"zmidi_ump::(translate::|channel_voice2|flex_data|ump_stream|data128)|zmidi_usb::(ms2|gtb|ump_usb)::"
+    r"zmidi_ump::(translate::|channel_voice2|flex_data|ump_stream|data128)"
+    r"|zmidi_usb::(ms2::(?!check_max_packet)|gtb::|ump_usb::)"
     r"|zmidi_ci|zmidi_net|Midi1ToMidi2|midi2_to_midi1"
 )
 
@@ -296,7 +308,7 @@ def main():
             failed.append(f"{name}: flash {flash} B, budget {fb} B")
         if ram > rb:
             failed.append(f"{name}: RAM {ram} B, budget {rb} B")
-        if name.endswith("_midi1") and m2:
+        if name in MIDI1_ONLY and m2:
             failed.append(f"{name}: MIDI 2.0 code in a MIDI 1.0-only build: {', '.join(m2[:5])}")
     for f in failed:
         print(f"size-check: FAIL {f}", file=sys.stderr)

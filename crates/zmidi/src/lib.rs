@@ -18,5 +18,5 @@ pub use zmidi_io as io;
 #[cfg(feature = "net")]
 pub use zmidi_net as net;
 pub use zmidi_ump as ump;
-#[cfg(feature = "usb")]
+#[cfg(feature = "usb-midi1")]
 pub use zmidi_usb as usb;

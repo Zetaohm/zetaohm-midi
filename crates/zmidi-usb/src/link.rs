@@ -34,7 +34,9 @@ use crate::event_packet::{self, PacketReader, PacketWriter, PACKET_LEN};
 use crate::event_packet::{EventPacketError, WriterOptions};
 use crate::gtb::GroupMask;
 use crate::ms2::EndpointDirection;
-use crate::ump_usb::{self, ReceivedUmp, UmpPacketReader, UmpPacketWriter, UmpUsbError};
+use crate::ump_usb::{self, ReceivedUmp, UmpUsbError};
+#[cfg(feature = "alt1")]
+use crate::ump_usb::{UmpPacketReader as UmpReader, UmpPacketWriter as UmpWriter};
 
 /// The largest number of Event Packet bytes of one UMP: 13 packets in the unparsed mode
 /// (REQ-USB-EVT-021).
@@ -207,10 +209,11 @@ pub struct MidiLink<const CABLES: usize = 1, const X: usize = 0> {
     setting: SettingNumber,
     /// The Event Packet state of Alternate Setting 0; no state without the feature `alt0`.
     alt0: Alt0<CABLES, X>,
-    /// UMP reader of the received endpoint (USB MIDI 2.0 settings).
-    ump_reader: UmpPacketReader,
-    /// UMP writer of the sent endpoint (USB MIDI 2.0 settings).
-    ump_writer: UmpPacketWriter,
+    /// UMP reader of the received endpoint (USB MIDI 2.0 settings); a stub with no data path
+    /// without the feature `alt1`.
+    ump_reader: UmpReader,
+    /// UMP writer of the sent endpoint (USB MIDI 2.0 settings); a stub without the feature `alt1`.
+    ump_writer: UmpWriter,
     /// wMaxPacketSize of the sent endpoint of Alternate Setting 0 (`LinkConfig::max_packet`),
     /// the packet size again after a USB reset or a configuration change.
     alt0_max_packet: u16,
@@ -233,6 +236,79 @@ struct Alt0<const CABLES: usize, const X: usize> {
 #[cfg(not(feature = "alt0"))]
 #[derive(Debug, Clone)]
 struct Alt0<const CABLES: usize, const X: usize>;
+
+/// Without the feature `alt1`, a USB MIDI 2.0 setting has no data path (DEC-022,
+/// REQ-USB-GEN-015): the stub reader keeps only the Group mask, and the stub writer only the
+/// packet size, as the link API gives them. The link reads no UMP and writes no packet there.
+#[cfg(not(feature = "alt1"))]
+#[derive(Debug, Clone)]
+struct UmpReader {
+    mask: GroupMask,
+}
+
+#[cfg(not(feature = "alt1"))]
+impl UmpReader {
+    const fn new(_endpoint: EndpointDirection, mask: GroupMask) -> Self {
+        UmpReader { mask }
+    }
+
+    fn mask(&self) -> GroupMask {
+        self.mask
+    }
+
+    fn set_mask(&mut self, mask: GroupMask) {
+        self.mask = mask;
+    }
+
+    fn held(&self) -> usize {
+        0
+    }
+
+    fn reset(&mut self) {}
+}
+
+/// The stub writer of a build without the feature `alt1` (see [`UmpReader`]).
+#[cfg(not(feature = "alt1"))]
+#[derive(Debug, Clone)]
+struct UmpWriter {
+    size: usize,
+}
+
+#[cfg(not(feature = "alt1"))]
+impl UmpWriter {
+    /// The packet size as the UMP writer gives it: rounded down to a multiple of 4,
+    /// [`UmpUsbError::InvalidPacketSize`] below 4.
+    const fn new(max_packet_size: u16) -> Result<Self, UmpUsbError> {
+        let size = max_packet_size as usize & !3;
+        if size == 0 {
+            return Err(UmpUsbError::InvalidPacketSize);
+        }
+        Ok(UmpWriter { size })
+    }
+
+    fn packet_size(&self) -> usize {
+        self.size
+    }
+
+    fn pending(&self) -> bool {
+        false
+    }
+
+    fn reset(&mut self) {}
+
+    /// Takes every UMP of `umps` and writes nothing: no USB MIDI 2.0 data path.
+    fn write_packet<'w, I>(
+        &mut self,
+        umps: &mut Peekable<I>,
+        _out: &mut [u8],
+    ) -> Result<usize, UmpUsbError>
+    where
+        I: Iterator<Item = &'w [u32]>,
+    {
+        umps.for_each(drop);
+        Ok(0)
+    }
+}
 
 /// The Event Packets of one UMP that the link holds for the next USB packets
 /// (REQ-USB-EVT-030). At most 48 bytes are held; the buffer has room for 52.
@@ -278,11 +354,11 @@ impl<const CABLES: usize, const X: usize> MidiLink<CABLES, X> {
     /// A link with `config`, at Alternate Setting 0. [`LinkError::InvalidPacketSize`] when
     /// `config.max_packet` is below 4. `CABLES` must be 1 to 16 (checked at compile time).
     pub fn new(config: LinkConfig) -> Result<Self, LinkError> {
-        let ump_writer = UmpPacketWriter::new(config.max_packet)?;
+        let ump_writer = UmpWriter::new(config.max_packet)?;
         Ok(MidiLink {
             setting: SettingNumber::MIDI1,
             alt0: Alt0::new(&config)?,
-            ump_reader: UmpPacketReader::new(config.receive, config.mask),
+            ump_reader: UmpReader::new(config.receive, config.mask),
             ump_writer,
             alt0_max_packet: config.max_packet,
         })
@@ -362,7 +438,7 @@ impl<const CABLES: usize, const X: usize> MidiLink<CABLES, X> {
         self.ump_writer.reset();
         if matches!(event, LinkEvent::UsbReset | LinkEvent::ConfigurationChange) {
             // Alternate Setting 0 again: the packet size of its endpoint (REQ-USB-MS2-009).
-            if let Ok(w) = UmpPacketWriter::new(self.alt0_max_packet) {
+            if let Ok(w) = UmpWriter::new(self.alt0_max_packet) {
                 self.ump_writer = w;
             }
         }
@@ -381,7 +457,7 @@ impl<const CABLES: usize, const X: usize> MidiLink<CABLES, X> {
         mask: GroupMask,
         max_packet: u16,
     ) -> Result<(), LinkError> {
-        let writer = UmpPacketWriter::new(max_packet)?;
+        let writer = UmpWriter::new(max_packet)?;
         self.report(LinkEvent::AlternateSetting(setting));
         self.ump_writer = writer;
         self.ump_reader.set_mask(mask);
@@ -399,7 +475,10 @@ impl<const CABLES: usize, const X: usize> MidiLink<CABLES, X> {
     pub fn read<'a>(&'a mut self, bytes: &'a [u8]) -> LinkRead<'a, CABLES, X> {
         let inner = match self.setting.mode() {
             LinkMode::EventPackets => self.alt0.read(bytes),
+            #[cfg(feature = "alt1")]
             LinkMode::Ump => ReadInner::Ump(self.ump_reader.read(bytes)),
+            #[cfg(not(feature = "alt1"))]
+            LinkMode::Ump => ReadInner::None,
         };
         LinkRead { inner }
     }
@@ -407,12 +486,16 @@ impl<const CABLES: usize, const X: usize> MidiLink<CABLES, X> {
     /// Reads all of `bytes` as [`Self::read`] does and gives each item to `sink`, in order.
     /// It uses the callback form of each reader, so a build that uses only this form links no
     /// iterator (OPT-021).
+    #[cfg_attr(not(feature = "alt1"), allow(unused_mut))]
     pub fn read_with(&mut self, bytes: &[u8], mut sink: impl FnMut(Result<Received, LinkError>)) {
         match self.setting.mode() {
             LinkMode::EventPackets => self.alt0.read_with(bytes, sink),
+            #[cfg(feature = "alt1")]
             LinkMode::Ump => self.ump_reader.read_with(bytes, |x| {
                 sink(x.map(Received::Ump).map_err(LinkError::from))
             }),
+            #[cfg(not(feature = "alt1"))]
+            LinkMode::Ump => {}
         }
     }
 
@@ -668,10 +751,15 @@ pub struct LinkRead<'a, const CABLES: usize, const X: usize = 0> {
 enum ReadInner<'a, const CABLES: usize, const X: usize> {
     #[cfg(feature = "alt0")]
     Event(event_packet::PacketRead<'a, CABLES, X>),
-    /// Alternate Setting 0 with no data path (no feature `alt0`).
-    #[cfg(not(feature = "alt0"))]
+    /// A setting with no data path (no feature `alt0` or no feature `alt1`).
+    #[cfg(any(not(feature = "alt0"), not(feature = "alt1")))]
     None,
+    #[cfg(feature = "alt1")]
     Ump(ump_usb::UmpRead<'a>),
+    /// Holds the lifetime in a build with no data path at all (neither `alt0` nor `alt1`).
+    #[cfg(not(any(feature = "alt0", feature = "alt1")))]
+    #[allow(dead_code)]
+    Never(core::marker::PhantomData<&'a ()>),
 }
 
 impl<const CABLES: usize, const X: usize> Iterator for LinkRead<'_, CABLES, X> {
@@ -683,17 +771,21 @@ impl<const CABLES: usize, const X: usize> Iterator for LinkRead<'_, CABLES, X> {
             ReadInner::Event(r) => r
                 .next()
                 .map(|x| x.map(Received::EventPacket).map_err(LinkError::from)),
-            #[cfg(not(feature = "alt0"))]
+            #[cfg(any(not(feature = "alt0"), not(feature = "alt1")))]
             ReadInner::None => None,
+            #[cfg(feature = "alt1")]
             ReadInner::Ump(r) => r
                 .next()
                 .map(|x| x.map(Received::Ump).map_err(LinkError::from)),
+            #[cfg(not(any(feature = "alt0", feature = "alt1")))]
+            ReadInner::Never(_) => None,
         }
     }
 }
 
-// The tests use Alternate Setting 0; `no_alt0_tests` covers the build without the feature.
-#[cfg(all(test, feature = "alt0"))]
+// The tests use Alternate Setting 0 and a USB MIDI 2.0 setting; `no_alt0_tests` and `no_alt1_tests` cover
+// the builds without the features.
+#[cfg(all(test, feature = "alt0", feature = "alt1"))]
 mod tests {
     extern crate std;
 
@@ -1275,7 +1367,7 @@ mod tests {
     }
 }
 
-#[cfg(all(test, not(feature = "alt0")))]
+#[cfg(all(test, not(feature = "alt0"), feature = "alt1"))]
 mod no_alt0_tests {
     extern crate std;
 
@@ -1304,5 +1396,68 @@ mod no_alt0_tests {
         let mut umps = [words].into_iter().peekable();
         assert_eq!(l.write_packet(&mut umps, &mut out), Ok(4));
         assert_eq!(l.read(&0x2090_3C64u32.to_le_bytes()).count(), 1);
+    }
+}
+
+#[cfg(all(test, feature = "alt0", not(feature = "alt1")))]
+mod no_alt1_tests {
+    extern crate std;
+
+    use super::*;
+    use crate::device::{function_len, DeviceError, FunctionConfig, Midi2Setting};
+    use crate::BusSpeed;
+    use std::vec::Vec;
+
+    #[test]
+    fn without_alt1_the_default_function_has_only_alternate_setting_0() {
+        // REQ-USB-GEN-015: the default function is USB-MIDI 1.0 only, and a USB MIDI 2.0 setting is
+        // refused by the configuration and by the writer.
+        let mut cfg = FunctionConfig::<'static, 4, 1, 2, 1>::new(0, 1, BusSpeed::Full).unwrap();
+        assert_eq!(cfg.alternate_settings(), 1);
+        assert!(cfg.midi2_setting(1).is_none());
+        assert_eq!(
+            cfg.endpoints().filter(|e| e.alternate_setting > 0).count(),
+            0
+        );
+        let s = Midi2Setting::<2, 1>::new(BusSpeed::Full).unwrap();
+        assert_eq!(cfg.add_midi2_setting(s), Err(DeviceError::TooManySettings));
+        assert!(cfg.midi2.push(s).is_ok());
+        assert_eq!(function_len(&cfg), Err(DeviceError::TooManySettings));
+    }
+
+    #[test]
+    fn without_alt1_a_midi2_setting_moves_no_data() {
+        // REQ-USB-GEN-015: at a USB MIDI 2.0 setting the link reads no UMP, takes each UMP and writes
+        // no packet; Alternate Setting 0 still moves Event Packets. The Group mask and the packet size
+        // stay as the API gives them.
+        let mut l = MidiLink::<1>::new(LinkConfig::default()).unwrap();
+        assert_eq!(l.packet_size(), 64);
+        assert_eq!(l.mask(), GroupMask::ALL);
+        let words: &[u32] = &[0x2090_3C64];
+        let mut out = [0u8; 64];
+        let mut umps = [words].into_iter().peekable();
+        assert_eq!(l.write_packet(&mut umps, &mut out), Ok(4));
+
+        l.report(LinkEvent::AlternateSetting(SettingNumber(1)));
+        assert_eq!(l.mode(), LinkMode::Ump);
+        let word = 0x2090_3C64u32.to_le_bytes();
+        assert_eq!(l.read(&word).count(), 0);
+        let mut got = Vec::new();
+        l.read_with(&word, |x| got.push(x));
+        assert!(got.is_empty());
+        let mut umps = [words, words].into_iter().peekable();
+        assert_eq!(l.write_packet(&mut umps, &mut out), Ok(0));
+        assert!(umps.peek().is_none());
+        assert!(!l.pending() && !l.holds_part());
+        assert_eq!(
+            l.report_setting(SettingNumber(1), GroupMask::EMPTY, 3),
+            Err(LinkError::InvalidPacketSize)
+        );
+        assert_eq!(
+            l.report_setting(SettingNumber(1), GroupMask::EMPTY, 30),
+            Ok(())
+        );
+        assert_eq!(l.packet_size(), 28);
+        assert_eq!(l.mask(), GroupMask::EMPTY);
     }
 }

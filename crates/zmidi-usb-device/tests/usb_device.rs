@@ -1,6 +1,6 @@
 //! Host tests of the usb-device adapter with a fake `UsbBus` (DEC-015 verification).
 //! They use Alternate Setting 0 with ports (feature `alt0`).
-#![cfg(feature = "alt0")]
+#![cfg(all(feature = "alt0", feature = "alt1"))]
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard};

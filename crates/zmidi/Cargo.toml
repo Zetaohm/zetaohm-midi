@@ -30,11 +30,11 @@ full = ["midi1", "midi2"]
 # Group features (DEC-022). `midi1`: every MIDI 1.0 part with no MIDI 2.0 code; build with
 # `default-features = false, features = ["midi1"]` for MIDI 1.0-only firmware. `midi2`: each part with
 # its MIDI 2.0 functions (the MIDI 1.0 parts too, with the MIDI 2.0 Protocol in them).
-midi1 = ["ump-midi1", "io-midi1", "file-midi1", "ble-midi1"]
+midi1 = ["ump-midi1", "io-midi1", "file-midi1", "ble-midi1", "usb-midi1"]
 midi2 = ["ump", "io", "ci", "ci-pe", "file", "net", "usb", "ble"]
 # Each part, with the default features of its crate. A `-midi1` part is the same crate with no MIDI 2.0
 # code: the MIDI 1.0 message families of zmidi-ump, zmidi-io with no MIDI 2.0 Protocol, zmidi-file with
-# no Clip File, zmidi-ble with no MIDI 2.0 Protocol.
+# no Clip File, zmidi-ble with no MIDI 2.0 Protocol, zmidi-usb with no USB MIDI 2.0 setting.
 ump-midi1 = ["zmidi-ump/system-common", "zmidi-ump/channel-voice1", "zmidi-ump/sysex7"]
 ump = ["ump-midi1", "zmidi-ump/full"]
 io-midi1 = ["dep:zmidi-io"]
@@ -44,7 +44,8 @@ ci-pe = ["dep:zmidi-ci-pe", "zmidi-ci-pe/initiator"]
 file-midi1 = ["dep:zmidi-file"]
 file = ["file-midi1", "zmidi-file/full"]
 net = ["dep:zmidi-net"]
-usb = ["dep:zmidi-usb", "zmidi-usb/alt0"]
+usb-midi1 = ["dep:zmidi-usb", "zmidi-usb/alt0"]
+usb = ["usb-midi1", "zmidi-usb/alt1"]
 ble-midi1 = ["dep:zmidi-ble"]
 ble = ["ble-midi1", "zmidi-ble/midi2-protocol"]
 # "zlib+Mcoded7" Property Data (zmidi-ci-pe, DEC-PE-004); off by default.

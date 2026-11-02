@@ -74,6 +74,7 @@ join3(device.run(), rx, tx).await;
 | Feature | Default | Description |
 |---|---|---|
 | `alt0` | yes | Turns on `zmidi-usb/alt0`: the USB-MIDI 1.0 data path of Alternate Setting 0. About 3.1 KB of flash. |
+| `alt1` | yes | Turns on `zmidi-usb/alt1`: the USB MIDI 2.0 Alternate Settings. Without it, a USB-MIDI 1.0-only class with no MIDI 2.0 code. |
 
 ## Notes
 

@@ -54,6 +54,7 @@ midi.write(&mut umps, &mut out).ok();
 | Feature | Default | Description |
 |---|---|---|
 | `alt0` | yes | Turns on `zmidi-usb/alt0`: the USB-MIDI 1.0 data path of Alternate Setting 0. About 3.3 KB of flash. |
+| `alt1` | yes | Turns on `zmidi-usb/alt1`: the USB MIDI 2.0 Alternate Settings. Without it, a USB-MIDI 1.0-only class with no MIDI 2.0 code. |
 
 ## Notes
 
