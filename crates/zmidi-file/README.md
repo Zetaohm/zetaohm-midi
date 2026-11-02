@@ -18,8 +18,6 @@ Part of [zetaohm-midi](../../README.md).
   tracks in file order (unknown chunks are skipped), and each event with its delta-time, absolute ticks and
   running status.
 - `SmfWriter`: writes a Standard MIDI File into your buffer, with running status (on by default).
-- Feature `full` (on by default): the Clip reader decodes every UMP message family. With it off, it decodes
-  only the families of its own rules and gives the others as `Ump::Unknown`.
 
 ## Example
 
@@ -54,7 +52,11 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
 
 ## Cargo features
 
-None.
+- `full` (on by default): turns on `clip`, and the Clip reader decodes every UMP message family. With it off and
+  `clip` on, the Clip reader decodes only the families of its own rules and gives the others as `Ump::Unknown`.
+- `clip` (on through `full`): the MIDI Clip File modules (`ClipReader`, `ClipWriter`, `clip_format`). Without it,
+  the crate has only the Standard MIDI File modules and links no MIDI 2.0 code: use
+  `default-features = false` for a MIDI 1.0-only build.
 
 ## License
 

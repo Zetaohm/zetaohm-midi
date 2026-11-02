@@ -113,8 +113,8 @@ net_client = ["dep:zmidi-net"]
 net_host = ["dep:zmidi-net"]
 # zmidi-file: Standard MIDI File reader (all tracks), MIDI Clip File reader and writer.
 smf_read = ["dep:zmidi-file"]
-clip_read = ["dep:zmidi-file"]
-clip_write = ["dep:zmidi-file"]
+clip_read = ["dep:zmidi-file", "zmidi-file/clip"]
+clip_write = ["dep:zmidi-file", "zmidi-file/clip"]
 
 [profile.release]
 opt-level = "s"
