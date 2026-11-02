@@ -5,15 +5,15 @@
 
 #![no_std]
 
-#[cfg(feature = "ble")]
+#[cfg(feature = "ble-midi1")]
 pub use zmidi_ble as ble;
 #[cfg(feature = "ci")]
 pub use zmidi_ci as ci;
 #[cfg(feature = "ci-pe")]
 pub use zmidi_ci_pe as ci_pe;
-#[cfg(feature = "file")]
+#[cfg(feature = "file-midi1")]
 pub use zmidi_file as file;
-#[cfg(feature = "io")]
+#[cfg(feature = "io-midi1")]
 pub use zmidi_io as io;
 #[cfg(feature = "net")]
 pub use zmidi_net as net;

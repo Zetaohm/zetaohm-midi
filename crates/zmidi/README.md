@@ -45,9 +45,13 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
 
 | Feature | Default | Description |
 |---|---|---|
-| `full` | yes | All the parts below that are on by default. |
+| `full` | yes | `midi1` and `midi2`: all the parts below that are on by default. |
+| `midi1` | via `full` | Every MIDI 1.0 part with no MIDI 2.0 code: `ump-midi1`, `io-midi1`, `file-midi1`, `ble-midi1`. Use `default-features = false, features = ["midi1"]` for MIDI 1.0-only firmware. |
+| `midi2` | via `full` | Each part with its MIDI 2.0 functions: `ump`, `io`, `ci`, `ci-pe`, `file`, `net`, `usb`, `ble`. |
 | `ump` | yes | All UMP message families (`zmidi-ump/full`). The `ump` module is always present. |
+| `ump-midi1` | yes | The MIDI 1.0 message families only (System, MIDI 1.0 Channel Voice, SysEx7). |
 | `io`, `ci`, `ci-pe`, `file`, `net`, `usb`, `ble` | yes | The module of the same name, with the default features of its crate. |
+| `io-midi1`, `file-midi1`, `ble-midi1` | yes | The module of the same name with no MIDI 2.0 code: no MIDI 2.0 Protocol in `io` and `ble`, no MIDI Clip File in `file`. |
 | `auth` | no | Network MIDI 2.0 authentication (`zmidi-net/auth`). |
 | `zlib` | no | The `zlib+Mcoded7` Property Exchange encoding (`zmidi-ci-pe/zlib`). |
 

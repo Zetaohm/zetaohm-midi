@@ -19,6 +19,7 @@ smallest build of each job.
 """
 
 import argparse
+import re
 import os
 import shutil
 import subprocess
@@ -190,6 +191,20 @@ def tool(name):
     sys.exit(f"size-check: no {name} (rustup component add llvm-tools)")
 
 
+# A job whose name ends in `_midi1` is a MIDI 1.0-only build (DEC-022): it fails when a symbol of a
+# MIDI 2.0 module is in its ELF.
+MIDI2_SYMBOLS = re.compile(
+    r"zmidi_ump::(translate::|channel_voice2|flex_data|ump_stream|data128)|zmidi_usb::(ms2|gtb|ump_usb)::"
+    r"|zmidi_ci|zmidi_net|Midi1ToMidi2|midi2_to_midi1"
+)
+
+
+def midi2_symbols(elf):
+    out = subprocess.run([tool("llvm-nm"), "--demangle", "--defined-only", elf], capture_output=True, text=True,
+                         check=True).stdout
+    return sorted({line.split(None, 2)[-1] for line in out.splitlines() if MIDI2_SYMBOLS.search(line)})
+
+
 def measure(features, build):
     if build:
         cmd = ["cargo", "build", "--quiet", "--release", "--target", TARGET]
@@ -204,7 +219,7 @@ def measure(features, build):
             sec[parts[0]] = int(parts[1])
     flash = sec.get(".text", 0) + sec.get(".rodata", 0) + sec.get(".data", 0)
     ram = sec.get(".data", 0) + sec.get(".bss", 0) + sec.get(".uninit", 0)
-    return flash, ram, peak_stack(ELF)
+    return flash, ram, peak_stack(ELF), midi2_symbols(ELF)
 
 
 def ratio(ours, other):
@@ -271,8 +286,8 @@ def main():
     rows = []
     for name in names:
         features, ref, fb, rb, of, orr, which = JOBS[name]
-        f1, r1, st = get(features)
-        f0, r0, _ = get(ref)
+        f1, r1, st, m2 = get(features)
+        f0, r0, _, _ = get(ref)
         flash, ram = f1 - f0, r1 - r0
         ost = OTHER_STACK.get(name)
         rows.append((name, features, ref, flash, ram, st, of, orr, ost, which))
@@ -281,6 +296,8 @@ def main():
             failed.append(f"{name}: flash {flash} B, budget {fb} B")
         if ram > rb:
             failed.append(f"{name}: RAM {ram} B, budget {rb} B")
+        if name.endswith("_midi1") and m2:
+            failed.append(f"{name}: MIDI 2.0 code in a MIDI 1.0-only build: {', '.join(m2[:5])}")
     for f in failed:
         print(f"size-check: FAIL {f}", file=sys.stderr)
     if a.markdown:
