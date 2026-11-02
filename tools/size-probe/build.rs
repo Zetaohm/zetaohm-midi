@@ -17,6 +17,10 @@ fn main() {
     if env::var_os("CARGO_FEATURE_USB2_LEAN").is_some() {
         cfg.midi1 = Some(empty.clone());
     }
+    // usb2_midi1: a USB-MIDI 1.0-only function (Alternate Setting 0 only).
+    if env::var_os("CARGO_FEATURE_USB2_MIDI1").is_some() {
+        cfg = FunctionConfig::midi1_only(0, 1, BusSpeed::Full);
+    }
     let mut src = String::new();
     zmidi_usb::fixed::write_rust(&cfg, "MIDI_FN", &mut src).unwrap();
     fs::write(out.join("midi_fn.rs"), src).unwrap();

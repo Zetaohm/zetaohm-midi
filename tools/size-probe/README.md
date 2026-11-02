@@ -27,3 +27,6 @@ of the plan (DEC-018): the word paths are now in the crates, so it no longer app
 
 The features `down_words` (`midi2_to_midi1`) and `bytes_core` (`BytesToUmpCore` with no translator) measure the
 word APIs of DEC-018.
+
+The features `usb2_midi1` (with `usb2` or `usb2_fixed`: a USB-MIDI 1.0-only function, `FunctionConfig::midi1_only`)
+and `ble_midi1` (with `ble_rx` or `ble_rx_words`: the MIDI 1.0 Protocol) measure MIDI 1.0-only builds (OPT-056).

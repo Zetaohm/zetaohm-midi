@@ -116,7 +116,10 @@ mod usb {
         let midi = usbd_midi::UsbMidiClass::new(alloc, 1, 1).unwrap();
         #[cfg(feature = "usb2_fixed_any")]
         let midi = {
+            #[cfg(not(feature = "usb2_midi1"))]
             static STREAMING: [Option<&str>; 2] = [Some("MIDI 1.0"), Some("MIDI 2.0")];
+            #[cfg(feature = "usb2_midi1")]
+            static STREAMING: [Option<&str>; 1] = [Some("MIDI 1.0")];
             let names = zmidi_usb_device::InterfaceNames { audio_control: Some("FLXS1"), streaming: &STREAMING };
             zmidi_usb_device::MidiClass::fixed(alloc, &MIDI_FN, names, zmidi_usb::LinkConfig::default()).unwrap()
         };
@@ -124,8 +127,14 @@ mod usb {
         let midi = {
             use zmidi_usb::device::FunctionConfig;
             use zmidi_usb::{BusSpeed, LinkConfig};
+            #[cfg(not(feature = "usb2_midi1"))]
             static STREAMING: [Option<&str>; 2] = [Some("MIDI 1.0"), Some("MIDI 2.0")];
+            #[cfg(feature = "usb2_midi1")]
+            static STREAMING: [Option<&str>; 1] = [Some("MIDI 1.0")];
+            #[cfg(not(feature = "usb2_midi1"))]
             let cfg = FunctionConfig::new(0, 0, BusSpeed::Full).unwrap();
+            #[cfg(feature = "usb2_midi1")]
+            let cfg = FunctionConfig::midi1_only(0, 0, BusSpeed::Full);
             let names = zmidi_usb_device::InterfaceNames { audio_control: Some("FLXS1"), streaming: &STREAMING };
             zmidi_usb_device::MidiClass::new(alloc, cfg, names, LinkConfig::default()).unwrap()
         };
@@ -237,7 +246,10 @@ mod emb {
         };
         #[cfg(feature = "emb2_any")]
         {
+            #[cfg(not(feature = "usb2_midi1"))]
             static STREAMING: [Option<&str>; 2] = [Some("MIDI 1.0"), Some("MIDI 2.0")];
+            #[cfg(feature = "usb2_midi1")]
+            static STREAMING: [Option<&str>; 1] = [Some("MIDI 1.0")];
             let names = zmidi_usb_embassy::InterfaceNames { audio_control: Some("FLXS1"), streaming: &STREAMING };
             let state = unsafe { &mut *(&raw mut STATE) };
             #[cfg(not(feature = "emb2_fixed_any"))]
@@ -945,22 +957,34 @@ mod transport {
         black_box(w);
     }
 
+    #[cfg(any(feature = "ble_rx", feature = "ble_rx_words"))]
+    const PROTOCOL: zmidi_ble::zmidi_ump::StreamProtocol = if cfg!(feature = "ble_midi1") {
+        zmidi_ble::zmidi_ump::StreamProtocol::Midi1
+    } else {
+        zmidi_ble::zmidi_ump::StreamProtocol::Midi2
+    };
+
     #[cfg(feature = "ble_rx")]
     fn ble_rx() {
-        use zmidi_ble::zmidi_ump::{Group, StreamProtocol, Ump};
+        use zmidi_ble::zmidi_ump::{Group, Ump};
         static mut R: core::mem::MaybeUninit<zmidi_ble::PacketReader> = core::mem::MaybeUninit::uninit();
         static mut INIT: bool = false;
         // SAFETY: one thread, no interrupt.
         let r = unsafe {
             if !INIT {
-                (*(&raw mut R)).write(zmidi_ble::PacketReader::new(Group::default(), StreamProtocol::Midi2));
+                (*(&raw mut R)).write(zmidi_ble::PacketReader::new(Group::default(), PROTOCOL));
                 INIT = true;
             }
             (*(&raw mut R)).assume_init_mut()
         };
         r.read(input_bytes(), |x| match x {
             Ok(rx) => {
+                #[cfg(not(feature = "ble_midi1"))]
                 if let Ump::Midi2ChannelVoice(m) = rx.ump {
+                    black_box(&m);
+                }
+                #[cfg(feature = "ble_midi1")]
+                if let Ump::Midi1ChannelVoice(m) = rx.ump {
                     black_box(&m);
                 }
                 black_box(rx.timestamp);
@@ -973,13 +997,13 @@ mod transport {
 
     #[cfg(feature = "ble_rx_words")]
     fn ble_rx_words() {
-        use zmidi_ble::zmidi_ump::{Group, StreamProtocol};
+        use zmidi_ble::zmidi_ump::Group;
         static mut R: core::mem::MaybeUninit<zmidi_ble::PacketReader> = core::mem::MaybeUninit::uninit();
         static mut INIT: bool = false;
         // SAFETY: one thread, no interrupt.
         let r = unsafe {
             if !INIT {
-                (*(&raw mut R)).write(zmidi_ble::PacketReader::new(Group::default(), StreamProtocol::Midi2));
+                (*(&raw mut R)).write(zmidi_ble::PacketReader::new(Group::default(), PROTOCOL));
                 INIT = true;
             }
             (*(&raw mut R)).assume_init_mut()

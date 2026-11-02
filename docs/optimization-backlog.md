@@ -1323,3 +1323,19 @@ Other sizes measured at the same time, no action proposed: `SendOrder` 96, `JrRe
     state: OPT-004 option 1 removes the 1332-byte `ended` table. `ZlibInflater::new` is not measured yet (`zlib`).
 - Status (2026-10-26): closed. The parts with no `unsafe` are done; the rest (`PeEngine::new`, the `[None; N]` arrays
   built on the stack) needs `MaybeUninit` (`unsafe`), which the library does not use.
+
+### OPT-056 — The USB-MIDI 1.0 class is about 4x the size of usbd-midi
+
+- Area: `crates/zmidi-usb` (`MidiLink`, `event_packet.rs`, `device.rs`) and `crates/zmidi-usb-device`.
+- Measurement (2026-11-02, `tools/size-probe`, class flash with the `usb_core` build subtracted): a USB-MIDI 1.0-only
+  function (`FunctionConfig::midi1_only`, probe feature `usb2_midi1`) is 7,868 B with fixed descriptors and 16,532 B
+  with descriptors made at run time; `usbd-midi` 0.5 (probe feature `usb1`) is 1,552 B. A scratch build with the
+  USB MIDI 2.0 data path of the link removed (the planned feature `alt1` off) is 6,732 B (fixed) and 15,396 B (run
+  time).
+- Cause: the class selects the Alternate Setting at run time, so the USB MIDI 2.0 path stays linked (planned fix: the
+  feature `alt1`, MIDI 1.0 plan track 0, M1). The rest is the Event Packet path with SysEx handling and several
+  cables, the conversion between Event Packets and UMP, and the descriptor and request code; `usbd-midi` writes raw
+  Event Packets for one fixed cable.
+- Options: after `alt1`, measure the Event Packet path by function (`inl.py`); a word-level Event Packet API with no
+  UMP conversion for MIDI 1.0-only firmware; fixed descriptors as the default of the 1.0-only examples. Each option
+  must not change a MIDI 2.0 build (no flash, RAM or CPU increase).

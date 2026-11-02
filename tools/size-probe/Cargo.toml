@@ -42,6 +42,8 @@ usb1 = ["dep:usbd-midi"]
 # usb2_any and emb2_any: the class code; usb2 and emb2 add Alternate Setting 0 (feature alt0, DEC-014 addendum).
 usb2_any = ["dep:zmidi-usb-device", "dep:zmidi-usb", "ump_full"]
 usb2 = ["usb2_any", "zmidi-usb-device/alt0"]
+# usb2 with a USB-MIDI 1.0-only function (FunctionConfig::midi1_only: Alternate Setting 0 only).
+usb2_midi1 = ["usb2"]
 # The usb-device core with no class: the class cost is usb1 or usb2 minus this.
 usb_core = []
 # The embassy-usb device with no class (stub driver, src/edriver.rs): an embassy class costs
@@ -104,6 +106,8 @@ ble_rx = ["dep:zmidi-ble"]
 # ble_rx with the word form PacketReader::read_words (DEC-BLE-002).
 ble_rx_words = ["dep:zmidi-ble"]
 ble_tx = ["dep:zmidi-ble"]
+# ble_rx and ble_rx_words with MIDI 1.0 Protocol output (StreamProtocol::Midi1).
+ble_midi1 = []
 # zmidi-net: a Network MIDI 2.0 Client with one session, and a Host with one session (no auth).
 net_client = ["dep:zmidi-net"]
 net_host = ["dep:zmidi-net"]
