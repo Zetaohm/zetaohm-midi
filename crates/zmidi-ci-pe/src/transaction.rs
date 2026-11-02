@@ -1103,8 +1103,10 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
             Err(e) => return Ok(self.closed(host, i, CloseReason::BadReply(e))),
         };
         let class = header.status.map_or(StatusClass::Unknown, Status::class);
-        let started = sub_start.then(|| self.start_reply(i, peer, &header, class));
-        if resource_list && class == StatusClass::Success {
+        // Only an Initiator sends a Subscription "start" or a Get of the ResourceList (OPT-055).
+        let started = (cfg!(feature = "initiator") && sub_start)
+            .then(|| self.start_reply(i, peer, &header, class));
+        if cfg!(feature = "initiator") && resource_list && class == StatusClass::Success {
             self.mark_list(peer);
         }
         if let Some(t) = self.txns[i].as_mut() {
@@ -1637,6 +1639,13 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
         now: u64,
     ) -> Result<RequestInfo, TransactionError> {
         let mut header = msg.header;
+        // OPT-055: without the feature `initiator` this Device is a Responder only. It sends no Get,
+        // no Set and no Subscription "start"; its Subscription updates stay.
+        let initiator_only = matches!(kind, TxnKind::Get | TxnKind::Set)
+            || (kind == TxnKind::Subscription && header.command == Some(Command::Start));
+        if !cfg!(feature = "initiator") && initiator_only {
+            return Err(DeviceError::NotSupported.into());
+        }
         let has_data = msg.total_len.is_some_and(|n| n > 0);
         let op = match kind {
             TxnKind::Get => Some(Operation::Get),

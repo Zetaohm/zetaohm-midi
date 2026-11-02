@@ -4,12 +4,12 @@
 //! with every feature set, also with `--no-default-features`.
 
 use zmidi_ci::{
-    Categories, CiDevice, DeviceConfig, DeviceIdentity, Direction, Framing, ManufacturerId, Muid,
-    PeChunk, PeKind, PiCapabilities,
+    Categories, CiDevice, DeviceConfig, DeviceError, DeviceIdentity, Direction, Framing,
+    ManufacturerId, Muid, PeChunk, PeKind, PiCapabilities,
 };
 use zmidi_ci_pe::{
-    Command, EncodingName, EngineConfig, Header, HeaderKind, PeEngine, PeEvent, ResourceCaps,
-    ResourceEntry, TransactionError, TxnKind,
+    Command, EncodingName, EngineConfig, Header, HeaderKind, HeaderStr, Outgoing, PeEngine,
+    PeEvent, ResourceCaps, ResourceEntry, TransactionError, TxnKind,
 };
 
 type Dev = CiDevice<'static, 4, 2, 8>;
@@ -308,4 +308,35 @@ fn responder_reads_the_replies_to_its_subscription_updates() {
 fn chunk_header(msg: &[u8]) -> Vec<u8> {
     let (h, body) = zmidi_ci::Header::parse(msg).unwrap();
     PeChunk::read(&h, body).unwrap().header.to_vec()
+}
+
+#[test]
+fn request_without_initiator_refuses_get_set_and_start() {
+    // REQ-PE-GEN-006 (OPT-055): without the feature `initiator` the engine is a Responder only:
+    // a Get, a Set and a Subscription "start" give NotSupported. Its Subscription updates still
+    // work in that build (the test above). With the feature, none of them gives NotSupported.
+    let mut b = Responder {
+        dev: device(),
+        eng: PeEngine::new(EngineConfig {
+            resources: resources(),
+            zlib_window: 0,
+        }),
+        now: 1_000,
+    };
+    let peer = Muid::new(SUBSCRIBER).unwrap();
+    let header = |command| Header {
+        resource: Some(HeaderStr::Text("X-Patch")),
+        command,
+        ..Default::default()
+    };
+    for (kind, command) in [
+        (TxnKind::Get, None),
+        (TxnKind::Set, None),
+        (TxnKind::Subscription, Some(Command::Start)),
+    ] {
+        let msg = Outgoing::json(header(command), 0);
+        let r = b.eng.request(&mut b.dev, peer, kind, &msg, None, b.now);
+        let refused = matches!(r, Err(TransactionError::Device(DeviceError::NotSupported)));
+        assert_eq!(refused, !cfg!(feature = "initiator"), "{kind:?}: {r:?}");
+    }
 }

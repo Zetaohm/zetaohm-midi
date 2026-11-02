@@ -37,8 +37,8 @@ BUDGETS = {
     "probe_net_host_poll": 2560,
     "probe_net_host_receive": 6400,
     "probe_pe_new": 1920,
-    "probe_pe_receive": 2368,  # 2,152 after OPT-053 (2026-10-29)
-    "probe_pe_write_pending": 2048,
+    "probe_pe_receive": 1872,  # 2,152 after OPT-053 (2026-10-29); 1,696 after OPT-055 (2026-11-02)
+    "probe_pe_write_pending": 880,  # 1,124 before OPT-055, 796 after (2026-11-02)
 }
 
 

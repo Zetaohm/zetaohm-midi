@@ -741,20 +741,24 @@ Other sizes measured at the same time, no action proposed: `SendOrder` 96, `JrRe
   3. OPT-039: `zmidi-file` still asks for `zmidi-ump/full`.
 - Constraints: DEC-001 (M2-116 rules), DEC-018 (word paths), DEC-021; option 2 adds public API.
 
-### OPT-055 — A responder-only PE engine still links the Initiator reply path
-
-- Area: `crates/zmidi-ci-pe/src/transaction.rs` (`PeEngine::receive`, `on_reply`).
-- Measurement: after OPT-053 the frame of `on_reply` is 760 B. A FLXS1 firmware report (2026-10-30) gives about
-  700 B of stack for this path in a Responder that sends no Get or Set inquiries; its run-time stack has 2,312 B free.
-  Not measured here yet (`scripts/stack-check.py`, a responder-only probe).
-- Cause: `receive` gives each reply Chunk to `on_reply`, and `on_reply` is not behind the feature `initiator` of
-  zmidi-ci-pe. A Responder still needs part of it: it sends Subscription messages and receives the Reply to
-  Subscription (DEC-CI-001 addendum of 2026-10-29).
-- Options: (1) move the Get and Set reply part of `on_reply` behind `initiator`, and keep the Reply to Subscription
-  part; (2) put the Get and Set reply part in a function with `#[inline(never)]`, so that a Responder does not pay its
-  frame. First measure the stack of each part.
-
 ## Done
+
+### OPT-055 — A responder-only PE engine still links the Initiator reply path (done 2026-11-02)
+
+- Area: `crates/zmidi-ci-pe/src/transaction.rs` (`PeEngine::on_reply`, `request`).
+- Measurement (responder-only build: `zmidi-ci-pe` with no feature `initiator`): `probe_pe_receive` 2,152 B of
+  stack, with `on_reply` (760 B) and `start_reply` (384 B) on the deepest path; `probe_pe_write_pending` 1,124 B;
+  the `pe_engine` job 24,196 B of flash. A FLXS1 firmware report asked for it (about 700 B of stack).
+- Cause: a Responder needs `on_reply` only for the Reply to Subscription of its own updates. The subscriber part
+  (`start_reply`) and the ResourceList mark run only after a Subscription "start" or a Get of this Device, but the
+  compiler could not see that, because `request` accepted them in every build.
+- Done: without `initiator`, `request` refuses a Get, a Set and a Subscription "start" with `NotSupported`
+  (REQ-PE-GEN-006), as `zmidi-ci` does for an Initiator call without its feature; the Subscription updates of a
+  Responder stay. Then `on_reply` runs the subscriber part and the ResourceList mark only with `initiator`.
+  Responder-only build: `probe_pe_receive` 2,152 -> 1,696 B (budget 2,368 -> 1,872), `probe_pe_write_pending`
+  1,124 -> 796 B (budget 2,048 -> 880), `pe_engine` 24,196 -> 23,340 B, `pe_engine_no_subscriptions` 21,160 ->
+  20,868 B. The build with `initiator` does not change (`pe_engine` 25,684 B). A firmware gets this with
+  `default-features = false` on `zmidi-ci-pe`.
 
 ### OPT-054 — The one-chunk PE Responder links the streaming Chunk writer (done 2026-10-30)
 
