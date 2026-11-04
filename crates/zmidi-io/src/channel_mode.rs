@@ -633,6 +633,10 @@ mod tests {
             ModeAction::ResetAllControllers { channel: None }
         );
         assert_eq!(s.receive(&cc(1, 123, 0)), ModeAction::Ignore);
+        // RP-015: Reset All Controllers keeps the mode and Local Control (AMB-RP-015-02).
+        s.receive(&cc(0, 122, 0));
+        s.receive(&cc(0, 121, 0));
+        assert_eq!((s.mode(), s.local()), (ReceiveMode::Mode3, false));
     }
 
     #[test]

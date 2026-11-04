@@ -75,7 +75,7 @@ fn main() -> ! {
         remote::run(&w);
         #[cfg(feature = "inject")]
         inject::run(&w);
-        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state"))]
+        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state"))]
         lean::run(&w);
         #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1", feature = "ble_tx_midi1", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
         transport::run(&w);
@@ -786,7 +786,7 @@ mod inject {
 }
 
 // ---------------------------------------------------------------- lean variants
-#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state"))]
+#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state"))]
 mod lean {
     use super::*;
     #[allow(unused_imports)]
@@ -942,6 +942,34 @@ mod lean {
             let mode = unsafe { &mut *(&raw mut MODE) };
             if let Some(m) = zmidi_ump::Midi1ChannelVoiceMessage::parse(&w[16..]) {
                 black_box(mode.receive(&m));
+            }
+        }
+        #[cfg(feature = "ctl_state")]
+        {
+            static mut CTL: [zmidi_io::ControllerState; 16] = [zmidi_io::ControllerState::new(); 16];
+            let ctl = unsafe { &mut *(&raw mut CTL) };
+            if let Some(m) = zmidi_ump::Midi1ChannelVoiceMessage::parse(&w[16..]) {
+                if let Some(state) = ctl.get_mut(m.channel().index() as usize) {
+                    black_box(state.receive(&m));
+                }
+            }
+        }
+        #[cfg(feature = "param_state")]
+        {
+            // One receiver and one held Pitch Bend Sensitivity value (2 semitones) for each channel.
+            static mut PAR: [zmidi_io::ParameterState; 16] = [zmidi_io::ParameterState::new(); 16];
+            static mut PBS: [u16; 16] = [2 << 7; 16];
+            let (par, pbs) = unsafe { (&mut *(&raw mut PAR), &mut *(&raw mut PBS)) };
+            if let Some(m) = zmidi_ump::Midi1ChannelVoiceMessage::parse(&w[16..]) {
+                let ch = m.channel().index() as usize;
+                if let (Some(state), Some(pbs)) = (par.get_mut(ch), pbs.get_mut(ch)) {
+                    if let Some(e) = state.receive(&m) {
+                        if e.parameter == zmidi_io::Parameter::Registered(zmidi_ump::controller::Rpn::PitchBendSensitivity) {
+                            *pbs = e.apply(*pbs);
+                        }
+                        black_box(e);
+                    }
+                }
             }
         }
         #[cfg(feature = "bytes_out")]

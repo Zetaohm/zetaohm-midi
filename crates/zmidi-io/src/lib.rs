@@ -11,10 +11,14 @@
 pub mod byte_stream;
 #[cfg(feature = "channel-mode")]
 pub mod channel_mode;
+#[cfg(feature = "controllers")]
+pub mod controllers;
 pub mod endpoint;
 pub mod jitter_reduction;
 #[cfg(feature = "messages")]
 pub mod messages;
+#[cfg(feature = "parameters")]
+pub mod parameters;
 pub mod router;
 pub mod send_order;
 
@@ -23,12 +27,21 @@ pub use byte_stream::{
 };
 #[cfg(feature = "channel-mode")]
 pub use channel_mode::{ModeAction, ModeConfig, ModeState, ReceiveMode};
+#[cfg(feature = "controllers")]
+pub use controllers::{
+    bank_program_messages, controller14_messages, reset_value, ControllerEvent, ControllerState,
+};
 pub use endpoint::{
     Endpoint, EndpointDescription, EndpointError, FunctionBlock, Replies, StreamConfiguration,
 };
 pub use jitter_reduction::{Disposition, JrError, JrReceiver, JrSender};
 #[cfg(feature = "messages")]
 pub use messages::{MessageError, Midi1Event, Midi1Message, Midi1Reader, Midi1Writer};
+#[cfg(feature = "parameters")]
+pub use parameters::{
+    change_message, select_messages, value_messages, Parameter, ParameterChange, ParameterEvent,
+    ParameterState,
+};
 pub use router::{blocks_for_group, ci_address, route, BlocksForGroup, CiAddress, Destination};
 pub use send_order::{end_mds_early, SendOrder, SendOrderError};
 
@@ -40,7 +53,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("channel-mode = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\"]"),
+            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\"]"),
             "{manifest}"
         );
     }
@@ -52,7 +65,32 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("default = [\"full\"]"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\"]"),
+            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\"]"),
+            "{manifest}"
+        );
+    }
+
+    #[test]
+    fn controllers_is_in_the_default_features() {
+        // REQ-CTRL-010: the controller state is on by default (`full` turns on `controllers`).
+        let manifest = include_str!("../Cargo.toml");
+        assert!(manifest.contains("controllers = []"), "{manifest}");
+        assert!(
+            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\"]"),
+            "{manifest}"
+        );
+    }
+
+    #[test]
+    fn parameters_is_in_the_default_features() {
+        // REQ-PARAM-007: the parameter receiver is on by default (`full` turns on `parameters`).
+        let manifest = include_str!("../Cargo.toml");
+        assert!(
+            manifest.contains("parameters = [\"zmidi-ump/channel-voice1\"]"),
+            "{manifest}"
+        );
+        assert!(
+            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\"]"),
             "{manifest}"
         );
     }

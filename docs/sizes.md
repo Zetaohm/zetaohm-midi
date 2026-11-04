@@ -37,6 +37,8 @@ the goal is 1.0x for the smallest build of each job (OPT-052).
 | `din_in_typed_midi1` | DIN bytes to typed MIDI 1.0 messages (`Midi1Reader::feed`, 64-byte SysEx buffer, DEC-022) | 1,936 | 852 | 2.3x | 92 | 52 | 1.8x | 64 | - | midi2 C99 midi2_conv |
 | `din_out_typed_midi1` | typed MIDI 1.0 messages to DIN bytes (`Midi1Writer::write_each`; the probe makes each message with `parse`, DEC-022) | 1,100 | 1,160 | 0.9x | 4 | 104 | 0.0x | 16 | - | AM_MIDI2.0Lib umpToBytestream |
 | `mode_state_midi1` | MIDI 1.0 receiver mode state, one instrument (`ModeState::receive`; the probe makes the message with `parse`, DEC-022) | 804 | - | - | 8 | - | - | 28 | - | none (no other library has a mode state) |
+| `ctl_state_midi1` | MIDI 1.0 controller state, 16 channels (`ControllerState::receive`; the probe makes the message with `parse`, DEC-022) | 640 | - | - | 544 | - | - | 24 | - | none (no other library has a controller state) |
+| `param_state_midi1` | MIDI 1.0 parameter receiver, 16 channels, with one held Pitch Bend Sensitivity value each (`ParameterState::receive`, `ParameterEvent::apply`; DEC-022) | 536 | - | - | 112 | - | - | 48 | - | none (no other library has a parameter receiver) |
 | `usb_class` | USB MIDI 2.0 class on usb-device, run-time `FunctionConfig` | 17,176 | 3,556 | 4.8x | 644 | 666 | 1.0x | 2,424 | - | tusb_ump class driver (object) |
 | `usb_class_fixed` | USB MIDI 2.0 class on usb-device, fixed function from the build script | 8,052 | 3,556 | 2.3x | 464 | 666 | 0.7x | 1,520 | - | tusb_ump class driver (object) |
 | `usb_class_lean` | usb_class_fixed with the feature alt0 off: empty Alternate Setting 0, no USB-MIDI 1.0 data path | 4,872 | 3,556 | 1.4x | 364 | 666 | 0.5x | 1,224 | - | tusb_ump class driver (object), with Alt 0 |

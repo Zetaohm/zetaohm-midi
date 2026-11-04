@@ -25,7 +25,7 @@ thiserror = { version = "2", default-features = false }
 [features]
 # DEC-002: the core API needs no alloc. DEC-017: all features on by default.
 default = ["full"]
-full = ["midi2-protocol", "messages", "channel-mode"]
+full = ["midi2-protocol", "messages", "channel-mode", "controllers", "parameters"]
 # BytesToUmp::new with StreamProtocol::Midi2: MIDI 2.0 Protocol output through the translator
 # (M2-104 D.3). Off: BytesToUmp holds no translator (BytesToUmp::midi1 only).
 # Also the MIDI 2.0 Channel Voice family of zmidi-ump: `UmpToBytes` translates a MIDI 2.0 Channel Voice
@@ -35,6 +35,12 @@ midi2-protocol = ["zmidi-ump/channel-voice2"]
 messages = []
 # MIDI 1.0 receiver mode state: Modes 1 to 4, Channel Mode messages (module channel_mode, DEC-022).
 channel-mode = []
+# MIDI 1.0 controller state of one channel: 14-bit pairs, bank and program, RP-015 reset (module
+# controllers, DEC-022).
+controllers = []
+# MIDI 1.0 parameter receiver of one channel: RPN and NRPN, RP-018 steps (module parameters, DEC-022).
+# It uses the RPN meanings of zmidi-ump (module controller, behind its feature channel-voice1).
+parameters = ["zmidi-ump/channel-voice1"]
 
 [dev-dependencies]
 proptest = "1"

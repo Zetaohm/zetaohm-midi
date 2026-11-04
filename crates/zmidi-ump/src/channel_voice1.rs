@@ -674,6 +674,12 @@ impl Midi1ChannelVoiceMessage {
         }
     }
 
+    /// The channel of the message (the 4-bit channel field of Figures 38 to 44), so that a
+    /// receiver can give the message to the state of that channel (REQ-CV1-012).
+    pub const fn channel(&self) -> Channel {
+        Channel::from_bits((self.into_bits() >> 16) as u8)
+    }
+
     /// The packet as one 32-bit word (Message Type 0x2), for a writer that takes words (DEC-018).
     pub const fn into_bits(self) -> u32 {
         match self {
@@ -976,6 +982,16 @@ mod tests {
             }
             let off = Midi1NoteOff::try_new(g(gi), c(ci), note, vel).unwrap();
             prop_assert_eq!(Midi1ChannelVoiceMessage::NoteOff(off).note_off(), Some(off));
+        });
+    }
+
+    #[test]
+    fn prop_channel_voice_message_gives_its_channel() {
+        // Figures 38 to 44: every opcode has the 4-bit channel field at the same place.
+        proptest!(|(op in 0x8u32..=0xE, gi in 0u8..16, ci in 0u8..16, d in 0u32..0x8000)| {
+            let w = 0x2000_0000 | ((gi as u32) << 24) | (op << 20) | ((ci as u32) << 16) | (d & 0x7F7F);
+            let m = Midi1ChannelVoiceMessage::parse(&[w]).unwrap();
+            prop_assert_eq!(m.channel(), c(ci));
         });
     }
 

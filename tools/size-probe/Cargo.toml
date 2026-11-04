@@ -108,6 +108,10 @@ msg_in = ["io", "zmidi-io/messages"]
 msg_out = ["io", "zmidi-io/messages"]
 # The MIDI 1.0 receiver mode state (zmidi-io channel-mode, DEC-022).
 mode_state = ["io", "zmidi-io/channel-mode"]
+# The MIDI 1.0 controller state and parameter receiver, 16 channels (zmidi-io controllers and
+# parameters, DEC-022).
+ctl_state = ["io", "zmidi-io/controllers"]
+param_state = ["io", "zmidi-io/parameters"]
 up_lean = ["ump_full"]
 # MIDI 1.0 to 2.0 Protocol, word API (Midi1ToMidi2Group::translate_words), one Group.
 up_words = ["ump_full"]
