@@ -62,7 +62,7 @@ JOBS = {
     # MIDI 1.0-only USB class (DEC-022): FunctionConfig::midi1_only, zmidi-usb with alt0 and no alt1; the
     # other library is usbd-midi 0.5 (probe feature usb1, measured 2026-11-02).
     "usb_class_midi1": ("usb2_midi1,usb2_fixed_any", "usb_core", 6192, 432, 1552, 28, "usbd-midi 0.5 class (USB-MIDI 1.0)"),
-    "usb_class_rt_midi1": ("usb2_midi1", "usb_core", 10304, 624, 1552, 28, "usbd-midi 0.5 class (USB-MIDI 1.0)"),
+    "usb_class_rt_midi1": ("usb2_midi1", "usb_core", 10608, 624, 1552, 28, "usbd-midi 0.5 class (USB-MIDI 1.0)"),
     # The embassy-usb adapter, with a stub driver (tools/size-probe/src/edriver.rs); emb_core is the
     # embassy-usb device with no class.
     "emb_class": ("emb2", "emb_core", 19936, 544, 3556, 666, "tusb_ump class driver (object)"),
