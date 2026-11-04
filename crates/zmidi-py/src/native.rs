@@ -44,6 +44,12 @@ pub mod _native {
     #[pymodule_export]
     use crate::io::{BytesToUmp, UmpToBytes};
     #[pymodule_export]
+    use crate::midi1::{
+        bank_program_messages, change_message, controller14_messages, reset_value, select_messages,
+        value_messages, ControllerEvent, ControllerState, Midi1Message, Midi1Reader, Midi1Writer,
+        ModeAction, ModeState, Parameter, ParameterEvent, ParameterState,
+    };
+    #[pymodule_export]
     use crate::net::{NetClient, NetEvent, NetHost};
     #[pymodule_export]
     use crate::pe::{PeEngine, PeEvent, PeResource, PeSubscription};

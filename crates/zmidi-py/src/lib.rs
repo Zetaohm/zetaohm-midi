@@ -8,6 +8,7 @@ pub mod ble;
 pub mod ci;
 pub mod file;
 pub mod io;
+pub mod midi1;
 pub mod native;
 pub mod net;
 pub mod pe;
