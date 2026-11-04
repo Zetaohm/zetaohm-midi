@@ -12,6 +12,9 @@ extern crate alloc;
 
 pub mod channel_voice1;
 pub mod channel_voice2;
+// DEC-022: the MIDI 1.0 controller and RPN meanings stay with the feature of their message family.
+#[cfg(feature = "channel-voice1")]
+pub mod controller;
 pub mod data128;
 pub mod flex_data;
 pub mod packet;
