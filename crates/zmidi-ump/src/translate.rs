@@ -1644,6 +1644,8 @@ mod tests {
     fn prop_rpn_nrpn_and_bank_round_trip() {
         proptest!(|(rpn in any::<bool>(), bank in 0u8..128, index in 0u8..128, msb in 0u8..128, lsb in 0u8..128, program in 0u8..128)| {
             prop_assume!(!(bank == 0x7F && index == 0x7F));
+            // RPN 0/6 (MPE Configuration Message) goes out at CC 6 (REQ-XLATE-029, own test).
+            prop_assume!(!(rpn && bank == 0 && index == 6));
             let select = if rpn { [101, 100] } else { [99, 98] };
             let sequence = [cc1(select[0], bank), cc1(select[1], index), cc1(6, msb), cc1(38, lsb)];
             let mut t = Midi1ToMidi2::new();
