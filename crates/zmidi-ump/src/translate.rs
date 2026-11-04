@@ -416,7 +416,8 @@ struct ChannelState {
     /// CC 0, CC 32.
     bank: [Held; 2],
     /// Bits 0-1: the selected [`Parameter`] (0 None, 1 Registered, 2 Assignable). Bit 2: CC 6
-    /// was received and its value is not sent yet.
+    /// was received and its value is not sent yet. Bit 3: Reset All Controllers came while that
+    /// value was held; the selection becomes null when it goes out (RP-015, AMB-RP-015-01).
     flags: u8,
 }
 
@@ -429,6 +430,7 @@ impl ChannelState {
         flags: 0,
     };
     const PENDING: u8 = 0b100;
+    const NULL_AFTER: u8 = 0b1000;
 
     const fn parameter(&self) -> Parameter {
         match self.flags & 0b11 {
@@ -457,6 +459,39 @@ impl ChannelState {
         } else {
             self.flags &= !Self::PENDING;
         }
+    }
+
+    /// RP-015: Reset All Controllers (CC 121) sets the RPN and NRPN numbers to the null value
+    /// 7FH 7FH. A held CC 6 keeps its parameter until it goes out (AMB-RP-015-01).
+    fn reset_controllers(&mut self) {
+        if self.pending() {
+            self.flags |= Self::NULL_AFTER;
+        } else {
+            self.null_selection();
+        }
+    }
+
+    const fn null_after(&self) -> bool {
+        self.flags & Self::NULL_AFTER != 0
+    }
+
+    fn null_selection(&mut self) {
+        self.rpn = [Held::some(0x7F); 2];
+        self.nrpn = [Held::some(0x7F); 2];
+        self.flags &= !Self::NULL_AFTER;
+    }
+
+    /// After a held value went out: the null selection of an earlier Reset All Controllers.
+    fn after_pending(&mut self) {
+        if self.null_after() {
+            self.null_selection();
+        }
+    }
+
+    /// The MPE Configuration Message (RPN 0/6) is selected (M1-100 2.2.1).
+    fn mcm(&self) -> bool {
+        matches!(self.parameter(), Parameter::Registered)
+            && self.rpn == [Held::some(0), Held::some(6)]
     }
 }
 
@@ -558,8 +593,12 @@ impl Midi1ToMidi2Group {
             return None;
         }
         state.set_pending(false);
-        let msb = state.data_msb.get()?;
-        controller(group, channel, state, msb, 0)
+        let out = state
+            .data_msb
+            .get()
+            .and_then(|msb| controller(group, channel, state, msb, 0));
+        state.after_pending();
+        out
     }
 
     /// Translates one UMP and gives zero or one UMP (D.3).
@@ -686,9 +725,17 @@ impl Midi1ToMidi2Group {
                 let out = take_pending(group, channel, state);
                 state.data_msb = Held::some(value);
                 state.set_pending(true);
+                if out.is_none() && state.mcm() {
+                    // M1-100 2.2.1: the MCM has no Data Entry LSB (AMB-M1-100-19).
+                    return take_pending(group, channel, state);
+                }
                 out
             }
             38 => {
+                if state.null_after() {
+                    // RP-015: after Reset All Controllers the receiver ignores CC 38.
+                    return take_pending(group, channel, state);
+                }
                 let msb = state.data_msb.get()?;
                 state.set_pending(false);
                 controller(group, channel, state, msb, value)
@@ -703,9 +750,14 @@ impl Midi1ToMidi2Group {
                 state.bank[1] = Held::some(value);
                 None
             }
-            index => Midi2ControlChange::try_new(group, channel, index, up(value as u32, 7, 32))
-                .ok()
-                .map(|c| midi2(Midi2ChannelVoiceMessage::ControlChange(c))),
+            index => {
+                if index == 121 {
+                    state.reset_controllers();
+                }
+                Midi2ControlChange::try_new(group, channel, index, up(value as u32, 7, 32))
+                    .ok()
+                    .map(|c| midi2(Midi2ChannelVoiceMessage::ControlChange(c)))
+            }
         }
     }
 
@@ -779,9 +831,19 @@ impl Midi1ToMidi2Group {
                 let out = take_pending_words(head, state);
                 state.data_msb = Held::some(value);
                 state.set_pending(true);
+                if out.is_none() && state.mcm() {
+                    // M1-100 2.2.1: the MPE Configuration Message has no Data Entry LSB, so it
+                    // goes out at CC 6 (REQ-XLATE-029, AMB-M1-100-19).
+                    return take_pending_words(head, state);
+                }
                 out
             }
             38 => {
+                if state.null_after() {
+                    // RP-015: after Reset All Controllers the receiver ignores CC 38; the held
+                    // MSB goes out with LSB 0, then the selection is null (REQ-XLATE-028).
+                    return take_pending_words(head, state);
+                }
                 let msb = state.data_msb.get()?;
                 state.set_pending(false);
                 controller_words(head, state, msb, value)
@@ -795,10 +857,17 @@ impl Midi1ToMidi2Group {
                 state.bank[1] = Held::some(value);
                 None
             }
-            index => Some([
-                head | 0xB << 20 | (index as u32) << 8,
-                up(value as u32, 7, 32),
-            ]),
+            index => {
+                if index == 121 {
+                    // RP-015: Reset All Controllers passes on and sets the RPN and NRPN
+                    // selection to null (REQ-XLATE-028, AMB-RP-015-01).
+                    state.reset_controllers();
+                }
+                Some([
+                    head | 0xB << 20 | (index as u32) << 8,
+                    up(value as u32, 7, 32),
+                ])
+            }
         }
     }
 }
@@ -809,7 +878,12 @@ fn take_pending_words(head: u32, state: &mut ChannelState) -> Option<[u32; 2]> {
         return None;
     }
     state.set_pending(false);
-    controller_words(head, state, state.data_msb.get()?, 0)
+    let out = state
+        .data_msb
+        .get()
+        .and_then(|msb| controller_words(head, state, msb, 0));
+    state.after_pending();
+    out
 }
 
 /// [`controller`] on words: the Registered (opcode 0x2) or Assignable (opcode 0x3) Controller
@@ -845,7 +919,12 @@ fn take_pending(group: Group, channel: Channel, state: &mut ChannelState) -> Opt
         return None;
     }
     state.set_pending(false);
-    controller(group, channel, state, state.data_msb.get()?, 0)
+    let out = state
+        .data_msb
+        .get()
+        .and_then(|msb| controller(group, channel, state, msb, 0));
+    state.after_pending();
+    out
 }
 
 #[cfg(test)]
@@ -1319,6 +1398,64 @@ mod tests {
         assert_eq!(t.flush(Group::new(0).unwrap(), c()), None);
         t.reset();
         assert!(feed(&mut t, &[cc1(6, 5), cc1(38, 0)]).is_empty());
+    }
+
+    /// RP-015 (REQ-XLATE-028, AMB-RP-015-01): Reset All Controllers passes on and sets the RPN and
+    /// NRPN selection to null. A held CC 6 keeps its parameter until it goes out (at the next
+    /// trigger or `flush`), and a CC 38 after the reset gives LSB 0.
+    #[test]
+    fn reset_all_controllers_nulls_the_selection() {
+        let mut t = Midi1ToMidi2::new();
+        let rpn0 = |v: u32| rc2(0, 0, zero_extend_upscale(v, 14, 32).unwrap());
+        let out = feed(
+            &mut t,
+            &[
+                cc1(101, 0),
+                cc1(100, 0),
+                cc1(6, 2),
+                cc1(38, 1),
+                cc1(121, 0),
+                cc1(6, 3),
+                cc1(38, 0),
+            ],
+        );
+        assert_eq!(out, [rpn0(2 << 7 | 1), cc2(121, 0)]);
+        assert_eq!(t.flush(g(), c()), None);
+
+        t.reset();
+        let out = feed(
+            &mut t,
+            &[cc1(101, 0), cc1(100, 0), cc1(6, 2), cc1(121, 0), cc1(38, 5)],
+        );
+        assert_eq!(out, [cc2(121, 0), rpn0(2 << 7)]);
+        assert!(feed(&mut t, &[cc1(6, 4), cc1(38, 0)]).is_empty());
+
+        t.reset();
+        let out = feed(&mut t, &[cc1(101, 0), cc1(100, 0), cc1(6, 2), cc1(121, 0)]);
+        assert_eq!(out, [cc2(121, 0)]);
+        assert_eq!(t.flush(g(), c()), Some(rpn0(2 << 7)));
+        assert!(feed(&mut t, &[cc1(6, 4), cc1(38, 0)]).is_empty());
+
+        t.reset();
+        let out = feed(
+            &mut t,
+            &[cc1(99, 1), cc1(98, 2), cc1(121, 0), cc1(6, 4), cc1(38, 0)],
+        );
+        assert_eq!(out, [cc2(121, 0)]);
+    }
+
+    /// M1-100 2.2.1 (REQ-XLATE-029, AMB-M1-100-19): the MPE Configuration Message (RPN 0/6) has
+    /// no Data Entry LSB, so it goes out at CC 6; other RPNs still wait for CC 38 (D.3.3).
+    #[test]
+    fn mpe_configuration_message_goes_out_at_data_entry_msb() {
+        let mut t = Midi1ToMidi2::new();
+        let mcm = |n: u32| rc2(0, 6, zero_extend_upscale(n << 7, 14, 32).unwrap());
+        assert_eq!(
+            feed(&mut t, &[cc1(101, 0), cc1(100, 6), cc1(6, 15)]),
+            [mcm(15)]
+        );
+        assert_eq!(t.flush(g(), c()), None);
+        assert!(feed(&mut t, &[cc1(100, 0), cc1(6, 2)]).is_empty());
     }
 
     /// D.3.3: the RPN/NRPN Null Function (0x7F, 0x7F) is not translated.

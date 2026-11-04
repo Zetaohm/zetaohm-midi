@@ -42,8 +42,11 @@ JOBS = {
     "midi1_to_midi2": ("up", "base", 6640, 2096, None, 140, "AM_MIDI2.0Lib state (RAM)"),
     # midi1_to_midi2_lean: the typed translator with Midi1ChannelVoiceMessage::parse in place of
     # Ump::parse (all Message Types); RAM is the state of one Group.
-    "midi1_to_midi2_lean": ("up_lean", "base", 1232, 136, None, 140, "AM_MIDI2.0Lib state (RAM)"),
-    "midi1_to_midi2_words": ("up_words", "base", 976, 136, 212, 0, "midi2 C99 midi2_msg_mt2_to_mt4 (stateless, a subset)"),
+    # 2026-11-04, DEC-022 (accepted R0 exceptions): the translator nulls the RPN/NRPN selection at
+    # Reset All Controllers (REQ-XLATE-028) and sends the MPE Configuration Message at CC 6
+    # (REQ-XLATE-029): +144 to +168 B in the translator jobs, +116 to +160 B in the BLE readers.
+    "midi1_to_midi2_lean": ("up_lean", "base", 1408, 136, None, 140, "AM_MIDI2.0Lib state (RAM)"),
+    "midi1_to_midi2_words": ("up_words", "base", 1120, 136, 212, 0, "midi2 C99 midi2_msg_mt2_to_mt4 (stateless, a subset)"),
     "din_in": ("bytes1", "base", 1072, 32, 852, 52, "midi2 C99 midi2_conv"),
     "din_in_core": ("bytes_core", "base", 2416, 32, 852, 52, "midi2 C99 midi2_conv"),
     "din_in_feed": ("bytes_feed", "base", 704, 32, 852, 52, "midi2 C99 midi2_conv"),
@@ -88,7 +91,7 @@ JOBS = {
              None, None, "no single library does all of it"),
     # BLE-MIDI, Network MIDI 2.0 and the file formats (2026-10-27, OPT-044). No other library measured yet.
     "ble_rx": ("ble_rx", "base", 9328, 192, None, None, "not measured yet"),
-    "ble_rx_words": ("ble_rx_words", "base", 3584, 192, None, None, "not measured yet"),
+    "ble_rx_words": ("ble_rx_words", "base", 3744, 192, None, None, "not measured yet"),
     "ble_tx": ("ble_tx", "base", 2976, 80, None, None, "not measured yet"),
     # MIDI 1.0-only BLE builds (DEC-022): zmidi-ble with no feature, PacketReader::midi1.
     "ble_rx_midi1": ("ble_rx_midi1", "base", 4000, 48, None, None, "not measured yet"),

@@ -24,9 +24,9 @@ the goal is 1.0x for the smallest build of each job (OPT-052).
 | `decode_cv2_system` | `Ump::parse` with the features `channel-voice2` and `system-common` only | 2,944 | 2,544 | 1.2x | 0 | 208 | 0.0x | 152 | - | midi2 C99 dispatch |
 | `midi2_to_midi1` | MIDI 2.0 to 1.0 Protocol, typed (`Ump::parse`, `to_midi1`) | 6,556 | 680 | 9.6x | 0 | 40 | 0.0x | 608 | - | AM_MIDI2.0Lib umpToMIDI1Protocol |
 | `midi2_to_midi1_words` | MIDI 2.0 to 1.0 Protocol, word API (`midi2_to_midi1`) | 488 | 680 | 0.7x | 0 | 40 | 0.0x | 64 | - | AM_MIDI2.0Lib umpToMIDI1Protocol |
-| `midi1_to_midi2` | MIDI 1.0 to 2.0 Protocol (`Ump::parse`, all 16 Groups) | 6,472 | - | - | 2,048 | 140 | 14.6x | 368 | - | AM_MIDI2.0Lib state (RAM) |
-| `midi1_to_midi2_lean` | MIDI 1.0 to 2.0 Protocol, one Group, `Midi1ChannelVoiceMessage::parse` | 1,200 | - | - | 128 | 140 | 0.9x | 116 | - | AM_MIDI2.0Lib state (RAM) |
-| `midi1_to_midi2_words` | MIDI 1.0 to 2.0 Protocol, word API (`Midi1ToMidi2Group::translate_words`), one Group | 932 | 212 | 4.4x | 128 | 0 | - | 100 | - | midi2 C99 midi2_msg_mt2_to_mt4 (stateless, a subset) |
+| `midi1_to_midi2` | MIDI 1.0 to 2.0 Protocol (`Ump::parse`, all 16 Groups) | 6,616 | - | - | 2,048 | 140 | 14.6x | 384 | - | AM_MIDI2.0Lib state (RAM) |
+| `midi1_to_midi2_lean` | MIDI 1.0 to 2.0 Protocol, one Group, `Midi1ChannelVoiceMessage::parse` | 1,368 | - | - | 128 | 140 | 0.9x | 124 | - | AM_MIDI2.0Lib state (RAM) |
+| `midi1_to_midi2_words` | MIDI 1.0 to 2.0 Protocol, word API (`Midi1ToMidi2Group::translate_words`), one Group | 1,096 | 212 | 5.2x | 128 | 0 | - | 116 | - | midi2 C99 midi2_msg_mt2_to_mt4 (stateless, a subset) |
 | `din_in` | DIN bytes to UMP, value form (`BytesToUmp::push`, MIDI 1.0 Protocol output) | 1,032 | 852 | 1.2x | 24 | 52 | 0.5x | 72 | - | midi2 C99 midi2_conv |
 | `din_in_core` | DIN bytes to UMP, `BytesToUmpCore::push_with`, each packet read as words | 2,044 | 852 | 2.4x | 24 | 52 | 0.5x | 160 | - | midi2 C99 midi2_conv |
 | `din_in_feed` | DIN bytes to UMP, callback form (`BytesToUmpCore::feed`) | 676 | 852 | 0.8x | 24 | 52 | 0.5x | 48 | - | midi2 C99 midi2_conv |
@@ -53,8 +53,8 @@ the goal is 1.0x for the smallest build of each job (OPT-052).
 | `ci_like_c` | ci_one_chunk with Profile Inquiry, Set Profile On/Off and Process Inquiry: the categories of midi2 C99 CI | 14,648 | 4,615 | 3.2x | 1,472 | 736 | 2.0x | 560 | 1,192 | midi2 C99 CI (with its PE Get and Set) |
 | `ci_like_c_flat` | ci_like_c with respond_flat (DEC-PE-006) | 14,080 | 4,615 | 3.1x | 1,472 | 736 | 2.0x | 560 | - | midi2 C99 CI (with its PE Get and Set) |
 | `full` | all of the UMP, DIN, USB, CI and PE jobs above in one firmware | 62,548 | - | - | 5,284 | - | - | 2,424 | - | no single library does all of it |
-| `ble_rx` | BLE-MIDI packet reader (`PacketReader::read`, typed `Ump`, MIDI 2.0 Protocol output) | 9,128 | - | - | 168 | - | - | 96 | - | not measured yet |
-| `ble_rx_words` | BLE-MIDI packet reader, word form (`PacketReader::read_words`, DEC-BLE-002) | 3,508 | - | - | 168 | - | - | 88 | - | not measured yet |
+| `ble_rx` | BLE-MIDI packet reader (`PacketReader::read`, typed `Ump`, MIDI 2.0 Protocol output) | 9,244 | - | - | 168 | - | - | 96 | - | not measured yet |
+| `ble_rx_words` | BLE-MIDI packet reader, word form (`PacketReader::read_words`, DEC-BLE-002) | 3,668 | - | - | 168 | - | - | 88 | - | not measured yet |
 | `ble_tx` | BLE-MIDI packet writer (`PacketWriter::write_packet`, ATT MTU 23) | 2,916 | - | - | 60 | - | - | 216 | - | not measured yet |
 | `ble_rx_midi1` | ble_rx in a MIDI 1.0-only build (zmidi-ble with no feature, `PacketReader::midi1`, DEC-022) | 3,912 | - | - | 32 | - | - | 96 | - | not measured yet |
 | `ble_rx_words_midi1` | ble_rx_words in a MIDI 1.0-only build (DEC-022) | 1,724 | - | - | 32 | - | - | 88 | - | not measured yet |
