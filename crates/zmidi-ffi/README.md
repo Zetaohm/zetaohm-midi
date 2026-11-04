@@ -10,8 +10,11 @@ and other languages. `no_std`, no allocator, no callbacks.
   header gives a `Zmidi<Object>` type of that size for static or stack storage. The library never
   calls `malloc`.
 - Parts: UMP, MIDI 1.0 byte stream, MIDI-CI (each category separately), MIDI Clip File, Network MIDI
-  2.0 (with optional authentication), USB-MIDI and BLE-MIDI. A build contains only the parts that
+  2.0 (with optional authentication), USB-MIDI and BLE-MIDI, and the MIDI 1.0 receiver states (typed
+  messages on bytes, Channel Mode, controllers, RPN and NRPN). A build contains only the parts that
   you select, and the header shows only their declarations.
+- A MIDI 1.0-only build (`midi1`) links no MIDI 2.0 code: about 11 KB of flash on Cortex-M4F for a
+  16-channel DIN receiver with the io, ble and usb parts.
 - The same library runs on bare metal, on a desktop and in WebAssembly. The
   [Python](../../bindings/python), [TypeScript](../../bindings/ts) and
   [Dart](../../bindings/dart) packages use it.
@@ -154,10 +157,20 @@ with LTO, so the linker removes the functions that the program does not call.
 | `net-auth` | `ZMIDI_NET_AUTH` | Network MIDI 2.0 authentication. Makes the `ZMIDI_NET_*_WORDS` storage sizes larger. |
 | `usb` | `ZMIDI_USB` | USB-MIDI data link, the USB descriptor writer and the Group Terminal Block requests. |
 | `ble` | `ZMIDI_BLE` | BLE-MIDI packet reader and writer. |
+| `io-midi1` | `ZMIDI_IO_MIDI1` | `io` with the MIDI 1.0 Protocol only (no MIDI 2.0 code, a smaller reader). |
+| `usb-midi1` | `ZMIDI_USB_MIDI1` | `usb` with Alternate Setting 0 only (USB-MIDI 1.0). |
+| `ble-midi1` | `ZMIDI_BLE_MIDI1` | `ble` with the MIDI 1.0 Protocol only (a smaller reader). |
+| `messages` | `ZMIDI_MESSAGES` | Typed MIDI 1.0 messages on bytes: a reader with System Exclusive in a caller buffer, and a writer. |
+| `channel-mode` | `ZMIDI_CHANNEL_MODE` | MIDI 1.0 receiver mode state: Modes 1 to 4, Basic Channel, Local Control. |
+| `controllers` | `ZMIDI_CONTROLLERS` | MIDI 1.0 controller state of one channel: 14-bit pairs, bank and program, Reset All Controllers (RP-015). |
+| `parameters` | `ZMIDI_PARAMETERS` | MIDI 1.0 RPN and NRPN receiver of one channel, Data Increment and Decrement (RP-018). |
+| `midi1` | `ZMIDI_MIDI1` | All MIDI 1.0 parts above, with no MIDI 2.0 code. |
 | `std` | – | Host builds. |
 | `panic-handler` | – | Bare-metal and WebAssembly builds: a panic handler for the library. |
 
-`ZMIDI_CI` also defines the five `ZMIDI_CI_*` macros. `ZMIDI_ABI_MAJOR` and `ZMIDI_ABI_MINOR` give
+`ZMIDI_CI` also defines the five `ZMIDI_CI_*` macros. `ZMIDI_MIDI1` defines the seven MIDI 1.0 macros, and
+`ZMIDI_IO`, `ZMIDI_USB` and `ZMIDI_BLE` also define their `*_MIDI1` macro. Define the macros of the features of
+your library build: `io-midi1` without `io` (and `ble-midi1` without `ble`) has a smaller storage size. `ZMIDI_ABI_MAJOR` and `ZMIDI_ABI_MINOR` give
 the ABI version of the header.
 
 ## License

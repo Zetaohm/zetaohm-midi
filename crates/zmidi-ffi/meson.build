@@ -85,7 +85,7 @@ if get_option('tests')
     endforeach
   else
     c_args = cc.get_supported_arguments('-Wall', '-Wextra', '-Werror', '-pedantic')
-    foreach t : ['io', 'ump', 'ble', 'file', 'ci', 'pe', 'net', 'usb', 'usb_desc', 'usb_fixed']
+    foreach t : ['io', 'ump', 'ble', 'file', 'ci', 'pe', 'net', 'usb', 'usb_desc', 'usb_fixed', 'midi1']
       exe = executable('c_' + t, 'tests/c' / t + '.c',
         c_args: c_args, override_options: ['c_std=c99'], dependencies: zmidi_dep)
       test('c_' + t, exe)

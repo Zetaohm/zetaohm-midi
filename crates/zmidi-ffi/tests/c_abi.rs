@@ -51,7 +51,7 @@ fn build_staticlib(dir: &str, features: &str) -> PathBuf {
 /// Builds the staticlib with all parts once for all tests and gives its path.
 fn staticlib() -> &'static Path {
     static LIB: OnceLock<PathBuf> = OnceLock::new();
-    LIB.get_or_init(|| build_staticlib("c-abi", "std,io,ump,ble,file,ci,net,net-auth,usb"))
+    LIB.get_or_init(|| build_staticlib("c-abi", "std,io,ump,ble,file,ci,net,net-auth,usb,midi1"))
 }
 
 /// Builds the responder-only ci staticlib (REQ-FFI-CI-009) once and gives its path.
@@ -159,6 +159,27 @@ fn c_null_args() {
     run_c("null_args");
 }
 
+/// Builds the MIDI 1.0-only staticlib (feature midi1, REQ-FFI-ABI-004) once and gives its path.
+fn midi1_staticlib() -> &'static Path {
+    static LIB: OnceLock<PathBuf> = OnceLock::new();
+    LIB.get_or_init(|| build_staticlib("c-abi-midi1", "std,midi1"))
+}
+
+/// REQ-FFI-MIDI1-008: the MIDI 1.0 parts through the header, with M1, RP-015 and RP-018 vectors, on
+/// the staticlib with all parts and on the MIDI 1.0-only staticlib.
+#[test]
+fn c_midi1() {
+    run_c("midi1");
+    run_c_defs("midi1", "midi1-on-midi1-only", midi1_staticlib(), &[]);
+}
+
+/// REQ-FFI-ABI-004, REQ-FFI-ABI-006: the MIDI 1.0-only build: ZMIDI_MIDI1, the MIDI 1.0 Protocol
+/// only, the smaller reader storage.
+#[test]
+fn c_midi1_only() {
+    run_c_with("midi1_only", midi1_staticlib());
+}
+
 /// REQ-FFI-NET-005: a Network MIDI 2.0 Host and Client in memory through the header (M2-124).
 #[test]
 fn c_net() {
@@ -213,6 +234,7 @@ fn header_compiles_as_c99_for_each_selection() {
         "ZMIDI_NET",
         "ZMIDI_NET_AUTH",
         "ZMIDI_USB",
+        "ZMIDI_MIDI1",
     ];
     assert!(c99_compiles("h-all.c", src, &all));
     for one in [
@@ -227,6 +249,14 @@ fn header_compiles_as_c99_for_each_selection() {
         "ZMIDI_CI_PROFILES",
         "ZMIDI_CI_PROPERTY_EXCHANGE",
         "ZMIDI_CI_PROCESS_INQUIRY",
+        "ZMIDI_MIDI1",
+        "ZMIDI_IO_MIDI1",
+        "ZMIDI_BLE_MIDI1",
+        "ZMIDI_USB_MIDI1",
+        "ZMIDI_MESSAGES",
+        "ZMIDI_CHANNEL_MODE",
+        "ZMIDI_CONTROLLERS",
+        "ZMIDI_PARAMETERS",
     ] {
         assert!(c99_compiles(&format!("h-{one}.c"), src, &[one]), "{one}");
     }
@@ -354,6 +384,7 @@ fn header_compiles_as_cpp17() {
             "-DZMIDI_NET",
             "-DZMIDI_NET_AUTH",
             "-DZMIDI_USB",
+            "-DZMIDI_MIDI1",
             "-x",
             "c++",
         ])

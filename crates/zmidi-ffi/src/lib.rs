@@ -10,14 +10,17 @@
 
 #![cfg_attr(not(feature = "std"), no_std)]
 
-#[cfg(feature = "ble")]
+#[cfg(feature = "ble-midi1")]
 pub mod ble;
 #[cfg(feature = "ci-device")]
 pub mod ci;
 #[cfg(feature = "file")]
 pub mod file;
-#[cfg(feature = "io")]
+#[cfg(feature = "io-midi1")]
 pub mod io;
+// Each item has the gate of its part (messages, channel-mode, controllers, parameters), so that
+// each header block names one macro.
+pub mod midi1;
 #[cfg(feature = "net")]
 pub mod net;
 #[cfg(feature = "ci-property-exchange")]
@@ -25,7 +28,7 @@ pub mod pe;
 pub mod status;
 #[cfg(feature = "ump")]
 pub mod ump;
-#[cfg(feature = "usb")]
+#[cfg(feature = "usb-midi1")]
 pub mod usb;
 
 /// Stops on a panic. The C ABI does not panic on input of the program; this handler is for a

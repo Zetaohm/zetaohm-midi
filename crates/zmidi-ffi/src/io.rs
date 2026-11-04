@@ -10,11 +10,15 @@ use zmidi_ump::{Group, StreamProtocol};
 use crate::status::ZmidiStatus;
 
 /// Storage words of a [`ZmidiBytesToUmp`] on a 64-bit target.
-#[cfg(target_pointer_width = "64")]
+#[cfg(all(feature = "io", target_pointer_width = "64"))]
 pub const ZMIDI_BYTES_TO_UMP_WORDS: usize = 24;
 /// Storage words of a [`ZmidiBytesToUmp`] on a 32-bit or 16-bit target.
-#[cfg(not(target_pointer_width = "64"))]
+#[cfg(all(feature = "io", not(target_pointer_width = "64")))]
 pub const ZMIDI_BYTES_TO_UMP_WORDS: usize = 22;
+/// Storage words of a [`ZmidiBytesToUmp`] in a MIDI 1.0-only build (io-midi1 without io): the
+/// reader has no translator (REQ-FFI-ABI-004).
+#[cfg(not(feature = "io"))]
+pub const ZMIDI_BYTES_TO_UMP_WORDS: usize = 4;
 /// Storage words of a [`ZmidiUmpToBytes`].
 pub const ZMIDI_UMP_TO_BYTES_WORDS: usize = 1;
 /// The most words that one byte completes: two UMPs of at most two words each (Message Types
@@ -72,12 +76,16 @@ pub unsafe extern "C" fn zmidi_bytes_to_ump_init(
     if reader.is_null() {
         return ZmidiStatus::InvalidArgument;
     }
-    // SAFETY: the storage is large and aligned enough (asserts above) and writable (caller).
-    unsafe {
-        reader
-            .cast::<BytesToUmp>()
-            .write(BytesToUmp::new(group, protocol))
+    #[cfg(feature = "io")]
+    let state = BytesToUmp::new(group, protocol);
+    // A MIDI 1.0-only build has no MIDI 2.0 Protocol output (REQ-FFI-ABI-004).
+    #[cfg(not(feature = "io"))]
+    let state = match protocol {
+        StreamProtocol::Midi1 => BytesToUmp::midi1(group),
+        StreamProtocol::Midi2 => return ZmidiStatus::NotSupported,
     };
+    // SAFETY: the storage is large and aligned enough (asserts above) and writable (caller).
+    unsafe { reader.cast::<BytesToUmp>().write(state) };
     ZmidiStatus::Ok
 }
 

@@ -25,7 +25,10 @@ echo 'compile-gates: gate cargo-check' >&2
 run 'cargo' 'check' '--quiet'
 
 echo 'compile-gates: gate bare-metal' >&2
-run 'cargo' 'check' '--quiet' '--lib' '--no-default-features' '--features' 'panic-handler,io,ump,ble,file,ci,net,net-auth,usb' '--target' 'thumbv7em-none-eabihf'
+run 'cargo' 'check' '--quiet' '--lib' '--no-default-features' '--features' 'panic-handler,io,ump,ble,file,ci,net,net-auth,usb,midi1' '--target' 'thumbv7em-none-eabihf'
+
+echo 'compile-gates: gate bare-metal-midi1' >&2
+run 'cargo' 'check' '--quiet' '--lib' '--no-default-features' '--features' 'panic-handler,midi1' '--target' 'thumbv7em-none-eabihf'
 
 echo 'compile-gates: gate test' >&2
 run 'cargo' 'test' '--quiet' '--all-features'

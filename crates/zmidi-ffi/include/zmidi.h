@@ -34,30 +34,72 @@
 #if !defined(ZMIDI_CI_DEVICE) && (defined(ZMIDI_CI_INITIATOR) || defined(ZMIDI_CI_PROFILES) || defined(ZMIDI_CI_PROPERTY_EXCHANGE) || defined(ZMIDI_CI_PROCESS_INQUIRY))
 #define ZMIDI_CI_DEVICE
 #endif
+/* The MIDI 1.0 parts (REQ-FFI-ABI-006): ZMIDI_MIDI1 selects all of them, as the Cargo feature midi1
+ * does, and the io, ble and usb parts include their MIDI 1.0-only part. */
+#if defined(ZMIDI_MIDI1)
+#ifndef ZMIDI_IO_MIDI1
+#define ZMIDI_IO_MIDI1
+#endif
+#ifndef ZMIDI_BLE_MIDI1
+#define ZMIDI_BLE_MIDI1
+#endif
+#ifndef ZMIDI_USB_MIDI1
+#define ZMIDI_USB_MIDI1
+#endif
+#ifndef ZMIDI_MESSAGES
+#define ZMIDI_MESSAGES
+#endif
+#ifndef ZMIDI_CHANNEL_MODE
+#define ZMIDI_CHANNEL_MODE
+#endif
+#ifndef ZMIDI_CONTROLLERS
+#define ZMIDI_CONTROLLERS
+#endif
+#ifndef ZMIDI_PARAMETERS
+#define ZMIDI_PARAMETERS
+#endif
+#endif
+#if defined(ZMIDI_IO) && !defined(ZMIDI_IO_MIDI1)
+#define ZMIDI_IO_MIDI1
+#endif
+#if defined(ZMIDI_BLE) && !defined(ZMIDI_BLE_MIDI1)
+#define ZMIDI_BLE_MIDI1
+#endif
+#if defined(ZMIDI_USB) && !defined(ZMIDI_USB_MIDI1)
+#define ZMIDI_USB_MIDI1
+#endif
 
 
-#if (defined(ZMIDI_BLE) && defined(ZMIDI_PTR64))
+#if (defined(ZMIDI_BLE_MIDI1) && (defined(ZMIDI_BLE) && defined(ZMIDI_PTR64)))
 /**
  * Storage words of a [`ZmidiBleReader`] on a 64-bit target.
  */
 #define ZMIDI_BLE_READER_WORDS 25
 #endif
 
-#if (defined(ZMIDI_BLE) && !defined(ZMIDI_PTR64))
+#if (defined(ZMIDI_BLE_MIDI1) && (defined(ZMIDI_BLE) && !defined(ZMIDI_PTR64)))
 /**
  * Storage words of a [`ZmidiBleReader`] on a 32-bit or 16-bit target.
  */
 #define ZMIDI_BLE_READER_WORDS 23
 #endif
 
-#if (defined(ZMIDI_BLE) && defined(ZMIDI_PTR64))
+#if (defined(ZMIDI_BLE_MIDI1) && !defined(ZMIDI_BLE))
+/**
+ * Storage words of a [`ZmidiBleReader`] in a MIDI 1.0-only build (ble-midi1 without ble): the
+ * reader has no translator (REQ-FFI-ABI-004).
+ */
+#define ZMIDI_BLE_READER_WORDS 5
+#endif
+
+#if (defined(ZMIDI_BLE_MIDI1) && defined(ZMIDI_PTR64))
 /**
  * Storage words of a [`ZmidiBleWriter`] on a 64-bit target.
  */
 #define ZMIDI_BLE_WRITER_WORDS 11
 #endif
 
-#if (defined(ZMIDI_BLE) && !defined(ZMIDI_PTR64))
+#if (defined(ZMIDI_BLE_MIDI1) && !defined(ZMIDI_PTR64))
 /**
  * Storage words of a [`ZmidiBleWriter`] on a 32-bit or 16-bit target.
  */
@@ -152,33 +194,91 @@
 #define ZMIDI_CLIP_MAX_PROFILES 16
 #endif
 
-#if (defined(ZMIDI_IO) && defined(ZMIDI_PTR64))
+#if (defined(ZMIDI_IO_MIDI1) && (defined(ZMIDI_IO) && defined(ZMIDI_PTR64)))
 /**
  * Storage words of a [`ZmidiBytesToUmp`] on a 64-bit target.
  */
 #define ZMIDI_BYTES_TO_UMP_WORDS 24
 #endif
 
-#if (defined(ZMIDI_IO) && !defined(ZMIDI_PTR64))
+#if (defined(ZMIDI_IO_MIDI1) && (defined(ZMIDI_IO) && !defined(ZMIDI_PTR64)))
 /**
  * Storage words of a [`ZmidiBytesToUmp`] on a 32-bit or 16-bit target.
  */
 #define ZMIDI_BYTES_TO_UMP_WORDS 22
 #endif
 
-#if defined(ZMIDI_IO)
+#if (defined(ZMIDI_IO_MIDI1) && !defined(ZMIDI_IO))
+/**
+ * Storage words of a [`ZmidiBytesToUmp`] in a MIDI 1.0-only build (io-midi1 without io): the
+ * reader has no translator (REQ-FFI-ABI-004).
+ */
+#define ZMIDI_BYTES_TO_UMP_WORDS 4
+#endif
+
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * Storage words of a [`ZmidiUmpToBytes`].
  */
 #define ZMIDI_UMP_TO_BYTES_WORDS 1
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * The most words that one byte completes: two UMPs of at most two words each (Message Types
  * 0x1 to 0x4).
  */
 #define ZMIDI_BYTES_TO_UMP_MAX_WORDS 4
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * Storage words of a [`ZmidiMidi1Reader`].
+ */
+#define ZMIDI_MIDI1_READER_WORDS 5
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * Storage words of a [`ZmidiMidi1Writer`].
+ */
+#define ZMIDI_MIDI1_WRITER_WORDS 1
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * The most messages that one byte completes: a System Exclusive message that a status byte
+ * ends, and the message of that status byte.
+ */
+#define ZMIDI_MIDI1_READER_MAX_EVENTS 2
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Storage words of a [`ZmidiModeState`].
+ */
+#define ZMIDI_MODE_STATE_WORDS 2
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * Storage words of a [`ZmidiControllerState`].
+ */
+#define ZMIDI_CONTROLLER_STATE_WORDS 5
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * The reset value of a controller that keeps its value at Reset All Controllers.
+ */
+#define ZMIDI_CONTROLLER_KEEP 255
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Storage words of a [`ZmidiParameterState`].
+ */
+#define ZMIDI_PARAMETER_STATE_WORDS 1
 #endif
 
 #if (defined(ZMIDI_NET) && (defined(ZMIDI_PTR64) && !defined(ZMIDI_NET_AUTH)))
@@ -318,65 +418,65 @@
 /**
  * Minor version of the C ABI. It changes when a function or a status value is added.
  */
-#define ZMIDI_ABI_MINOR 7
+#define ZMIDI_ABI_MINOR 8
 
-#if (defined(ZMIDI_USB) && defined(ZMIDI_PTR64))
+#if (defined(ZMIDI_USB_MIDI1) && defined(ZMIDI_PTR64))
 /**
  * Storage words of a [`ZmidiUsbLink`] on a 64-bit target.
  */
 #define ZMIDI_USB_LINK_WORDS 45
 #endif
 
-#if (defined(ZMIDI_USB) && !defined(ZMIDI_PTR64))
+#if (defined(ZMIDI_USB_MIDI1) && !defined(ZMIDI_PTR64))
 /**
  * Storage words of a [`ZmidiUsbLink`] on a 32-bit or 16-bit target.
  */
 #define ZMIDI_USB_LINK_WORDS 38
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The most USB MIDI 2.0 Alternate Settings of a [`ZmidiUsbFunction`] (Alternate Settings 1 and 2).
  */
 #define ZMIDI_USB_MAX_SETTINGS 2
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The most endpoints of one USB MIDI 2.0 Alternate Setting.
  */
 #define ZMIDI_USB_MAX_ENDPOINTS 4
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The most Group Terminal Blocks of one USB MIDI 2.0 Alternate Setting: one for each Group.
  */
 #define ZMIDI_USB_MAX_BLOCKS 16
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The most Group Terminal Block IDs of one endpoint (baAssoGrpTrmBlkID, Table 5-4).
  */
 #define ZMIDI_USB_MAX_BLOCK_IDS 16
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The length of a USB setup packet (USB 2.0 section 9.3).
  */
 #define ZMIDI_USB_SETUP_LEN 8
 #endif
 
-#if (defined(ZMIDI_USB) && defined(ZMIDI_PTR64))
+#if (defined(ZMIDI_USB_MIDI1) && defined(ZMIDI_PTR64))
 /**
  * Storage words of a [`ZmidiUsbFunction`] on a 64-bit target.
  */
 #define ZMIDI_USB_FUNCTION_WORDS 103
 #endif
 
-#if (defined(ZMIDI_USB) && !defined(ZMIDI_PTR64))
+#if (defined(ZMIDI_USB_MIDI1) && !defined(ZMIDI_PTR64))
 /**
  * Storage words of a [`ZmidiUsbFunction`] on a 32-bit or 16-bit target.
  */
@@ -684,6 +784,106 @@ typedef enum ZmidiClipError {
 } ZmidiClipError;
 #endif
 
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * The kind of a [`ZmidiControllerEvent`].
+ */
+typedef enum ZmidiControllerEventKind {
+  /**
+   * The message gives no event.
+   */
+  ZMIDI_CONTROLLER_EVENT_KIND_NONE = 0,
+  /**
+   * A 14-bit controller: `controller` 0 to 31 and the 14-bit `value`.
+   */
+  ZMIDI_CONTROLLER_EVENT_KIND_CONTROLLER14 = 1,
+  /**
+   * A single-byte controller: `controller` 64 to 119 and `value` 0 to 127.
+   */
+  ZMIDI_CONTROLLER_EVENT_KIND_CONTROLLER7 = 2,
+  /**
+   * Program Change: `program`, and `bank` when `has_bank`.
+   */
+  ZMIDI_CONTROLLER_EVENT_KIND_PROGRAM = 3,
+  /**
+   * A Note On after a Portamento Control: `source` is the source note.
+   */
+  ZMIDI_CONTROLLER_EVENT_KIND_PORTAMENTO = 4,
+  /**
+   * Reset All Controllers (RP-015): see `zmidi_controller_reset_value`.
+   */
+  ZMIDI_CONTROLLER_EVENT_KIND_RESET_ALL_CONTROLLERS = 5,
+} ZmidiControllerEventKind;
+#endif
+
+#if (defined(ZMIDI_MESSAGES) || defined(ZMIDI_CHANNEL_MODE) || defined(ZMIDI_CONTROLLERS) || defined(ZMIDI_PARAMETERS))
+/**
+ * The kind of a [`ZmidiMidi1Message`].
+ */
+typedef enum ZmidiMidi1Kind {
+  /**
+   * No message.
+   */
+  ZMIDI_MIDI1_KIND_NONE = 0,
+  /**
+   * A Channel Voice or Channel Mode message (status 80H to EFH).
+   */
+  ZMIDI_MIDI1_KIND_CHANNEL_VOICE = 1,
+  /**
+   * A System Common or System Real Time message (status F1H to FFH, not F7H).
+   */
+  ZMIDI_MIDI1_KIND_SYSTEM = 2,
+  /**
+   * A complete System Exclusive message, F0H to F7H, in the caller buffer.
+   */
+  ZMIDI_MIDI1_KIND_SYS_EX = 3,
+  /**
+   * A System Exclusive message that does not fit in the caller buffer; its bytes are discarded.
+   */
+  ZMIDI_MIDI1_KIND_SYS_EX_TOO_LONG = 4,
+} ZmidiMidi1Kind;
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * The kind of a [`ZmidiModeAction`].
+ */
+typedef enum ZmidiModeActionKind {
+  /**
+   * The message is not for this instrument.
+   */
+  ZMIDI_MODE_ACTION_KIND_IGNORE = 0,
+  /**
+   * A voice message for the instrument; `voice` is the Mode 4 voice.
+   */
+  ZMIDI_MODE_ACTION_KIND_VOICE = 1,
+  /**
+   * A Global Controller message (Mode 4).
+   */
+  ZMIDI_MODE_ACTION_KIND_GLOBAL = 2,
+  /**
+   * All Notes Off for `channel`.
+   */
+  ZMIDI_MODE_ACTION_KIND_ALL_NOTES_OFF = 3,
+  /**
+   * All Sound Off for `channel`.
+   */
+  ZMIDI_MODE_ACTION_KIND_ALL_SOUND_OFF = 4,
+  /**
+   * Reset All Controllers for `channel`.
+   */
+  ZMIDI_MODE_ACTION_KIND_RESET_ALL_CONTROLLERS = 5,
+  /**
+   * Local Control; `on`.
+   */
+  ZMIDI_MODE_ACTION_KIND_LOCAL_CONTROL = 6,
+  /**
+   * A mode message: all notes off for all voices; `changed` and `alternate`.
+   */
+  ZMIDI_MODE_ACTION_KIND_MODE_CHANGE = 7,
+} ZmidiModeActionKind;
+#endif
+
 #if defined(ZMIDI_NET)
 /**
  * The kind of an event.
@@ -806,6 +1006,34 @@ typedef enum ZmidiNetEventKind {
   ZMIDI_NET_EVENT_KIND_DIAGNOSTIC = 17,
 #endif
 } ZmidiNetEventKind;
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * The change of a [`ZmidiParameterEvent`].
+ */
+typedef enum ZmidiParameterChange {
+  /**
+   * The message gives no event.
+   */
+  ZMIDI_PARAMETER_CHANGE_NONE = 0,
+  /**
+   * Data Entry MSB (controller 6): `value`.
+   */
+  ZMIDI_PARAMETER_CHANGE_DATA_ENTRY_MSB = 1,
+  /**
+   * Data Entry LSB (controller 38): `value`.
+   */
+  ZMIDI_PARAMETER_CHANGE_DATA_ENTRY_LSB = 2,
+  /**
+   * Data Increment (controller 96).
+   */
+  ZMIDI_PARAMETER_CHANGE_INCREMENT = 3,
+  /**
+   * Data Decrement (controller 97).
+   */
+  ZMIDI_PARAMETER_CHANGE_DECREMENT = 4,
+} ZmidiParameterChange;
 #endif
 
 #if defined(ZMIDI_CI_PROPERTY_EXCHANGE)
@@ -1269,24 +1497,24 @@ typedef enum ZmidiStatus {
   ZMIDI_STATUS_NOT_SUPPORTED = 5,
 } ZmidiStatus;
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The result of [`zmidi_usb_gtb_setup`] (REQ-USB-GTB-017 to REQ-USB-GTB-019).
  */
 typedef enum ZmidiUsbGtbResponse {
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
   /**
    * The handler wrote the data stage of the answer; send it.
    */
   ZMIDI_USB_GTB_RESPONSE_ANSWERED = 0,
 #endif
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
   /**
    * Stall the request (USB 2.0 9.2.7). Nothing is written.
    */
   ZMIDI_USB_GTB_RESPONSE_STALL = 1,
 #endif
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
   /**
    * Not the Group Terminal Block descriptors request; handle it in another way.
    */
@@ -1295,7 +1523,7 @@ typedef enum ZmidiUsbGtbResponse {
 } ZmidiUsbGtbResponse;
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Storage of one packet reader. The program gives it; [`zmidi_ble_reader_init`] sets it up.
  */
@@ -1307,7 +1535,7 @@ typedef struct ZmidiBleReader {
 } ZmidiBleReader;
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * One UMP of a read packet with the 13-bit timestamp of its message (sender clock).
  */
@@ -1327,7 +1555,7 @@ typedef struct ZmidiBleUmp {
 } ZmidiBleUmp;
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Storage of one packet writer. The program gives it; [`zmidi_ble_writer_init`] sets it up.
  */
@@ -1339,7 +1567,7 @@ typedef struct ZmidiBleWriter {
 } ZmidiBleWriter;
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * One UMP to write, with the time of its message in milliseconds (the clock of the program).
  */
@@ -1765,7 +1993,7 @@ typedef struct ZmidiClipConfig {
 } ZmidiClipConfig;
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * Storage of one byte stream reader. The program gives it; [`zmidi_bytes_to_ump_init`] sets it up.
  */
@@ -1777,7 +2005,7 @@ typedef struct ZmidiBytesToUmp {
 } ZmidiBytesToUmp;
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * Storage of one byte stream writer. The program gives it; [`zmidi_ump_to_bytes_init`] sets it up.
  */
@@ -1787,6 +2015,271 @@ typedef struct ZmidiUmpToBytes {
    */
   uint64_t _opaque[ZMIDI_UMP_TO_BYTES_WORDS];
 } ZmidiUmpToBytes;
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * Storage of one typed MIDI 1.0 byte reader. The program gives it; [`zmidi_midi1_reader_init`]
+ * sets it up.
+ */
+typedef struct ZmidiMidi1Reader {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_MIDI1_READER_WORDS];
+} ZmidiMidi1Reader;
+#endif
+
+#if (defined(ZMIDI_MESSAGES) || defined(ZMIDI_CHANNEL_MODE) || defined(ZMIDI_CONTROLLERS) || defined(ZMIDI_PARAMETERS))
+/**
+ * One typed MIDI 1.0 message as flat bytes, with no UMP Group (REQ-FFI-MIDI1-001).
+ */
+typedef struct ZmidiMidi1Message {
+  /**
+   * A [`ZmidiMidi1Kind`] value.
+   */
+  uint32_t kind;
+  /**
+   * The status byte, 80H to FFH; F0H for a System Exclusive message.
+   */
+  uint8_t status;
+  /**
+   * The first data byte, 00H to 7FH; 0 when the message has none.
+   */
+  uint8_t data1;
+  /**
+   * The second data byte, 00H to 7FH; 0 when the message has none.
+   */
+  uint8_t data2;
+  /**
+   * The length in bytes of a System Exclusive message from F0H to F7H; 0 for the other kinds.
+   */
+  uint32_t length;
+} ZmidiMidi1Message;
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * Storage of one typed MIDI 1.0 byte writer. The program gives it; [`zmidi_midi1_writer_init`]
+ * sets it up.
+ */
+typedef struct ZmidiMidi1Writer {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_MIDI1_WRITER_WORDS];
+} ZmidiMidi1Writer;
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Storage of one receiver mode state (one instrument). The program gives it; [`zmidi_mode_init`]
+ * sets it up.
+ */
+typedef struct ZmidiModeState {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_MODE_STATE_WORDS];
+} ZmidiModeState;
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * The configuration of a mode state.
+ */
+typedef struct ZmidiModeConfig {
+  /**
+   * The Basic Channel, 0 to 15.
+   */
+  uint8_t basic_channel;
+  /**
+   * The implemented modes: bit 0 Mode 1 (always implemented), bit 1 Mode 2, bit 2 Mode 3, bit 3
+   * Mode 4.
+   */
+  uint8_t implemented;
+  /**
+   * True: a mode that is not implemented gives the alternate mode (p. 23); false: the Mode
+   * message is ignored.
+   */
+  bool alternate;
+  /**
+   * The voice count for M = 0 (Mode 4).
+   */
+  uint8_t voices;
+  /**
+   * True: the channel below the Basic Channel carries the Global Controllers in Mode 4.
+   */
+  bool global_controllers;
+} ZmidiModeConfig;
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * The action of one received message.
+ */
+typedef struct ZmidiModeAction {
+  /**
+   * A [`ZmidiModeActionKind`] value.
+   */
+  uint32_t kind;
+  /**
+   * The channel of an All Notes Off, All Sound Off or Reset All Controllers action (Mode 4), or
+   * FFH for all channels of the instrument.
+   */
+  uint8_t channel;
+  /**
+   * The Mode 4 voice of a voice message, or FFH for none.
+   */
+  uint8_t voice;
+  /**
+   * Local Control on.
+   */
+  bool on;
+  /**
+   * The mode message changed the mode.
+   */
+  bool changed;
+  /**
+   * The mode in use is an alternate mode.
+   */
+  bool alternate;
+} ZmidiModeAction;
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * The mode information of a mode state.
+ */
+typedef struct ZmidiModeInfo {
+  /**
+   * The mode in use, 1 to 4.
+   */
+  uint8_t mode;
+  /**
+   * The mode of the Omni and Mono flags, 1 to 4.
+   */
+  uint8_t requested_mode;
+  /**
+   * The mode in use is an alternate mode.
+   */
+  bool alternate;
+  /**
+   * The Basic Channel, 0 to 15.
+   */
+  uint8_t basic_channel;
+  /**
+   * M of the last Mono On.
+   */
+  uint8_t m;
+  /**
+   * Local Control on.
+   */
+  bool local;
+} ZmidiModeInfo;
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * Storage of one controller state (one channel). The program gives it;
+ * [`zmidi_controllers_init`] sets it up.
+ */
+typedef struct ZmidiControllerState {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_CONTROLLER_STATE_WORDS];
+} ZmidiControllerState;
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * The event of one received message.
+ */
+typedef struct ZmidiControllerEvent {
+  /**
+   * A [`ZmidiControllerEventKind`] value.
+   */
+  uint32_t kind;
+  /**
+   * The controller number.
+   */
+  uint8_t controller;
+  /**
+   * The program number.
+   */
+  uint8_t program;
+  /**
+   * The Portamento source note.
+   */
+  uint8_t source;
+  /**
+   * The program event has a bank.
+   */
+  bool has_bank;
+  /**
+   * The 14-bit or 7-bit controller value.
+   */
+  uint16_t value;
+  /**
+   * The 14-bit bank of a program event.
+   */
+  uint16_t bank;
+} ZmidiControllerEvent;
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Storage of one parameter receiver (one channel). The program gives it;
+ * [`zmidi_parameters_init`] sets it up.
+ */
+typedef struct ZmidiParameterState {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_PARAMETER_STATE_WORDS];
+} ZmidiParameterState;
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * A parameter number.
+ */
+typedef struct ZmidiParameter {
+  /**
+   * True: a Registered Parameter Number (controllers 101 and 100); false: a Non-Registered
+   * Parameter Number (controllers 99 and 98).
+   */
+  bool registered;
+  /**
+   * The MSB, 0 to 127. 7FH 7FH is the null number.
+   */
+  uint8_t msb;
+  /**
+   * The LSB, 0 to 127.
+   */
+  uint8_t lsb;
+} ZmidiParameter;
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * The event of one received message.
+ */
+typedef struct ZmidiParameterEvent {
+  /**
+   * A [`ZmidiParameterChange`] value.
+   */
+  uint32_t change;
+  /**
+   * The selected parameter.
+   */
+  struct ZmidiParameter parameter;
+  /**
+   * The data byte of a Data Entry, 0 to 127.
+   */
+  uint8_t value;
+} ZmidiParameterEvent;
 #endif
 
 #if defined(ZMIDI_NET)
@@ -2291,7 +2784,7 @@ typedef struct ZmidiUmpInfo {
 } ZmidiUmpInfo;
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Storage of one link. The program gives it; [`zmidi_usb_link_init`] sets it up.
  */
@@ -2303,7 +2796,7 @@ typedef struct ZmidiUsbLink {
 } ZmidiUsbLink;
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The configuration of a link.
  */
@@ -2328,7 +2821,7 @@ typedef struct ZmidiUsbLinkConfig {
 } ZmidiUsbLinkConfig;
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * One UMP of a received transfer.
  */
@@ -2344,7 +2837,7 @@ typedef struct ZmidiUsbUmp {
 } ZmidiUsbUmp;
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Storage of one USB MIDI function configuration. The program gives it;
  * [`zmidi_usb_function_init`] or [`zmidi_usb_function_init_default`] sets it up.
@@ -2357,7 +2850,7 @@ typedef struct ZmidiUsbFunction {
 } ZmidiUsbFunction;
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The interfaces, the bus speed and Alternate Setting 0 (USB-MIDI 1.0, cable-count form) of a
  * function.
@@ -2407,7 +2900,7 @@ typedef struct ZmidiUsbFunctionConfig {
 } ZmidiUsbFunctionConfig;
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * One endpoint of a USB MIDI 2.0 Alternate Setting (USB-MIDI v2.0 Tables 5-3 and 5-4).
  */
@@ -2443,7 +2936,7 @@ typedef struct ZmidiUsbEndpoint {
 } ZmidiUsbEndpoint;
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * One Group Terminal Block (USB-MIDI v2.0 Table 5-6). The fields are the raw descriptor values.
  */
@@ -2483,7 +2976,7 @@ typedef struct ZmidiUsbBlock {
 } ZmidiUsbBlock;
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * One endpoint as the writer writes it, for the endpoint allocation of the USB stack.
  */
@@ -2515,7 +3008,7 @@ typedef struct ZmidiUsbSettingEndpoint {
 extern "C" {
 #endif // __cplusplus
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Sets up `reader` for Group `group` (0 to 15) and protocol `protocol` (1 or 2).
  *
@@ -2527,7 +3020,7 @@ enum ZmidiStatus zmidi_ble_reader_init(struct ZmidiBleReader *reader,
                                        uint32_t protocol);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Reads one packet (`len` bytes) and writes each UMP of it into `out` (`capacity` records), the
  * record count into `count` and the count of dropped parts into `dropped`. A `capacity` below
@@ -2547,7 +3040,7 @@ enum ZmidiStatus zmidi_ble_read(struct ZmidiBleReader *reader,
                                 uintptr_t *dropped);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Drops an open SysEx message and the last timestamp of `reader`.
  *
@@ -2557,14 +3050,14 @@ enum ZmidiStatus zmidi_ble_read(struct ZmidiBleReader *reader,
 enum ZmidiStatus zmidi_ble_reader_reset(struct ZmidiBleReader *reader);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Gives the size in bytes of the Rust `PacketReader` (DEC-019 rule 6).
  */
 uintptr_t zmidi_ble_reader_size(void);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Sets up `writer` for the ATT_MTU `att_mtu` (23 or more).
  *
@@ -2574,7 +3067,7 @@ uintptr_t zmidi_ble_reader_size(void);
 enum ZmidiStatus zmidi_ble_writer_init(struct ZmidiBleWriter *writer, uint16_t att_mtu);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Changes the ATT_MTU of `writer` (23 or more).
  *
@@ -2584,7 +3077,7 @@ enum ZmidiStatus zmidi_ble_writer_init(struct ZmidiBleWriter *writer, uint16_t a
 enum ZmidiStatus zmidi_ble_writer_set_att_mtu(struct ZmidiBleWriter *writer, uint16_t att_mtu);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Turns running status of `writer` on or off.
  *
@@ -2594,7 +3087,7 @@ enum ZmidiStatus zmidi_ble_writer_set_att_mtu(struct ZmidiBleWriter *writer, uin
 enum ZmidiStatus zmidi_ble_writer_set_running_status(struct ZmidiBleWriter *writer, bool on);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Gives the packet length of `writer` (ATT_MTU - 3), or 0 for a null pointer.
  *
@@ -2604,7 +3097,7 @@ enum ZmidiStatus zmidi_ble_writer_set_running_status(struct ZmidiBleWriter *writ
 uintptr_t zmidi_ble_writer_packet_len(struct ZmidiBleWriter *writer);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Gives true when `writer` holds bytes for the next packet; false for a null pointer.
  *
@@ -2614,7 +3107,7 @@ uintptr_t zmidi_ble_writer_packet_len(struct ZmidiBleWriter *writer);
 bool zmidi_ble_writer_has_held(struct ZmidiBleWriter *writer);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Drops the held bytes and the state of `writer`.
  *
@@ -2624,14 +3117,14 @@ bool zmidi_ble_writer_has_held(struct ZmidiBleWriter *writer);
 enum ZmidiStatus zmidi_ble_writer_reset(struct ZmidiBleWriter *writer);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Gives the size in bytes of the Rust `PacketWriter` (DEC-019 rule 6).
  */
 uintptr_t zmidi_ble_writer_size(void);
 #endif
 
-#if defined(ZMIDI_BLE)
+#if defined(ZMIDI_BLE_MIDI1)
 /**
  * Writes one packet into `out` (`capacity` bytes) from the held bytes and then from `umps`
  * (`ump_count` timed UMPs), and gives its length in `len` (0: nothing to send) and the count of
@@ -3308,7 +3801,7 @@ uintptr_t zmidi_clip_writer_len(struct ZmidiClipWriter *writer);
 uintptr_t zmidi_clip_writer_size(void);
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * Sets up `reader` for Group `group` (0 to 15) and protocol `protocol` (1 or 2, see
  * [`ZmidiProtocol`]).
@@ -3321,7 +3814,7 @@ enum ZmidiStatus zmidi_bytes_to_ump_init(struct ZmidiBytesToUmp *reader,
                                          uint32_t protocol);
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * Reads `byte` and writes the words of each UMP that it completes into `out` (`capacity`
  * words), and their count into `count`. A `capacity` below [`ZMIDI_BYTES_TO_UMP_MAX_WORDS`] gives
@@ -3338,7 +3831,7 @@ enum ZmidiStatus zmidi_bytes_to_ump_push(struct ZmidiBytesToUmp *reader,
                                          uintptr_t *count);
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * Reads the bytes of `bytes` (`len` bytes) in order and writes the words of each UMP that they
  * complete into `out` (`capacity` words) (OPT-035: one call for many bytes). It stops before a
@@ -3362,14 +3855,14 @@ enum ZmidiStatus zmidi_bytes_to_ump_feed(struct ZmidiBytesToUmp *reader,
                                          uintptr_t *count);
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * Gives the size in bytes of the Rust `BytesToUmp` (DEC-019 rule 6).
  */
 uintptr_t zmidi_bytes_to_ump_size(void);
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * Sets up `writer`, with MIDI 1.0 running status when `running_status` is true.
  *
@@ -3379,7 +3872,7 @@ uintptr_t zmidi_bytes_to_ump_size(void);
 enum ZmidiStatus zmidi_ump_to_bytes_init(struct ZmidiUmpToBytes *writer, bool running_status);
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * Writes the MIDI 1.0 bytes of one UMP (`words`, `word_count` words) into `out` (`capacity`
  * bytes), and their count into `count`. A buffer that is too small gives
@@ -3398,7 +3891,7 @@ enum ZmidiStatus zmidi_ump_to_bytes_write(struct ZmidiUmpToBytes *writer,
                                           uintptr_t *count);
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * The next Channel Voice or Mode message writes its status byte.
  *
@@ -3408,11 +3901,458 @@ enum ZmidiStatus zmidi_ump_to_bytes_write(struct ZmidiUmpToBytes *writer,
 enum ZmidiStatus zmidi_ump_to_bytes_refresh_status(struct ZmidiUmpToBytes *writer);
 #endif
 
-#if defined(ZMIDI_IO)
+#if defined(ZMIDI_IO_MIDI1)
 /**
  * Gives the size in bytes of the Rust `UmpToBytes` (DEC-019 rule 6).
  */
 uintptr_t zmidi_ump_to_bytes_size(void);
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * Sets up `reader`: no running status and no System Exclusive message in progress.
+ *
+ * # Safety
+ * `reader` is null or points to writable storage of a [`ZmidiMidi1Reader`].
+ */
+enum ZmidiStatus zmidi_midi1_reader_init(struct ZmidiMidi1Reader *reader);
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * The System Reset action of the program (AMB-M1-13): the reader forgets its running status, its
+ * partial message and its System Exclusive message in progress.
+ *
+ * # Safety
+ * `reader` is null or was set up by [`zmidi_midi1_reader_init`].
+ */
+enum ZmidiStatus zmidi_midi1_reader_reset(struct ZmidiMidi1Reader *reader);
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * Reads `byte` and writes each message that it completes into `out` (`capacity` entries), and
+ * their count into `count`. The bytes of a System Exclusive message go into `sysex`
+ * (`sysex_capacity` bytes); its message gives the length. A System Exclusive message that does
+ * not fit gives the kind [`ZmidiMidi1Kind::SysExTooLong`] with its full length. A `capacity`
+ * below [`ZMIDI_MIDI1_READER_MAX_EVENTS`] gives [`ZmidiStatus::BufferTooSmall`] before the byte
+ * is read.
+ *
+ * # Safety
+ * `reader` was set up by [`zmidi_midi1_reader_init`]; `sysex` points to `sysex_capacity` writable
+ * bytes; `out` points to `capacity` writable entries; `count` is writable. Null pointers give
+ * [`ZmidiStatus::InvalidArgument`].
+ */
+enum ZmidiStatus zmidi_midi1_reader_push(struct ZmidiMidi1Reader *reader,
+                                         uint8_t byte,
+                                         uint8_t *sysex,
+                                         uintptr_t sysex_capacity,
+                                         struct ZmidiMidi1Message *out,
+                                         uintptr_t capacity,
+                                         uintptr_t *count);
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * Gives `size_of` the Rust reader, for a binding that checks its copy of the layout (DEC-019 rule
+ * 6).
+ */
+uintptr_t zmidi_midi1_reader_size(void);
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * Sets up `writer`, with running status when `running_status` is true.
+ *
+ * # Safety
+ * `writer` is null or points to writable storage of a [`ZmidiMidi1Writer`].
+ */
+enum ZmidiStatus zmidi_midi1_writer_init(struct ZmidiMidi1Writer *writer, bool running_status);
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * The next Channel Voice message writes its status byte, also with running status.
+ *
+ * # Safety
+ * `writer` is null or was set up by [`zmidi_midi1_writer_init`].
+ */
+enum ZmidiStatus zmidi_midi1_writer_refresh_status(struct ZmidiMidi1Writer *writer);
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * Writes the bytes of `message` into `out` (`capacity` bytes) and their count into `count`. A
+ * System Exclusive message takes its `length` bytes from `sysex`, which may be null for the other
+ * kinds. An invalid message (a status byte of another kind, a data byte above 7FH, a System
+ * Exclusive message with no F0H first, no F7H last or a data byte above 7FH) gives
+ * [`ZmidiStatus::InvalidArgument`], and a small `out` gives [`ZmidiStatus::BufferTooSmall`],
+ * both with no state change.
+ *
+ * # Safety
+ * `writer` was set up by [`zmidi_midi1_writer_init`]; `message` is readable; `sysex` is null or
+ * points to `message.length` readable bytes; `out` points to `capacity` writable bytes; `count`
+ * is writable.
+ */
+enum ZmidiStatus zmidi_midi1_writer_write(struct ZmidiMidi1Writer *writer,
+                                          const struct ZmidiMidi1Message *message,
+                                          const uint8_t *sysex,
+                                          uint8_t *out,
+                                          uintptr_t capacity,
+                                          uintptr_t *count);
+#endif
+
+#if defined(ZMIDI_MESSAGES)
+/**
+ * Gives `size_of` the Rust writer, for a binding that checks its copy of the layout (DEC-019 rule
+ * 6).
+ */
+uintptr_t zmidi_midi1_writer_size(void);
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Sets up `state` from `config`, in Mode 1 with Local Control on. A Basic Channel above 15 or a
+ * mode mask above 0FH gives [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `state` is null or points to writable storage of a [`ZmidiModeState`]; `config` is null or
+ * readable.
+ */
+enum ZmidiStatus zmidi_mode_init(struct ZmidiModeState *state,
+                                 const struct ZmidiModeConfig *config);
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Takes one Channel Voice `message` and writes its action into `action`. A message that is not a
+ * valid Channel Voice message gives [`ZmidiStatus::InvalidArgument`] and changes nothing.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_mode_init`]; `message` is readable; `action` is writable.
+ */
+enum ZmidiStatus zmidi_mode_receive(struct ZmidiModeState *state,
+                                    const struct ZmidiMidi1Message *message,
+                                    struct ZmidiModeAction *action);
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * The System Reset action of the program: Omni On, Poly and Local On; the Basic Channel and M stay.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_mode_init`].
+ */
+enum ZmidiStatus zmidi_mode_system_reset(struct ZmidiModeState *state);
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Writes the mode information of `state` into `info`.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_mode_init`]; `info` is null or writable.
+ */
+enum ZmidiStatus zmidi_mode_info(const struct ZmidiModeState *state, struct ZmidiModeInfo *info);
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Sets the Basic Channel (0 to 15), for example from a front panel.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_mode_init`].
+ */
+enum ZmidiStatus zmidi_mode_set_basic_channel(struct ZmidiModeState *state, uint8_t channel);
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Sets the Omni flag, as Omni On or Omni Off does, from the program.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_mode_init`].
+ */
+enum ZmidiStatus zmidi_mode_set_omni(struct ZmidiModeState *state, bool on);
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Selects Poly, as Poly On does, from the program.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_mode_init`].
+ */
+enum ZmidiStatus zmidi_mode_set_poly(struct ZmidiModeState *state);
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Selects Mono with M (0 to 127), as Mono On does, from the program.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_mode_init`].
+ */
+enum ZmidiStatus zmidi_mode_set_mono(struct ZmidiModeState *state, uint8_t m);
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Sets Local Control on or off from the program.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_mode_init`].
+ */
+enum ZmidiStatus zmidi_mode_set_local(struct ZmidiModeState *state, bool on);
+#endif
+
+#if defined(ZMIDI_CHANNEL_MODE)
+/**
+ * Gives `size_of` the Rust mode state, for a binding that checks its copy of the layout (DEC-019
+ * rule 6).
+ */
+uintptr_t zmidi_mode_state_size(void);
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * Sets up `state`: no bank and no Portamento source.
+ *
+ * # Safety
+ * `state` is null or points to writable storage of a [`ZmidiControllerState`].
+ */
+enum ZmidiStatus zmidi_controllers_init(struct ZmidiControllerState *state);
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * Takes one Channel Voice `message` of the channel of `state` and writes its event into `event`
+ * (the kind none when the message gives no event). A message that is not a valid Channel Voice
+ * message gives [`ZmidiStatus::InvalidArgument`] and changes nothing.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_controllers_init`]; `message` is readable; `event` is writable.
+ */
+enum ZmidiStatus zmidi_controllers_receive(struct ZmidiControllerState *state,
+                                           const struct ZmidiMidi1Message *message,
+                                           struct ZmidiControllerEvent *event);
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * The Reset All Controllers action of the program (a mode state action or General MIDI System On).
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_controllers_init`].
+ */
+enum ZmidiStatus zmidi_controllers_reset(struct ZmidiControllerState *state);
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * Writes whether `state` holds a bank into `has_bank`, and the held 14-bit bank (or 0) into `bank`.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_controllers_init`]; `has_bank` and `bank` are writable.
+ */
+enum ZmidiStatus zmidi_controllers_bank(const struct ZmidiControllerState *state,
+                                        bool *has_bank,
+                                        uint16_t *bank);
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * Gives `size_of` the Rust controller state, for a binding that checks its copy of the layout
+ * (DEC-019 rule 6).
+ */
+uintptr_t zmidi_controller_state_size(void);
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * Writes the RP-015 reset value of `controller` into `value`, or [`ZMIDI_CONTROLLER_KEEP`] when
+ * the controller keeps its value (zmidi-io `reset_value`).
+ *
+ * # Safety
+ * `value` is null or writable.
+ */
+enum ZmidiStatus zmidi_controller_reset_value(uint8_t controller, uint8_t *value);
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * Writes a 14-bit controller value (`controller` 0 to 31, `value` 0 to 3FFFH) on `channel` (0
+ * to 15) as the MSB and then the LSB Control Change into `out` (`capacity` entries, at least 2),
+ * and 2 into `count`.
+ *
+ * # Safety
+ * `out` points to `capacity` writable entries; `count` is writable.
+ */
+enum ZmidiStatus zmidi_controller14_messages(uint8_t channel,
+                                             uint8_t controller,
+                                             uint16_t value,
+                                             struct ZmidiMidi1Message *out,
+                                             uintptr_t capacity,
+                                             uintptr_t *count);
+#endif
+
+#if defined(ZMIDI_CONTROLLERS)
+/**
+ * Writes a bank (0 to 3FFFH) and program (0 to 127) selection on `channel` (0 to 15) as Bank
+ * Select MSB, Bank Select LSB and Program Change into `out` (`capacity` entries, at least 3), and
+ * 3 into `count`.
+ *
+ * # Safety
+ * `out` points to `capacity` writable entries; `count` is writable.
+ */
+enum ZmidiStatus zmidi_bank_program_messages(uint8_t channel,
+                                             uint16_t bank,
+                                             uint8_t program,
+                                             struct ZmidiMidi1Message *out,
+                                             uintptr_t capacity,
+                                             uintptr_t *count);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Sets up `state`: no number received, RPN reception on and NRPN reception off.
+ *
+ * # Safety
+ * `state` is null or points to writable storage of a [`ZmidiParameterState`].
+ */
+enum ZmidiStatus zmidi_parameters_init(struct ZmidiParameterState *state);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Takes one Channel Voice `message` of the channel of `state` and writes its event into `event`
+ * (the change none when the message gives no event). A message that is not a valid Channel Voice
+ * message gives [`ZmidiStatus::InvalidArgument`] and changes nothing.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_parameters_init`]; `message` is readable; `event` is writable.
+ */
+enum ZmidiStatus zmidi_parameters_receive(struct ZmidiParameterState *state,
+                                          const struct ZmidiMidi1Message *message,
+                                          struct ZmidiParameterEvent *event);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * The Reset All Controllers action of the program: the RPN and NRPN numbers become 7FH 7FH.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_parameters_init`].
+ */
+enum ZmidiStatus zmidi_parameters_reset(struct ZmidiParameterState *state);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Writes whether a parameter is selected into `selected`, and the parameter (or zeros) into
+ * `parameter`.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_parameters_init`]; `selected` and `parameter` are writable.
+ */
+enum ZmidiStatus zmidi_parameters_selection(const struct ZmidiParameterState *state,
+                                            bool *selected,
+                                            struct ZmidiParameter *parameter);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Writes whether RPN reception is on into `rpn` and whether NRPN reception is on into `nrpn`.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_parameters_init`]; `rpn` and `nrpn` are writable.
+ */
+enum ZmidiStatus zmidi_parameters_reception(const struct ZmidiParameterState *state,
+                                            bool *rpn,
+                                            bool *nrpn);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Turns RPN reception and NRPN reception on or off. A kind that goes on waits again for both bytes
+ * of its number.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_parameters_init`].
+ */
+enum ZmidiStatus zmidi_parameters_set_reception(struct ZmidiParameterState *state,
+                                                bool rpn,
+                                                bool nrpn);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Gives `size_of` the Rust parameter receiver, for a binding that checks its copy of the layout
+ * (DEC-019 rule 6).
+ */
+uintptr_t zmidi_parameter_state_size(void);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Writes the new 14-bit value of the parameter of `event` from its current `value` (0 to 3FFFH)
+ * into `out`, with the RP-018 steps (zmidi-io `ParameterEvent::apply`). An event with no change,
+ * an invalid parameter or a value above 3FFFH gives [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `event` is null or readable; `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_parameter_apply(const struct ZmidiParameterEvent *event,
+                                       uint16_t value,
+                                       uint16_t *out);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Writes the number of `parameter` on `channel` (0 to 15) as its MSB and then its LSB Control
+ * Change into `out` (`capacity` entries, at least 2), and 2 into `count`. A registered 7FH 7FH
+ * is the null number.
+ *
+ * # Safety
+ * `parameter` is readable; `out` points to `capacity` writable entries; `count` is writable.
+ */
+enum ZmidiStatus zmidi_parameter_select_messages(uint8_t channel,
+                                                 const struct ZmidiParameter *parameter,
+                                                 struct ZmidiMidi1Message *out,
+                                                 uintptr_t capacity,
+                                                 uintptr_t *count);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Writes one `change` (a [`ZmidiParameterChange`] value, not none; `value` is the Data Entry byte)
+ * on `channel` (0 to 15) into `out`: Data Entry MSB (6), Data Entry LSB (38), Data Increment (96)
+ * or Data Decrement (97) with value 0.
+ *
+ * # Safety
+ * `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_parameter_change_message(uint8_t channel,
+                                                uint32_t change,
+                                                uint8_t value,
+                                                struct ZmidiMidi1Message *out);
+#endif
+
+#if defined(ZMIDI_PARAMETERS)
+/**
+ * Writes a parameter `value` (0 to 3FFFH) of `parameter` on `channel` (0 to 15) as the number
+ * and then Data Entry MSB and LSB into `out` (`capacity` entries, at least 4), and 4 into
+ * `count`.
+ *
+ * # Safety
+ * `parameter` is readable; `out` points to `capacity` writable entries; `count` is writable.
+ */
+enum ZmidiStatus zmidi_parameter_value_messages(uint8_t channel,
+                                                const struct ZmidiParameter *parameter,
+                                                uint16_t value,
+                                                struct ZmidiMidi1Message *out,
+                                                uintptr_t capacity,
+                                                uintptr_t *count);
 #endif
 
 #if defined(ZMIDI_NET)
@@ -4268,7 +5208,7 @@ enum ZmidiStatus zmidi_ump_downscale(uint32_t value,
                                      uint32_t *out);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Sets up `link` from `config`, at Alternate Setting 0.
  *
@@ -4279,7 +5219,7 @@ enum ZmidiStatus zmidi_usb_link_init(struct ZmidiUsbLink *link,
                                      const struct ZmidiUsbLinkConfig *config);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Reports that the host selected Alternate Setting `setting` (0: USB-MIDI 1.0 Event Packets;
  * other: USB MIDI 2.0 UMP), with the Group Terminal mask and wMaxPacketSize of that setting.
@@ -4293,7 +5233,7 @@ enum ZmidiStatus zmidi_usb_link_set_alternate_setting(struct ZmidiUsbLink *link,
                                                       uint16_t max_packet);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Reports a USB reset: the link goes to Alternate Setting 0.
  *
@@ -4303,7 +5243,7 @@ enum ZmidiStatus zmidi_usb_link_set_alternate_setting(struct ZmidiUsbLink *link,
 enum ZmidiStatus zmidi_usb_link_usb_reset(struct ZmidiUsbLink *link);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Reports a configuration change (SET_CONFIGURATION): the link goes to Alternate Setting 0.
  *
@@ -4313,7 +5253,7 @@ enum ZmidiStatus zmidi_usb_link_usb_reset(struct ZmidiUsbLink *link);
 enum ZmidiStatus zmidi_usb_link_configuration_change(struct ZmidiUsbLink *link);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives the selected Alternate Setting, or 0 for a null pointer.
  *
@@ -4323,7 +5263,7 @@ enum ZmidiStatus zmidi_usb_link_configuration_change(struct ZmidiUsbLink *link);
 uint8_t zmidi_usb_link_setting(struct ZmidiUsbLink *link);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives true when the link uses UMP words (a USB MIDI 2.0 setting); false for Event Packets.
  *
@@ -4333,7 +5273,7 @@ uint8_t zmidi_usb_link_setting(struct ZmidiUsbLink *link);
 bool zmidi_usb_link_is_ump(struct ZmidiUsbLink *link);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives the size of the USB packets that the writer writes, or 0 for a null pointer.
  *
@@ -4343,7 +5283,7 @@ bool zmidi_usb_link_is_ump(struct ZmidiUsbLink *link);
 uintptr_t zmidi_usb_link_packet_size(struct ZmidiUsbLink *link);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives true when the writer has bytes for the next packet (a split UMP or a SysEx part).
  *
@@ -4353,7 +5293,7 @@ uintptr_t zmidi_usb_link_packet_size(struct ZmidiUsbLink *link);
 bool zmidi_usb_link_pending(struct ZmidiUsbLink *link);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives true when the reader holds part of a UMP or of a SysEx message from the last transfer.
  *
@@ -4363,7 +5303,7 @@ bool zmidi_usb_link_pending(struct ZmidiUsbLink *link);
 bool zmidi_usb_link_holds_part(struct ZmidiUsbLink *link);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Reads the data of one received USB transfer (`len` bytes) and writes each UMP into `out`
  * (`capacity` records), the record count into `count` and the count of errors into `errors`. A
@@ -4382,7 +5322,7 @@ enum ZmidiStatus zmidi_usb_link_read(struct ZmidiUsbLink *link,
                                      uintptr_t *errors);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Writes one USB packet into `out` (`capacity` bytes, at least the packet size) from `umps`
  * (`ump_count` UMPs), and gives its length in `len` (0: nothing to send) and the count of UMPs
@@ -4401,14 +5341,14 @@ enum ZmidiStatus zmidi_usb_link_write_packet(struct ZmidiUsbLink *link,
                                              uintptr_t *taken);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives the size in bytes of the Rust `MidiLink` (DEC-019 rule 6).
  */
 uintptr_t zmidi_usb_link_size(void);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Sets up `f` as a function with Alternate Setting 0 only (USB-MIDI 1.0, the cable-count form
  * of `config`). Add the USB MIDI 2.0 settings with [`zmidi_usb_function_add_setting`]. The
@@ -4421,7 +5361,7 @@ enum ZmidiStatus zmidi_usb_function_init(struct ZmidiUsbFunction *f,
                                          const struct ZmidiUsbFunctionConfig *config);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Sets up `f` as the default function (USB-MIDI v2.0 Appendix B): Alternate Setting 0 with one
  * cable in each direction on bulk endpoints OUT 1 and IN 1, and Alternate Setting 1 with bulk
@@ -4437,7 +5377,7 @@ enum ZmidiStatus zmidi_usb_function_init_default(struct ZmidiUsbFunction *f,
                                                  bool high_speed);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Adds a USB MIDI 2.0 Alternate Setting with no endpoint and the default Group Terminal Block
  * (bidirectional, Group 1, ID 1), and gives its bAlternateSetting (1 or 2) in `alt`. Rejected when
@@ -4451,7 +5391,7 @@ enum ZmidiStatus zmidi_usb_function_add_setting(struct ZmidiUsbFunction *f,
                                                 uint8_t *alt);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Adds an endpoint to USB MIDI 2.0 Alternate Setting `alt`. Invalid argument for a null
  * pointer, no such setting, a direction other than 0 or 1, a transfer other than 2 or 3, or a
@@ -4466,7 +5406,7 @@ enum ZmidiStatus zmidi_usb_function_add_endpoint(struct ZmidiUsbFunction *f,
                                                  const struct ZmidiUsbEndpoint *endpoint);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Replaces the Group Terminal Blocks of USB MIDI 2.0 Alternate Setting `alt` with the `count`
  * blocks of `blocks`, in this order. Invalid argument for a null pointer or no such setting;
@@ -4481,7 +5421,7 @@ enum ZmidiStatus zmidi_usb_function_set_blocks(struct ZmidiUsbFunction *f,
                                                uintptr_t count);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives in `len` the number of bytes of [`zmidi_usb_function_write`], for wTotalLength of the
  * Configuration descriptor. It checks the same rules as the writer: rejected for a broken rule.
@@ -4492,7 +5432,7 @@ enum ZmidiStatus zmidi_usb_function_set_blocks(struct ZmidiUsbFunction *f,
 enum ZmidiStatus zmidi_usb_function_len(struct ZmidiUsbFunction *f, uintptr_t *len);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Writes the descriptors of the function into `out` (USB-MIDI v2.0 Appendix B order: the
  * AudioControl interface, then Alternate Setting 0 and the USB MIDI 2.0 settings) and gives the
@@ -4509,7 +5449,7 @@ enum ZmidiStatus zmidi_usb_function_write(struct ZmidiUsbFunction *f,
                                           uintptr_t *written);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives the number of endpoints that the writer writes (all Alternate Settings), or 0 for a null
  * pointer. The list is valid for a function that [`zmidi_usb_function_len`] accepts.
@@ -4520,7 +5460,7 @@ enum ZmidiStatus zmidi_usb_function_write(struct ZmidiUsbFunction *f,
 uintptr_t zmidi_usb_function_endpoint_count(struct ZmidiUsbFunction *f);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives endpoint `index` (0 to the count - 1) in descriptor order, so that the USB stack can
  * allocate the endpoints before it writes the descriptors. One endpoint address can come in more
@@ -4534,7 +5474,7 @@ enum ZmidiStatus zmidi_usb_function_endpoint(struct ZmidiUsbFunction *f,
                                              struct ZmidiUsbSettingEndpoint *endpoint);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives the Group Terminals of the endpoints of `direction` (0 MIDI OUT, 1 MIDI IN) of
  * Alternate Setting `alt` as a mask (bit n is Group n), for [`zmidi_usb_link_set_alternate_setting`]:
@@ -4549,7 +5489,7 @@ uint16_t zmidi_usb_function_group_mask(struct ZmidiUsbFunction *f,
                                        uint8_t direction);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives in `len` the length of the Group Terminal Block descriptor set of USB MIDI 2.0 Alternate
  * Setting `alt` (its wTotalLength). Invalid argument for Alternate Setting 0 or no such setting.
@@ -4560,7 +5500,7 @@ uint16_t zmidi_usb_function_group_mask(struct ZmidiUsbFunction *f,
 enum ZmidiStatus zmidi_usb_gtb_set_len(struct ZmidiUsbFunction *f, uint8_t alt, uintptr_t *len);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Writes the Group Terminal Block descriptor set of USB MIDI 2.0 Alternate Setting `alt` (the
  * header, then the blocks) into `out` and gives its length in `written` (REQ-USB-GTB-015).
@@ -4577,7 +5517,7 @@ enum ZmidiStatus zmidi_usb_gtb_set_write(struct ZmidiUsbFunction *f,
                                          uintptr_t *written);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The device-side handler of the Group Terminal Block descriptors request (USB-MIDI v2.0
  * section 6). `setup` is the 8 bytes of the setup packet. `response` gives what to do:
@@ -4599,7 +5539,7 @@ enum ZmidiStatus zmidi_usb_gtb_setup(struct ZmidiUsbFunction *f,
                                      uintptr_t *written);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The device-side handler of the Group Terminal Block descriptors request for a fixed function
  * (OPT-038): the Group Terminal Block sets are C arrays that a host program wrote before the
@@ -4627,7 +5567,7 @@ enum ZmidiStatus zmidi_usb_fixed_gtb_setup(const uint8_t *const *sets,
                                            uintptr_t *written);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The host side (REQ-USB-GTB-020): writes the 8 setup packet bytes of the Group Terminal Block
  * descriptors request for Alternate Setting `alt`, interface `interface` and wLength `length`
@@ -4643,7 +5583,7 @@ enum ZmidiStatus zmidi_usb_gtb_request(uint8_t alt,
                                        uint8_t *out);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The host side: gives in `total` wTotalLength of the Group Terminal Block Header at the start of
  * `answer` (the answer can be the 5-byte header only). Rejected when the answer has no readable
@@ -4655,7 +5595,7 @@ enum ZmidiStatus zmidi_usb_gtb_request(uint8_t alt,
 enum ZmidiStatus zmidi_usb_gtb_total_length(const uint8_t *answer, uintptr_t len, uint16_t *total);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * The host side: gives in `block` block `index` (0, 1, ...) of the Group Terminal Block
  * descriptor set in `answer`, with the raw field values. The reader is lenient (REQ-USB-GTB-016):
@@ -4672,7 +5612,7 @@ enum ZmidiStatus zmidi_usb_gtb_block(const uint8_t *answer,
                                      struct ZmidiUsbBlock *block);
 #endif
 
-#if defined(ZMIDI_USB)
+#if defined(ZMIDI_USB_MIDI1)
 /**
  * Gives the size in bytes of the Rust function configuration (DEC-019 rule 6).
  */

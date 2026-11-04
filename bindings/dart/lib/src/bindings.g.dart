@@ -4514,7 +4514,7 @@ ZmidiStatus zmidi_usb_link_write_packet(
 
 const int ZMIDI_ABI_MAJOR = 0;
 
-const int ZMIDI_ABI_MINOR = 7;
+const int ZMIDI_ABI_MINOR = 8;
 
 const int ZMIDI_BLE_READER_WORDS = 25;
 

@@ -34,6 +34,40 @@ after_includes = """
     defined(ZMIDI_CI_PROPERTY_EXCHANGE) || defined(ZMIDI_CI_PROCESS_INQUIRY))
 #define ZMIDI_CI_DEVICE
 #endif
+/* The MIDI 1.0 parts (REQ-FFI-ABI-006): ZMIDI_MIDI1 selects all of them, as the Cargo feature midi1
+ * does, and the io, ble and usb parts include their MIDI 1.0-only part. */
+#if defined(ZMIDI_MIDI1)
+#ifndef ZMIDI_IO_MIDI1
+#define ZMIDI_IO_MIDI1
+#endif
+#ifndef ZMIDI_BLE_MIDI1
+#define ZMIDI_BLE_MIDI1
+#endif
+#ifndef ZMIDI_USB_MIDI1
+#define ZMIDI_USB_MIDI1
+#endif
+#ifndef ZMIDI_MESSAGES
+#define ZMIDI_MESSAGES
+#endif
+#ifndef ZMIDI_CHANNEL_MODE
+#define ZMIDI_CHANNEL_MODE
+#endif
+#ifndef ZMIDI_CONTROLLERS
+#define ZMIDI_CONTROLLERS
+#endif
+#ifndef ZMIDI_PARAMETERS
+#define ZMIDI_PARAMETERS
+#endif
+#endif
+#if defined(ZMIDI_IO) && !defined(ZMIDI_IO_MIDI1)
+#define ZMIDI_IO_MIDI1
+#endif
+#if defined(ZMIDI_BLE) && !defined(ZMIDI_BLE_MIDI1)
+#define ZMIDI_BLE_MIDI1
+#endif
+#if defined(ZMIDI_USB) && !defined(ZMIDI_USB_MIDI1)
+#define ZMIDI_USB_MIDI1
+#endif
 """
 
 [layout]
@@ -41,8 +75,10 @@ aligned_n = "ZMIDI_ALIGNED"
 
 [defines]
 "feature = io" = "ZMIDI_IO"
+"feature = io-midi1" = "ZMIDI_IO_MIDI1"
 "feature = ump" = "ZMIDI_UMP"
 "feature = ble" = "ZMIDI_BLE"
+"feature = ble-midi1" = "ZMIDI_BLE_MIDI1"
 "feature = file" = "ZMIDI_FILE"
 "feature = ci-device" = "ZMIDI_CI_DEVICE"
 "feature = ci-initiator" = "ZMIDI_CI_INITIATOR"
@@ -52,8 +88,19 @@ aligned_n = "ZMIDI_ALIGNED"
 "feature = net" = "ZMIDI_NET"
 "feature = net-auth" = "ZMIDI_NET_AUTH"
 "feature = usb" = "ZMIDI_USB"
+"feature = usb-midi1" = "ZMIDI_USB_MIDI1"
+"feature = messages" = "ZMIDI_MESSAGES"
+"feature = channel-mode" = "ZMIDI_CHANNEL_MODE"
+"feature = controllers" = "ZMIDI_CONTROLLERS"
+"feature = parameters" = "ZMIDI_PARAMETERS"
+"feature = midi1" = "ZMIDI_MIDI1"
 "target_pointer_width = 64" = "ZMIDI_PTR64"
 
 [enum]
 rename_variants = "ScreamingSnakeCase"
 prefix_with_name = true
+
+# The kinds of the MIDI 1.0 parts (module Midi1): no signature names them (the structs hold a
+# uint32_t), so the header exports them by name for their constants.
+[export]
+include = ["ZmidiMidi1Kind", "ZmidiModeActionKind", "ZmidiControllerEventKind", "ZmidiParameterChange"]

@@ -1141,3 +1141,464 @@ mod usb {
         });
     }
 }
+
+#[cfg(feature = "midi1")]
+mod midi1 {
+    use proptest::prelude::*;
+    use zmidi::midi1::*;
+    use zmidi::status::ZmidiStatus;
+    use zmidi_io::{
+        ControllerState, Midi1Event, Midi1Message, Midi1Reader, Midi1Writer, ModeConfig, ModeState,
+        ParameterState,
+    };
+    use zmidi_ump::{Channel, Midi1ChannelVoiceMessage};
+
+    /// The C message of a MIDI 1.0 word (Message Type 0x2 or 0x1): bytes 2 to 4.
+    fn of_word(kind: ZmidiMidi1Kind, w: u32) -> ZmidiMidi1Message {
+        ZmidiMidi1Message {
+            kind: kind as u32,
+            status: (w >> 16) as u8,
+            data1: (w >> 8) as u8 & 0x7F,
+            data2: w as u8 & 0x7F,
+            length: 0,
+        }
+    }
+
+    fn cv(m: Midi1ChannelVoiceMessage) -> ZmidiMidi1Message {
+        of_word(ZmidiMidi1Kind::ChannelVoice, m.into_bits())
+    }
+
+    /// Any Channel Voice message (status 80H to EFH, 7-bit data).
+    fn any_cv() -> impl Strategy<Value = Midi1ChannelVoiceMessage> {
+        (0x80u32..=0xEF, 0u32..0x80, 0u32..0x80).prop_map(|(s, a, b)| {
+            Midi1ChannelVoiceMessage::parse(&[0x2000_0000 | s << 16 | a << 8 | b]).unwrap()
+        })
+    }
+
+    /// Control Changes of the controller and parameter controllers, Program Change and Note On.
+    fn any_control() -> impl Strategy<Value = Midi1ChannelVoiceMessage> {
+        prop_oneof![
+            (
+                prop_oneof![
+                    0u32..=63,
+                    64u32..=127,
+                    Just(6),
+                    Just(38),
+                    96u32..=101,
+                    Just(121)
+                ],
+                0u32..0x80
+            )
+                .prop_map(
+                    |(c, v)| Midi1ChannelVoiceMessage::parse(&[0x20B0_0000 | c << 8 | v]).unwrap()
+                ),
+            any_cv(),
+        ]
+    }
+
+    /// REQ-FFI-MIDI1-001: a Channel Voice message goes to C and back; a bad status or data byte
+    /// gives invalid-argument.
+    #[test]
+    fn prop_midi1_message_round_trip() {
+        proptest!(|(m in any_cv(), bad_status in 0u8..0x80, bad_data in 0x80u8..=0xFF)| {
+            let mut s = ZmidiControllerState { _opaque: [0; ZMIDI_CONTROLLER_STATE_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_controllers_init(&mut s) }, ZmidiStatus::Ok);
+            let mut e = ZmidiControllerEvent { kind: 9, controller: 0, program: 0, source: 0, has_bank: false, value: 0, bank: 0 };
+            let c = cv(m);
+            prop_assert_eq!(unsafe { zmidi_controllers_receive(&mut s, &c, &mut e) }, ZmidiStatus::Ok);
+            for bad in [
+                ZmidiMidi1Message { status: bad_status, ..c },
+                ZmidiMidi1Message { data1: bad_data, ..c },
+                ZmidiMidi1Message { kind: ZmidiMidi1Kind::System as u32, ..c },
+            ] {
+                prop_assert_eq!(unsafe { zmidi_controllers_receive(&mut s, &bad, &mut e) }, ZmidiStatus::InvalidArgument);
+            }
+            // The writer gives the bytes of the message.
+            let mut w = ZmidiMidi1Writer { _opaque: [0; ZMIDI_MIDI1_WRITER_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_midi1_writer_init(&mut w, false) }, ZmidiStatus::Ok);
+            let (mut out, mut n) = ([0u8; 4], 0usize);
+            prop_assert_eq!(unsafe { zmidi_midi1_writer_write(&mut w, &c, core::ptr::null(), out.as_mut_ptr(), 4, &mut n) }, ZmidiStatus::Ok);
+            let len = if (0xC0..=0xDF).contains(&c.status) { 2 } else { 3 };
+            prop_assert_eq!(&out[..n], &[c.status, c.data1, c.data2][..len]);
+        });
+    }
+
+    /// REQ-FFI-MIDI1-002: the C reader gives the messages of the Rust reader for any bytes.
+    #[test]
+    fn prop_midi1_reader_equals_rust() {
+        proptest!(|(bytes in proptest::collection::vec(any::<u8>(), 0..96), sysex_cap in 0usize..12, cap in 0usize..4, reset_at in 0usize..96)| {
+            let mut c = ZmidiMidi1Reader { _opaque: [0; ZMIDI_MIDI1_READER_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_midi1_reader_init(&mut c) }, ZmidiStatus::Ok);
+            let mut r = Midi1Reader::new();
+            let (mut cbuf, mut rbuf) = ([0u8; 12], [0u8; 12]);
+            for (i, b) in bytes.into_iter().enumerate() {
+                if i == reset_at {
+                    prop_assert_eq!(unsafe { zmidi_midi1_reader_reset(&mut c) }, ZmidiStatus::Ok);
+                    r.reset();
+                }
+                let mut want = Vec::new();
+                r.feed(b, &mut rbuf[..sysex_cap], |e| want.push(match e {
+                    Midi1Event::Message(Midi1Message::ChannelVoice(m)) => (cv(m), Vec::new()),
+                    Midi1Event::Message(Midi1Message::System(m)) => (of_word(ZmidiMidi1Kind::System, m.into_bits()), Vec::new()),
+                    Midi1Event::Message(Midi1Message::SysEx(s)) => (ZmidiMidi1Message { kind: ZmidiMidi1Kind::SysEx as u32, status: 0xF0, data1: 0, data2: 0, length: s.len() as u32 }, s.to_vec()),
+                    Midi1Event::SysExTooLong { length } => (ZmidiMidi1Message { kind: ZmidiMidi1Kind::SysExTooLong as u32, status: 0xF0, data1: 0, data2: 0, length: length as u32 }, Vec::new()),
+                }));
+                let mut out = [ZmidiMidi1Message { kind: 0, status: 0, data1: 0, data2: 0, length: 0 }; 4];
+                let mut n = 0usize;
+                let st = unsafe { zmidi_midi1_reader_push(&mut c, b, cbuf.as_mut_ptr(), sysex_cap, out.as_mut_ptr(), cap, &mut n) };
+                if cap < ZMIDI_MIDI1_READER_MAX_EVENTS {
+                    // No byte read: give it to the C reader again with room.
+                    prop_assert_eq!(st, ZmidiStatus::BufferTooSmall);
+                    let st = unsafe { zmidi_midi1_reader_push(&mut c, b, cbuf.as_mut_ptr(), sysex_cap, out.as_mut_ptr(), 4, &mut n) };
+                    prop_assert_eq!(st, ZmidiStatus::Ok);
+                }
+                prop_assert_eq!(n, want.len());
+                for (got, (m, sysex)) in out[..n].iter().zip(&want) {
+                    prop_assert_eq!(got, m);
+                    if got.kind == ZmidiMidi1Kind::SysEx as u32 {
+                        prop_assert_eq!(&cbuf[..got.length as usize], &sysex[..]);
+                    }
+                }
+            }
+        });
+    }
+
+    /// REQ-FFI-MIDI1-003: the C writer gives the bytes of the Rust writer, and a small buffer or a
+    /// bad SysEx changes no state.
+    #[test]
+    fn prop_midi1_writer_equals_rust() {
+        proptest!(|(ms in proptest::collection::vec(any_cv(), 1..12), rs in any::<bool>(), small in 0usize..12, sysex in proptest::collection::vec(any::<u8>(), 0..6))| {
+            let mut c = ZmidiMidi1Writer { _opaque: [0; ZMIDI_MIDI1_WRITER_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_midi1_writer_init(&mut c, rs) }, ZmidiStatus::Ok);
+            let mut r = Midi1Writer::new(rs);
+            for (i, m) in ms.into_iter().enumerate() {
+                let (mut want, mut got) = ([0u8; 4], [0u8; 4]);
+                let k = r.write(Midi1Message::ChannelVoice(m), &mut want).unwrap();
+                let msg = cv(m);
+                let mut n = 0usize;
+                if i == small {
+                    prop_assert_eq!(unsafe { zmidi_midi1_writer_write(&mut c, &msg, core::ptr::null(), got.as_mut_ptr(), 0, &mut n) }, ZmidiStatus::BufferTooSmall);
+                }
+                prop_assert_eq!(unsafe { zmidi_midi1_writer_write(&mut c, &msg, core::ptr::null(), got.as_mut_ptr(), 4, &mut n) }, ZmidiStatus::Ok);
+                prop_assert_eq!(&got[..n], &want[..k]);
+            }
+            // A SysEx: F0H, data, F7H is written; anything else is invalid.
+            let mut bytes = vec![0xF0u8];
+            bytes.extend(&sysex);
+            bytes.push(0xF7);
+            let ok = sysex.iter().all(|b| *b < 0x80);
+            let msg = ZmidiMidi1Message { kind: ZmidiMidi1Kind::SysEx as u32, status: 0xF0, data1: 0, data2: 0, length: bytes.len() as u32 };
+            let (mut out, mut n) = ([0u8; 16], 0usize);
+            let st = unsafe { zmidi_midi1_writer_write(&mut c, &msg, bytes.as_ptr(), out.as_mut_ptr(), 16, &mut n) };
+            prop_assert_eq!(st, if ok { ZmidiStatus::Ok } else { ZmidiStatus::InvalidArgument });
+            if ok { prop_assert_eq!(&out[..n], &bytes[..]); }
+            prop_assert_eq!(unsafe { zmidi_midi1_writer_write(&mut c, &msg, core::ptr::null(), out.as_mut_ptr(), 16, &mut n) }, ZmidiStatus::InvalidArgument);
+        });
+    }
+
+    /// REQ-FFI-MIDI1-004, -009: the C mode state gives the actions and information of the Rust
+    /// state for any configuration and messages.
+    #[test]
+    fn prop_mode_state_equals_rust() {
+        proptest!(|(basic in 0u8..20, mask in 0u8..0x14, alternate in any::<bool>(), voices in 0u8..20, global in any::<bool>(), ms in proptest::collection::vec(any_cv(), 0..24), reset_at in 0usize..24)| {
+            let config = ZmidiModeConfig { basic_channel: basic, implemented: mask, alternate, voices, global_controllers: global };
+            let mut c = ZmidiModeState { _opaque: [0; ZMIDI_MODE_STATE_WORDS] };
+            let st = unsafe { zmidi_mode_init(&mut c, &config) };
+            prop_assert_eq!(st == ZmidiStatus::Ok, basic < 16 && mask < 0x10);
+            if st != ZmidiStatus::Ok { return Ok(()); }
+            let mut r = ModeState::new(ModeConfig {
+                basic_channel: Channel::new(basic).unwrap(),
+                implemented: [0, 1, 2, 3].map(|b| mask >> b & 1 != 0),
+                alternate,
+                voices,
+                global_controllers: global,
+            });
+            for (i, m) in ms.into_iter().enumerate() {
+                if i == reset_at {
+                    prop_assert_eq!(unsafe { zmidi_mode_system_reset(&mut c) }, ZmidiStatus::Ok);
+                    r.system_reset();
+                }
+                let mut a = ZmidiModeAction { kind: 99, channel: 0, voice: 0, on: false, changed: false, alternate: false };
+                prop_assert_eq!(unsafe { zmidi_mode_receive(&mut c, &cv(m), &mut a) }, ZmidiStatus::Ok);
+                let want = r.receive(&m);
+                prop_assert_eq!(format!("{:?}", kind_of(&a)), format!("{want:?}"));
+                let mut info = ZmidiModeInfo { mode: 0, requested_mode: 0, alternate: false, basic_channel: 0, m: 0, local: false };
+                prop_assert_eq!(unsafe { zmidi_mode_info(&c, &mut info) }, ZmidiStatus::Ok);
+                prop_assert_eq!(
+                    (info.mode, info.requested_mode, info.alternate, info.basic_channel, info.m, info.local),
+                    (r.mode().number(), r.requested_mode().number(), r.is_alternate(), r.basic_channel().index(), r.m(), r.local())
+                );
+            }
+            // The setters.
+            prop_assert_eq!(unsafe { zmidi_mode_set_basic_channel(&mut c, 16) }, ZmidiStatus::InvalidArgument);
+            prop_assert_eq!(unsafe { zmidi_mode_set_mono(&mut c, 0x80) }, ZmidiStatus::InvalidArgument);
+            prop_assert_eq!(unsafe { zmidi_mode_set_basic_channel(&mut c, 3) }, ZmidiStatus::Ok);
+            prop_assert_eq!(unsafe { zmidi_mode_set_omni(&mut c, false) }, ZmidiStatus::Ok);
+            prop_assert_eq!(unsafe { zmidi_mode_set_mono(&mut c, 2) }, ZmidiStatus::Ok);
+            prop_assert_eq!(unsafe { zmidi_mode_set_local(&mut c, false) }, ZmidiStatus::Ok);
+            r.set_basic_channel(Channel::new(3).unwrap());
+            r.set_omni(false);
+            r.set_mono(2);
+            r.set_local(false);
+            let mut info = ZmidiModeInfo { mode: 0, requested_mode: 0, alternate: false, basic_channel: 0, m: 0, local: true };
+            prop_assert_eq!(unsafe { zmidi_mode_info(&c, &mut info) }, ZmidiStatus::Ok);
+            prop_assert_eq!((info.mode, info.basic_channel, info.m, info.local), (r.mode().number(), 3, 2, false));
+            prop_assert_eq!(unsafe { zmidi_mode_set_poly(&mut c) }, ZmidiStatus::Ok);
+            r.set_poly();
+            prop_assert_eq!(unsafe { zmidi_mode_info(&c, &mut info) }, ZmidiStatus::Ok);
+            prop_assert_eq!(info.requested_mode, r.requested_mode().number());
+        });
+    }
+
+    /// The Rust `ModeAction` of a C action, to compare with `Debug`.
+    fn kind_of(a: &ZmidiModeAction) -> zmidi_io::ModeAction {
+        use zmidi_io::ModeAction as A;
+        let ch = |c: u8| (c != 0xFF).then(|| Channel::new(c).unwrap());
+        match a.kind {
+            0 => A::Ignore,
+            1 => A::Voice {
+                voice: (a.voice != 0xFF).then_some(a.voice),
+            },
+            2 => A::Global,
+            3 => A::AllNotesOff {
+                channel: ch(a.channel),
+            },
+            4 => A::AllSoundOff {
+                channel: ch(a.channel),
+            },
+            5 => A::ResetAllControllers {
+                channel: ch(a.channel),
+            },
+            6 => A::LocalControl { on: a.on },
+            _ => A::ModeChange {
+                changed: a.changed,
+                alternate: a.alternate,
+            },
+        }
+    }
+
+    /// REQ-FFI-MIDI1-005: the C controller state gives the events and bank of the Rust state.
+    #[test]
+    fn prop_controller_state_equals_rust() {
+        proptest!(|(ms in proptest::collection::vec(any_control(), 0..32), reset_at in 0usize..32)| {
+            let mut c = ZmidiControllerState { _opaque: [0; ZMIDI_CONTROLLER_STATE_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_controllers_init(&mut c) }, ZmidiStatus::Ok);
+            let mut r = ControllerState::new();
+            for (i, m) in ms.into_iter().enumerate() {
+                if i == reset_at {
+                    prop_assert_eq!(unsafe { zmidi_controllers_reset(&mut c) }, ZmidiStatus::Ok);
+                    r.reset_all_controllers();
+                }
+                let mut e = ZmidiControllerEvent { kind: 99, controller: 0, program: 0, source: 0, has_bank: false, value: 0, bank: 0 };
+                prop_assert_eq!(unsafe { zmidi_controllers_receive(&mut c, &cv(m), &mut e) }, ZmidiStatus::Ok);
+                let want = r.receive(&m);
+                use zmidi_io::ControllerEvent as E;
+                let got = match e.kind {
+                    0 => None,
+                    1 => Some(E::Controller14 { controller: e.controller, value: e.value }),
+                    2 => Some(E::Controller7 { controller: e.controller, value: e.value as u8 }),
+                    3 => Some(E::Program { program: e.program, bank: e.has_bank.then_some(e.bank) }),
+                    4 => Some(E::Portamento { source: e.source }),
+                    _ => Some(E::ResetAllControllers),
+                };
+                prop_assert_eq!(got, want);
+                let (mut has, mut bank) = (false, 0u16);
+                prop_assert_eq!(unsafe { zmidi_controllers_bank(&c, &mut has, &mut bank) }, ZmidiStatus::Ok);
+                prop_assert_eq!(has.then_some(bank), r.bank());
+            }
+        });
+    }
+
+    /// REQ-FFI-MIDI1-010: the reset value and the controller writers give the zmidi-io results.
+    #[test]
+    fn prop_controller_writers_equal_rust() {
+        proptest!(|(ch in 0u8..18, controller in any::<u8>(), value in 0u16..0x4100, program in 0u8..0x90, cap in 0usize..5)| {
+            let mut v = 0u8;
+            prop_assert_eq!(unsafe { zmidi_controller_reset_value(controller, &mut v) }, ZmidiStatus::Ok);
+            prop_assert_eq!(v, zmidi_io::reset_value(controller).unwrap_or(ZMIDI_CONTROLLER_KEEP));
+            let mut out = [ZmidiMidi1Message { kind: 0, status: 0, data1: 0, data2: 0, length: 0 }; 4];
+            let mut n = 0usize;
+            let want = Channel::new(ch).and_then(|c| zmidi_io::controller14_messages(c, controller, value));
+            let st = unsafe { zmidi_controller14_messages(ch, controller, value, out.as_mut_ptr(), cap, &mut n) };
+            match want {
+                Err(_) => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+                Ok(_) if cap < 2 => prop_assert_eq!(st, ZmidiStatus::BufferTooSmall),
+                Ok(w) => { prop_assert_eq!(st, ZmidiStatus::Ok); prop_assert_eq!(&out[..n], &w.map(cv)[..]); }
+            }
+            let want = Channel::new(ch).and_then(|c| zmidi_io::bank_program_messages(c, value, program));
+            let st = unsafe { zmidi_bank_program_messages(ch, value, program, out.as_mut_ptr(), cap, &mut n) };
+            match want {
+                Err(_) => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+                Ok(_) if cap < 3 => prop_assert_eq!(st, ZmidiStatus::BufferTooSmall),
+                Ok(w) => { prop_assert_eq!(st, ZmidiStatus::Ok); prop_assert_eq!(&out[..n], &w.map(cv)[..]); }
+            }
+        });
+    }
+
+    /// REQ-FFI-MIDI1-006: the C parameter receiver gives the events, selection and reception of
+    /// the Rust receiver.
+    #[test]
+    fn prop_parameter_state_equals_rust() {
+        proptest!(|(ms in proptest::collection::vec(any_control(), 0..32), switch_at in 0usize..32, rpn in any::<bool>(), nrpn in any::<bool>(), reset_at in 0usize..32)| {
+            let mut c = ZmidiParameterState { _opaque: [0; ZMIDI_PARAMETER_STATE_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_parameters_init(&mut c) }, ZmidiStatus::Ok);
+            let mut r = ParameterState::new();
+            for (i, m) in ms.into_iter().enumerate() {
+                if i == switch_at {
+                    prop_assert_eq!(unsafe { zmidi_parameters_set_reception(&mut c, rpn, nrpn) }, ZmidiStatus::Ok);
+                    r.set_rpn_reception(rpn);
+                    r.set_nrpn_reception(nrpn);
+                }
+                if i == reset_at {
+                    prop_assert_eq!(unsafe { zmidi_parameters_reset(&mut c) }, ZmidiStatus::Ok);
+                    r.reset_all_controllers();
+                }
+                let mut e = ZmidiParameterEvent { change: 99, parameter: ZmidiParameter { registered: false, msb: 0, lsb: 0 }, value: 0 };
+                prop_assert_eq!(unsafe { zmidi_parameters_receive(&mut c, &cv(m), &mut e) }, ZmidiStatus::Ok);
+                let want = r.receive(&m);
+                prop_assert_eq!(e.change == 0, want.is_none());
+                if let Some(w) = want {
+                    // The event gives the same new value as the Rust event.
+                    let mut out = 0u16;
+                    prop_assert_eq!(unsafe { zmidi_parameter_apply(&e, 0x1234, &mut out) }, ZmidiStatus::Ok);
+                    prop_assert_eq!(out, w.apply(0x1234));
+                }
+                let (mut sel, mut p) = (false, ZmidiParameter { registered: false, msb: 0, lsb: 0 });
+                prop_assert_eq!(unsafe { zmidi_parameters_selection(&c, &mut sel, &mut p) }, ZmidiStatus::Ok);
+                prop_assert_eq!(sel, r.selection().is_some());
+                let (mut a, mut b) = (false, false);
+                prop_assert_eq!(unsafe { zmidi_parameters_reception(&c, &mut a, &mut b) }, ZmidiStatus::Ok);
+                prop_assert_eq!((a, b), (r.rpn_reception(), r.nrpn_reception()));
+            }
+        });
+    }
+
+    /// REQ-FFI-MIDI1-011: the apply function and the parameter writers give the zmidi-io results.
+    #[test]
+    fn prop_parameter_writers_equal_rust() {
+        proptest!(|(ch in 0u8..18, registered in any::<bool>(), msb in 0u8..0x90, lsb in 0u8..0x90, value in 0u16..0x4100, change in 0u32..6, data in 0u8..0x90, cap in 0usize..5)| {
+            let p = ZmidiParameter { registered, msb, lsb };
+            let rp = (msb < 0x80 && lsb < 0x80).then(|| if registered {
+                zmidi_io::Parameter::Registered(zmidi_ump::controller::Rpn::from_parts(msb, lsb))
+            } else {
+                zmidi_io::Parameter::NonRegistered { msb, lsb }
+            });
+            let rc = if data >= 0x80 { None } else { match change {
+                1 => Some(zmidi_io::ParameterChange::DataEntryMsb(data)),
+                2 => Some(zmidi_io::ParameterChange::DataEntryLsb(data)),
+                3 => Some(zmidi_io::ParameterChange::Increment),
+                4 => Some(zmidi_io::ParameterChange::Decrement),
+                _ => None,
+            } };
+            let mut out16 = 0u16;
+            let st = unsafe { zmidi_parameter_apply(&ZmidiParameterEvent { change, parameter: p, value: data }, value, &mut out16) };
+            match (rp, rc, value < 0x4000) {
+                (Some(parameter), Some(change), true) => {
+                    prop_assert_eq!(st, ZmidiStatus::Ok);
+                    prop_assert_eq!(out16, zmidi_io::ParameterEvent { parameter, change }.apply(value));
+                }
+                _ => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+            }
+            let mut out = [ZmidiMidi1Message { kind: 0, status: 0, data1: 0, data2: 0, length: 0 }; 4];
+            let mut n = 0usize;
+            let c = Channel::new(ch).ok();
+            let st = unsafe { zmidi_parameter_select_messages(ch, &p, out.as_mut_ptr(), cap, &mut n) };
+            match (c, rp) {
+                (Some(c), Some(rp)) if cap >= 2 => { prop_assert_eq!(st, ZmidiStatus::Ok); prop_assert_eq!(&out[..n], &zmidi_io::select_messages(c, rp).unwrap().map(cv)[..]); }
+                (Some(_), Some(_)) => prop_assert_eq!(st, ZmidiStatus::BufferTooSmall),
+                _ => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+            }
+            let st = unsafe { zmidi_parameter_value_messages(ch, &p, value, out.as_mut_ptr(), cap, &mut n) };
+            match (c, rp, value < 0x4000) {
+                (Some(c), Some(rp), true) if cap >= 4 => { prop_assert_eq!(st, ZmidiStatus::Ok); prop_assert_eq!(&out[..n], &zmidi_io::value_messages(c, rp, value).unwrap().map(cv)[..]); }
+                (Some(_), Some(_), true) => prop_assert_eq!(st, ZmidiStatus::BufferTooSmall),
+                _ => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+            }
+            let mut one = out[0];
+            let st = unsafe { zmidi_parameter_change_message(ch, change, data, &mut one) };
+            match (c, rc) {
+                (Some(c), Some(rc)) => { prop_assert_eq!(st, ZmidiStatus::Ok); prop_assert_eq!(one, cv(zmidi_io::change_message(c, rc).unwrap())); }
+                _ => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+            }
+        });
+    }
+
+    /// REQ-FFI-MIDI1-007: each storage holds its Rust type.
+    #[test]
+    fn midi1_storage_holds_the_rust_types() {
+        use core::mem::size_of;
+        assert!(zmidi_midi1_reader_size() <= size_of::<ZmidiMidi1Reader>());
+        assert!(zmidi_midi1_writer_size() <= size_of::<ZmidiMidi1Writer>());
+        assert!(zmidi_mode_state_size() <= size_of::<ZmidiModeState>());
+        assert!(zmidi_controller_state_size() <= size_of::<ZmidiControllerState>());
+        assert!(zmidi_parameter_state_size() <= size_of::<ZmidiParameterState>());
+    }
+}
+
+/// REQ-FFI-ABI-004: the features of the MIDI 1.0-only build turn on no MIDI 2.0 feature of a
+/// dependency, and io, ble and usb keep their MIDI 2.0 features (rule R0 of DEC-022).
+#[test]
+fn midi1_features_have_no_midi2_dependency() {
+    let manifest = include_str!("../Cargo.toml");
+    let features = &manifest[manifest.find("[features]").unwrap()..];
+    let list = |name: &str| -> Vec<String> {
+        let line = features
+            .lines()
+            .find(|l| l.starts_with(&format!("{name} = [")))
+            .unwrap_or_else(|| panic!("feature {name}"));
+        line[line.find('[').unwrap() + 1..line.rfind(']').unwrap()]
+            .split(',')
+            .map(|s| s.trim().trim_matches('"').to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+    // The closure of `midi1` over the features of this crate.
+    let mut todo = vec!["midi1".to_string()];
+    let mut all = Vec::new();
+    while let Some(f) = todo.pop() {
+        for item in list(&f) {
+            if !item.contains(':') && !item.contains('/') {
+                todo.push(item.clone());
+            }
+            all.push(item);
+        }
+    }
+    for midi2 in [
+        "midi2-protocol",
+        "alt1",
+        "channel-voice2",
+        "/full",
+        "zmidi-ble/midi2",
+    ] {
+        assert!(
+            !all.iter().any(|i| i.contains(midi2)),
+            "midi1 turns on {midi2}: {all:?}"
+        );
+    }
+    assert_eq!(
+        list("io"),
+        [
+            "io-midi1",
+            "zmidi-io/midi2-protocol",
+            "zmidi-ump/channel-voice2"
+        ]
+    );
+    assert_eq!(list("ble"), ["ble-midi1", "zmidi-ble/midi2-protocol"]);
+    assert_eq!(list("usb"), ["usb-midi1", "zmidi-usb/alt1"]);
+}
+
+/// REQ-FFI-ABI-005: the C ABI check script builds fw_midi1, checks its flash budget and fails on a
+/// MIDI 2.0 symbol.
+#[test]
+fn ffi_check_has_the_midi1_firmware() {
+    let script = include_str!("../../../scripts/ffi-check.sh");
+    assert!(
+        script.contains("ZMIDI_CHECK_MIDI1_ONLY=ON"),
+        "fw_midi1 build"
+    );
+    assert!(script.contains("fw_midi1 flash"), "fw_midi1 budget");
+    assert!(
+        script.contains("fw_midi1 has MIDI 2.0 code"),
+        "fw_midi1 symbol check"
+    );
+}

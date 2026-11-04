@@ -1,6 +1,6 @@
 # Options of the Meson package of the C ABI (crates/zmidi-ffi/meson.build).
 option('features', type: 'array', value: ['io'],
-  description: 'Parts of the C ABI (Cargo features of zmidi-ffi), for example io, ump, ble, file, ci, net, net-auth, usb')
+  description: 'Parts of the C ABI (Cargo features of zmidi-ffi), for example io, ump, ble, file, ci, net, net-auth, usb, midi1')
 option('cargo_target', type: 'string', value: '',
   description: 'Rust target triple; empty for the host. A cross build needs it, for example thumbv7em-none-eabihf')
 option('runtime', type: 'combo', choices: ['auto', 'std', 'panic-handler'], value: 'auto',

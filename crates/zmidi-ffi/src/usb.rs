@@ -20,7 +20,12 @@ use zmidi_usb::{
 use crate::status::ZmidiStatus;
 
 /// One cable with one translator, so the Event Packet reader can give MIDI 2.0 Protocol UMPs.
+#[cfg(feature = "usb")]
 type Link = MidiLink<1, 1>;
+/// A MIDI 1.0-only build (usb-midi1 without usb, REQ-FFI-ABI-004): no translator, so no MIDI 2.0
+/// Protocol output and no MIDI 2.0 code.
+#[cfg(not(feature = "usb"))]
+type Link = MidiLink<1, 0>;
 
 /// Storage words of a [`ZmidiUsbLink`] on a 64-bit target.
 #[cfg(target_pointer_width = "64")]
@@ -88,7 +93,10 @@ pub unsafe extern "C" fn zmidi_usb_link_init(
     };
     let protocol = match c.protocol {
         1 => StreamProtocol::Midi1,
+        #[cfg(feature = "usb")]
         2 => StreamProtocol::Midi2,
+        #[cfg(not(feature = "usb"))]
+        2 => return ZmidiStatus::NotSupported,
         _ => return ZmidiStatus::InvalidArgument,
     };
     let config = LinkConfig {

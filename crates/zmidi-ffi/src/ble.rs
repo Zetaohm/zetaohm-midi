@@ -10,11 +10,15 @@ use zmidi_ble::{PacketReader, PacketWriter, TimedUmp, WriteError};
 use crate::status::ZmidiStatus;
 
 /// Storage words of a [`ZmidiBleReader`] on a 64-bit target.
-#[cfg(target_pointer_width = "64")]
+#[cfg(all(feature = "ble", target_pointer_width = "64"))]
 pub const ZMIDI_BLE_READER_WORDS: usize = 25;
 /// Storage words of a [`ZmidiBleReader`] on a 32-bit or 16-bit target.
-#[cfg(not(target_pointer_width = "64"))]
+#[cfg(all(feature = "ble", not(target_pointer_width = "64")))]
 pub const ZMIDI_BLE_READER_WORDS: usize = 23;
+/// Storage words of a [`ZmidiBleReader`] in a MIDI 1.0-only build (ble-midi1 without ble): the
+/// reader has no translator (REQ-FFI-ABI-004).
+#[cfg(not(feature = "ble"))]
+pub const ZMIDI_BLE_READER_WORDS: usize = 5;
 /// Storage words of a [`ZmidiBleWriter`] on a 64-bit target.
 #[cfg(target_pointer_width = "64")]
 pub const ZMIDI_BLE_WRITER_WORDS: usize = 11;
@@ -91,8 +95,16 @@ pub unsafe extern "C" fn zmidi_ble_reader_init(
     if reader.is_null() {
         return ZmidiStatus::InvalidArgument;
     }
+    #[cfg(feature = "ble")]
+    let state = PacketReader::new(g, p);
+    // A MIDI 1.0-only build has no MIDI 2.0 Protocol output (REQ-FFI-ABI-004).
+    #[cfg(not(feature = "ble"))]
+    let state = match p {
+        StreamProtocol::Midi1 => PacketReader::midi1(g),
+        StreamProtocol::Midi2 => return ZmidiStatus::NotSupported,
+    };
     // SAFETY: the storage is large and aligned enough (asserts above) and writable (caller).
-    unsafe { reader.cast::<PacketReader>().write(PacketReader::new(g, p)) };
+    unsafe { reader.cast::<PacketReader>().write(state) };
     ZmidiStatus::Ok
 }
 
