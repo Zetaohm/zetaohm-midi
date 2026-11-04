@@ -36,6 +36,34 @@ export { ClipWriter, readClip } from "./file.js";
 export type { ClipEvent, ClipOptions, ClipProfile } from "./file.js";
 export { BytesToUmp, UmpToBytes } from "./io.js";
 export {
+  ControllerState,
+  Midi1Reader,
+  Midi1Writer,
+  ModeState,
+  ParameterState,
+  applyParameter,
+  bankProgramMessages,
+  changeMessage,
+  controller14Messages,
+  midi1Message,
+  resetValue,
+  selectMessages,
+  sysexMessage,
+  valueMessages,
+} from "./midi1.js";
+export type {
+  ControllerEvent,
+  ControllerEventKind,
+  Midi1Kind,
+  Midi1Message,
+  ModeAction,
+  ModeActionKind,
+  ModeStateOptions,
+  Parameter,
+  ParameterChange,
+  ParameterEvent,
+} from "./midi1.js";
+export {
   downscale,
   midi2ChannelPressure,
   midi2ControlChange,

@@ -16,9 +16,10 @@ export const ABI_MAJOR = 0;
  * 3 gives the Property Exchange engine (zmidi_pe_*); 4 gives zmidi_ci_pe_end and the free of the
  * Request ID at the last Chunk of a reply; 5 gives the USB descriptor writer and the Group Terminal
  * Block requests (zmidi_usb_function_*, zmidi_usb_gtb_*); 7 gives zmidi_bytes_to_ump_feed (many bytes in one
- * call). 6 adds only a C call that the package does not use.
+ * call); 8 gives the MIDI 1.0 parts (zmidi_midi1_*, zmidi_mode_*, zmidi_controller*, zmidi_parameter*). 6 adds
+ * only a C call that the package does not use.
  */
-export const ABI_MINOR = 7;
+export const ABI_MINOR = 8;
 
 interface State {
   exports: Record<string, CFn>;

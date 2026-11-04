@@ -7,6 +7,6 @@ cd "$(dirname "$0")/.."
 root=../..
 cargo rustc --quiet --manifest-path "$root/Cargo.toml" -p zmidi-ffi --profile ffi \
   --target wasm32-unknown-unknown --no-default-features \
-  --features panic-handler,io,ump,ble,file,ci,net,net-auth,usb --crate-type cdylib
+  --features panic-handler,io,ump,ble,file,ci,net,net-auth,usb,midi1 --crate-type cdylib
 mkdir -p wasm
 cp "$root/target/wasm32-unknown-unknown/ffi/zmidi.wasm" wasm/zmidi.wasm
