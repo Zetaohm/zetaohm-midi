@@ -674,8 +674,8 @@ impl Midi1ChannelVoiceMessage {
         }
     }
 
-    /// The packet as one 32-bit word.
-    pub(crate) const fn into_bits(self) -> u32 {
+    /// The packet as one 32-bit word (Message Type 0x2), for a writer that takes words (DEC-018).
+    pub const fn into_bits(self) -> u32 {
         match self {
             Self::NoteOff(m) => m.0,
             Self::NoteOn(m) => m.0,

@@ -75,7 +75,7 @@ fn main() -> ! {
         remote::run(&w);
         #[cfg(feature = "inject")]
         inject::run(&w);
-        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words"))]
+        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out"))]
         lean::run(&w);
         #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1", feature = "ble_tx_midi1", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
         transport::run(&w);
@@ -786,7 +786,7 @@ mod inject {
 }
 
 // ---------------------------------------------------------------- lean variants
-#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words"))]
+#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out"))]
 mod lean {
     use super::*;
     #[allow(unused_imports)]
@@ -899,6 +899,35 @@ mod lean {
                     black_box(p.words());
                 }
             }
+        }
+        // The typed MIDI 1.0 reader and writer (zmidi-io messages), with a 64-byte SysEx buffer.
+        #[cfg(feature = "msg_in")]
+        {
+            static mut IN: zmidi_io::Midi1Reader = zmidi_io::Midi1Reader::new();
+            static mut SYSEX: [u8; 64] = [0; 64];
+            let (inp, sysex) = unsafe { (&mut *(&raw mut IN), &mut *(&raw mut SYSEX)) };
+            for &b in input_bytes() {
+                inp.feed(b, sysex, |e| {
+                    black_box(&e);
+                });
+            }
+        }
+        #[cfg(feature = "msg_out")]
+        {
+            use zmidi_io::Midi1Message;
+            static mut OUT: zmidi_io::Midi1Writer = zmidi_io::Midi1Writer::new(true);
+            let out = unsafe { &mut *(&raw mut OUT) };
+            let m = match zmidi_ump::Midi1ChannelVoiceMessage::parse(&w[16..]) {
+                Some(m) => Midi1Message::ChannelVoice(m),
+                None => match zmidi_ump::SystemMessage::parse(&w[16..]) {
+                    Some(m) => Midi1Message::System(m),
+                    None => Midi1Message::SysEx(input_bytes()),
+                },
+            };
+            black_box(out.write_each(m, |b| {
+                black_box(b);
+            }))
+            .ok();
         }
         #[cfg(feature = "bytes_out")]
         {

@@ -11,6 +11,8 @@
 pub mod byte_stream;
 pub mod endpoint;
 pub mod jitter_reduction;
+#[cfg(feature = "messages")]
+pub mod messages;
 pub mod router;
 pub mod send_order;
 
@@ -21,5 +23,22 @@ pub use endpoint::{
     Endpoint, EndpointDescription, EndpointError, FunctionBlock, Replies, StreamConfiguration,
 };
 pub use jitter_reduction::{Disposition, JrError, JrReceiver, JrSender};
+#[cfg(feature = "messages")]
+pub use messages::{MessageError, Midi1Event, Midi1Message, Midi1Reader, Midi1Writer};
 pub use router::{blocks_for_group, ci_address, route, BlocksForGroup, CiAddress, Destination};
 pub use send_order::{end_mds_early, SendOrder, SendOrderError};
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn messages_is_in_the_default_features() {
+        // REQ-MSG-006: the typed byte reader and writer are on by default (`full` turns on
+        // `messages`).
+        let manifest = include_str!("../Cargo.toml");
+        assert!(manifest.contains("default = [\"full\"]"), "{manifest}");
+        assert!(
+            manifest.contains("full = [\"midi2-protocol\", \"messages\"]"),
+            "{manifest}"
+        );
+    }
+}

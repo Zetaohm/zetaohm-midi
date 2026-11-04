@@ -1339,3 +1339,15 @@ Other sizes measured at the same time, no action proposed: `SendOrder` 96, `JrRe
 - Options: after `alt1`, measure the Event Packet path by function (`inl.py`); a word-level Event Packet API with no
   UMP conversion for MIDI 1.0-only firmware; fixed descriptors as the default of the 1.0-only examples. Each option
   must not change a MIDI 2.0 build (no flash, RAM or CPU increase).
+
+### OPT-057 — The typed MIDI 1.0 byte reader decodes each word two times
+
+- Area: `crates/zmidi-io` (`messages.rs`, `Midi1Reader::feed`).
+- Measurement (2026-11-04, `tools/size-probe`, job `din_in_typed_midi1`): 1,936 B flash, 92 B RAM (64 B of it the
+  SysEx buffer of the probe), against 676 B for the callback reader `BytesToUmpCore::feed` (`din_in_feed`). The
+  closure that types each UMP is 1,188 B.
+- Cause: `BytesToUmpCore` makes valid words, and `Midi1ChannelVoiceMessage::parse` and `SystemMessage::parse` then
+  check each word again (opcode, status and reserved bits for each variant). SysEx bytes also go into SysEx7 words
+  and back out.
+- Options: a `zmidi-ump` constructor of the family enums from status and data bytes with one check; a SysEx path
+  from the core with no SysEx7 step. Neither may change `BytesToUmpCore` or any MIDI 2.0 job (DEC-022, R0).

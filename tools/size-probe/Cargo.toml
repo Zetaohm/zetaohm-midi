@@ -103,6 +103,9 @@ rx_assign = ["ump_full"]
 down_words = ["ump_full"]
 bytes_core = ["io"]
 bytes_feed = ["io"]
+# The typed MIDI 1.0 reader and writer on bytes (zmidi-io messages, DEC-022), MIDI 1.0-only builds.
+msg_in = ["io", "zmidi-io/messages"]
+msg_out = ["io", "zmidi-io/messages"]
 up_lean = ["ump_full"]
 # MIDI 1.0 to 2.0 Protocol, word API (Midi1ToMidi2Group::translate_words), one Group.
 up_words = ["ump_full"]
