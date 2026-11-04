@@ -75,7 +75,7 @@ fn main() -> ! {
         remote::run(&w);
         #[cfg(feature = "inject")]
         inject::run(&w);
-        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out"))]
+        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state"))]
         lean::run(&w);
         #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1", feature = "ble_tx_midi1", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
         transport::run(&w);
@@ -786,7 +786,7 @@ mod inject {
 }
 
 // ---------------------------------------------------------------- lean variants
-#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out"))]
+#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state"))]
 mod lean {
     use super::*;
     #[allow(unused_imports)]
@@ -928,6 +928,21 @@ mod lean {
                 black_box(b);
             }))
             .ok();
+        }
+        #[cfg(feature = "mode_state")]
+        {
+            static mut MODE: zmidi_io::ModeState =
+                zmidi_io::ModeState::new(zmidi_io::ModeConfig {
+                    basic_channel: zmidi_ump::Channel::from_bits(0),
+                    implemented: [true; 4],
+                    alternate: true,
+                    voices: 16,
+                    global_controllers: true,
+                });
+            let mode = unsafe { &mut *(&raw mut MODE) };
+            if let Some(m) = zmidi_ump::Midi1ChannelVoiceMessage::parse(&w[16..]) {
+                black_box(mode.receive(&m));
+            }
         }
         #[cfg(feature = "bytes_out")]
         {

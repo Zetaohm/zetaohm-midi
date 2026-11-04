@@ -58,6 +58,8 @@ JOBS = {
     # The typed MIDI 1.0 reader (64-byte SysEx buffer) and writer on bytes (zmidi-io messages, DEC-022).
     "din_in_typed_midi1": ("msg_in", "base", 2000, 112, 852, 52, "midi2 C99 midi2_conv"),
     "din_out_typed_midi1": ("msg_out", "base", 1136, 16, 1160, 104, "AM_MIDI2.0Lib umpToBytestream"),
+    # The MIDI 1.0 receiver mode state of one instrument (zmidi-io channel-mode, DEC-022); no C library has one.
+    "mode_state_midi1": ("mode_state", "base", 832, 16, None, None, "none (no other library has a mode state)"),
     "usb_class": ("usb2", "usb_core", 17488, 672, 3556, 666, "tusb_ump class driver (object)"),
     # ci_device: Discovery and management, no category feature (DEC-017), with a 64 B reply buffer
     # (tests/reply_len.rs of zmidi-ci); pe_engine includes the PE message framing of zmidi-ci (feature
@@ -128,6 +130,7 @@ WHAT = {
     "din_out_midi1": "din_out in a MIDI 1.0-only build (no MIDI 2.0 family, DEC-022)",
     "din_in_typed_midi1": "DIN bytes to typed MIDI 1.0 messages (`Midi1Reader::feed`, 64-byte SysEx buffer, DEC-022)",
     "din_out_typed_midi1": "typed MIDI 1.0 messages to DIN bytes (`Midi1Writer::write_each`; the probe makes each message with `parse`, DEC-022)",
+    "mode_state_midi1": "MIDI 1.0 receiver mode state, one instrument (`ModeState::receive`; the probe makes the message with `parse`, DEC-022)",
     "din_out": "UMP to DIN bytes, value form (`UmpToBytes::write`)",
     "usb_class": "USB MIDI 2.0 class on usb-device, run-time `FunctionConfig`",
     "usb_class_fixed": "USB MIDI 2.0 class on usb-device, fixed function from the build script",
@@ -209,6 +212,7 @@ def tool(name):
 MIDI1_ONLY = {
     "din_out_midi1", "din_out_each_midi1", "usb_class_midi1", "usb_class_rt_midi1",
     "ble_rx_midi1", "ble_rx_words_midi1", "ble_tx_midi1", "din_in_typed_midi1", "din_out_typed_midi1",
+    "mode_state_midi1",
 }
 # `ms2::check_max_packet` is the USB 2.0 wMaxPacketSize rule that Alternate Setting 0 uses too, so it is not
 # MIDI 2.0 code.

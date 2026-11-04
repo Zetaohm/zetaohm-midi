@@ -106,6 +106,8 @@ bytes_feed = ["io"]
 # The typed MIDI 1.0 reader and writer on bytes (zmidi-io messages, DEC-022), MIDI 1.0-only builds.
 msg_in = ["io", "zmidi-io/messages"]
 msg_out = ["io", "zmidi-io/messages"]
+# The MIDI 1.0 receiver mode state (zmidi-io channel-mode, DEC-022).
+mode_state = ["io", "zmidi-io/channel-mode"]
 up_lean = ["ump_full"]
 # MIDI 1.0 to 2.0 Protocol, word API (Midi1ToMidi2Group::translate_words), one Group.
 up_words = ["ump_full"]
