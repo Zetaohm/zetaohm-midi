@@ -70,24 +70,24 @@
 #endif
 
 
-#if (defined(ZMIDI_BLE_MIDI1) && (defined(ZMIDI_BLE) && defined(ZMIDI_PTR64)))
+#if (defined(ZMIDI_BLE_MIDI1) && ((defined(ZMIDI_IO) || defined(ZMIDI_BLE)) && defined(ZMIDI_PTR64)))
 /**
  * Storage words of a [`ZmidiBleReader`] on a 64-bit target.
  */
 #define ZMIDI_BLE_READER_WORDS 25
 #endif
 
-#if (defined(ZMIDI_BLE_MIDI1) && (defined(ZMIDI_BLE) && !defined(ZMIDI_PTR64)))
+#if (defined(ZMIDI_BLE_MIDI1) && ((defined(ZMIDI_IO) || defined(ZMIDI_BLE)) && !defined(ZMIDI_PTR64)))
 /**
  * Storage words of a [`ZmidiBleReader`] on a 32-bit or 16-bit target.
  */
 #define ZMIDI_BLE_READER_WORDS 23
 #endif
 
-#if (defined(ZMIDI_BLE_MIDI1) && !defined(ZMIDI_BLE))
+#if (defined(ZMIDI_BLE_MIDI1) && !(defined(ZMIDI_IO) || defined(ZMIDI_BLE)))
 /**
- * Storage words of a [`ZmidiBleReader`] in a MIDI 1.0-only build (ble-midi1 without ble): the
- * reader has no translator (REQ-FFI-ABI-004).
+ * Storage words of a [`ZmidiBleReader`] in a MIDI 1.0-only build (neither io nor ble: each of them
+ * turns on the MIDI 2.0 translator of zmidi-io): the reader has no translator (REQ-FFI-ABI-006).
  */
 #define ZMIDI_BLE_READER_WORDS 5
 #endif
@@ -194,24 +194,24 @@
 #define ZMIDI_CLIP_MAX_PROFILES 16
 #endif
 
-#if (defined(ZMIDI_IO_MIDI1) && (defined(ZMIDI_IO) && defined(ZMIDI_PTR64)))
+#if (defined(ZMIDI_IO_MIDI1) && ((defined(ZMIDI_IO) || defined(ZMIDI_BLE)) && defined(ZMIDI_PTR64)))
 /**
  * Storage words of a [`ZmidiBytesToUmp`] on a 64-bit target.
  */
 #define ZMIDI_BYTES_TO_UMP_WORDS 24
 #endif
 
-#if (defined(ZMIDI_IO_MIDI1) && (defined(ZMIDI_IO) && !defined(ZMIDI_PTR64)))
+#if (defined(ZMIDI_IO_MIDI1) && ((defined(ZMIDI_IO) || defined(ZMIDI_BLE)) && !defined(ZMIDI_PTR64)))
 /**
  * Storage words of a [`ZmidiBytesToUmp`] on a 32-bit or 16-bit target.
  */
 #define ZMIDI_BYTES_TO_UMP_WORDS 22
 #endif
 
-#if (defined(ZMIDI_IO_MIDI1) && !defined(ZMIDI_IO))
+#if (defined(ZMIDI_IO_MIDI1) && !(defined(ZMIDI_IO) || defined(ZMIDI_BLE)))
 /**
- * Storage words of a [`ZmidiBytesToUmp`] in a MIDI 1.0-only build (io-midi1 without io): the
- * reader has no translator (REQ-FFI-ABI-004).
+ * Storage words of a [`ZmidiBytesToUmp`] in a MIDI 1.0-only build (neither io nor ble: each of them
+ * turns on the MIDI 2.0 translator of zmidi-io): the reader has no translator (REQ-FFI-ABI-006).
  */
 #define ZMIDI_BYTES_TO_UMP_WORDS 4
 #endif

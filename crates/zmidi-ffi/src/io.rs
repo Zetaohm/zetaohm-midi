@@ -10,14 +10,14 @@ use zmidi_ump::{Group, StreamProtocol};
 use crate::status::ZmidiStatus;
 
 /// Storage words of a [`ZmidiBytesToUmp`] on a 64-bit target.
-#[cfg(all(feature = "io", target_pointer_width = "64"))]
+#[cfg(all(any(feature = "io", feature = "ble"), target_pointer_width = "64"))]
 pub const ZMIDI_BYTES_TO_UMP_WORDS: usize = 24;
 /// Storage words of a [`ZmidiBytesToUmp`] on a 32-bit or 16-bit target.
-#[cfg(all(feature = "io", not(target_pointer_width = "64")))]
+#[cfg(all(any(feature = "io", feature = "ble"), not(target_pointer_width = "64")))]
 pub const ZMIDI_BYTES_TO_UMP_WORDS: usize = 22;
-/// Storage words of a [`ZmidiBytesToUmp`] in a MIDI 1.0-only build (io-midi1 without io): the
-/// reader has no translator (REQ-FFI-ABI-004).
-#[cfg(not(feature = "io"))]
+/// Storage words of a [`ZmidiBytesToUmp`] in a MIDI 1.0-only build (neither io nor ble: each of them
+/// turns on the MIDI 2.0 translator of zmidi-io): the reader has no translator (REQ-FFI-ABI-006).
+#[cfg(not(any(feature = "io", feature = "ble")))]
 pub const ZMIDI_BYTES_TO_UMP_WORDS: usize = 4;
 /// Storage words of a [`ZmidiUmpToBytes`].
 pub const ZMIDI_UMP_TO_BYTES_WORDS: usize = 1;

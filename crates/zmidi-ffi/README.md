@@ -170,7 +170,7 @@ with LTO, so the linker removes the functions that the program does not call.
 
 `ZMIDI_CI` also defines the five `ZMIDI_CI_*` macros. `ZMIDI_MIDI1` defines the seven MIDI 1.0 macros, and
 `ZMIDI_IO`, `ZMIDI_USB` and `ZMIDI_BLE` also define their `*_MIDI1` macro. Define the macros of the features of
-your library build: `io-midi1` without `io` (and `ble-midi1` without `ble`) has a smaller storage size. `ZMIDI_ABI_MAJOR` and `ZMIDI_ABI_MINOR` give
+your library build: with neither `io` nor `ble`, the readers of `io-midi1` and `ble-midi1` have a smaller storage size. `ZMIDI_ABI_MAJOR` and `ZMIDI_ABI_MINOR` give
 the ABI version of the header.
 
 ## License
