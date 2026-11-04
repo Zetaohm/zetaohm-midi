@@ -29,8 +29,9 @@ pub mod ump_stream;
 pub mod utility;
 
 pub use channel_voice1::{
-    ChannelModeController, Midi1ChannelPressure, Midi1ChannelVoiceMessage, Midi1ControlChange,
-    Midi1NoteOff, Midi1NoteOn, Midi1Opcode, Midi1PitchBend, Midi1PolyPressure, Midi1ProgramChange,
+    ChannelModeController, ChannelModeMessage, Midi1ChannelPressure, Midi1ChannelVoiceMessage,
+    Midi1ControlChange, Midi1NoteOff, Midi1NoteOn, Midi1Opcode, Midi1PitchBend, Midi1PolyPressure,
+    Midi1ProgramChange, DEFAULT_VELOCITY, MIDDLE_C, PITCH_BEND_CENTER,
 };
 pub use channel_voice2::{
     msb_value, AssignableController, AssignablePerNoteController, AttributeType,
@@ -54,7 +55,8 @@ pub use packet::{Channel, Group, MessageType, UmpError, UmpWords};
 pub use sysex7::{SysEx7, SysEx7Data, SysEx7Event, SysEx7Packets, SysEx7Reassembler, SysEx7Status};
 pub use system::{
     ActiveSensing, Continue, MidiTimeCode, Reset, SongPositionPointer, SongSelect, Start, Stop,
-    SystemMessage, SystemStatus, TimingClock, TuneRequest,
+    SystemMessage, SystemStatus, TimingClock, TuneRequest, CLOCKS_PER_MIDI_BEAT,
+    CLOCKS_PER_QUARTER_NOTE,
 };
 pub use translate::{
     midi2_to_midi1, to_midi1, Midi1ToMidi2, Midi1ToMidi2Group, Midi1Words, Translated,

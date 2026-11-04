@@ -100,7 +100,114 @@ impl ChannelModeController {
     pub const fn index(self) -> u8 {
         self as u8
     }
+
+    /// `true` when the message also performs All Notes Off: 123 to 127 (MIDI 1.0 Specification
+    /// Appendix p. A-4 and Table IV p. T-5; Omni Off 124 included, AMB-M1-55; REQ-CV-MODE-004).
+    pub const fn performs_all_notes_off(self) -> bool {
+        self as u8 >= 123
+    }
 }
+
+/// A Channel Mode message with its value (MIDI 1.0 Specification pp. 20 to 26, Table IV p. T-5;
+/// REQ-CV-MODE-002, REQ-CV-MODE-003).
+///
+/// - Reader: the value of 120, 121, 123, 124, 125 and 127 is ignored; Local Control uses the
+///   switch rule of p. 12 (AMB-M1-24); the Mono On value is given as it is (AMB-M1-56).
+/// - Writer: the value of Table IV (0; 0 or 127 for Local Control; 0 to 16 for Mono On).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ChannelModeMessage {
+    /// 120: All Sound Off.
+    AllSoundOff,
+    /// 121: Reset All Controllers.
+    ResetAllControllers,
+    /// 122: Local Control; `true` is On (127), `false` is Off (0).
+    LocalControl(bool),
+    /// 123: All Notes Off.
+    AllNotesOff,
+    /// 124: Omni Off (All Notes Off).
+    OmniOff,
+    /// 125: Omni On (All Notes Off).
+    OmniOn,
+    /// 126: Mono On (Poly Off, All Notes Off) with M: 1 to 16 channels, or 0 for as many channels
+    /// as the receiver has voices. The reader gives 0 to 127 as it is; the writer refuses M > 16.
+    MonoOn(u8),
+    /// 127: Poly On (Mono Off, All Notes Off).
+    PolyOn,
+}
+
+impl ChannelModeMessage {
+    /// The Channel Mode message for controller `index` and its `value`, or `None` for an index
+    /// outside 120 to 127 or a value above 127.
+    pub const fn from_control(index: u8, value: u8) -> Option<Self> {
+        if value > 0x7F {
+            return None;
+        }
+        let Some(controller) = ChannelModeController::from_index(index) else {
+            return None;
+        };
+        Some(match controller {
+            ChannelModeController::AllSoundOff => Self::AllSoundOff,
+            ChannelModeController::ResetAllControllers => Self::ResetAllControllers,
+            // Switch rule, p. 12: 0 to 3FH Off, 40H to 7FH On (AMB-M1-24).
+            ChannelModeController::LocalControl => Self::LocalControl(value >= 0x40),
+            ChannelModeController::AllNotesOff => Self::AllNotesOff,
+            ChannelModeController::OmniOff => Self::OmniOff,
+            ChannelModeController::OmniOn => Self::OmniOn,
+            ChannelModeController::MonoOn => Self::MonoOn(value),
+            ChannelModeController::PolyOn => Self::PolyOn,
+        })
+    }
+
+    /// The controller number of the message.
+    pub const fn controller(self) -> ChannelModeController {
+        match self {
+            Self::AllSoundOff => ChannelModeController::AllSoundOff,
+            Self::ResetAllControllers => ChannelModeController::ResetAllControllers,
+            Self::LocalControl(_) => ChannelModeController::LocalControl,
+            Self::AllNotesOff => ChannelModeController::AllNotesOff,
+            Self::OmniOff => ChannelModeController::OmniOff,
+            Self::OmniOn => ChannelModeController::OmniOn,
+            Self::MonoOn(_) => ChannelModeController::MonoOn,
+            Self::PolyOn => ChannelModeController::PolyOn,
+        }
+    }
+
+    /// The value of Table IV. Gives `OutOfRange` for a Mono On M above 16.
+    pub const fn value(self) -> Result<u8, UmpError> {
+        match self {
+            Self::LocalControl(true) => Ok(0x7F),
+            Self::MonoOn(m) if m > 16 => Err(UmpError::OutOfRange),
+            Self::MonoOn(m) => Ok(m),
+            _ => Ok(0),
+        }
+    }
+
+    /// The message as a MIDI 1.0 Control Change with the value of Table IV. Gives `OutOfRange`
+    /// for a Mono On M above 16.
+    pub const fn to_control_change(
+        self,
+        group: Group,
+        channel: Channel,
+    ) -> Result<Midi1ControlChange, UmpError> {
+        match self.value() {
+            Ok(value) => {
+                Midi1ControlChange::try_new(group, channel, self.controller().index(), value)
+            }
+            Err(e) => Err(e),
+        }
+    }
+}
+
+/// Middle C, note number 60 (MIDI 1.0 Specification p. 10, Note Number; REQ-CV1-010).
+pub const MIDDLE_C: u8 = 60;
+
+/// Velocity 64 (40H): the velocity of a sender that is not velocity sensitive, and the release
+/// velocity of a Note On with velocity 0 (MIDI 1.0 Specification p. 10, Velocity; REQ-CV1-010).
+pub const DEFAULT_VELOCITY: u8 = 0x40;
+
+/// The Pitch Bend center (no effect), 8192 (2000H): data bytes 00H, 40H (MIDI 1.0
+/// Specification p. 19; REQ-CV1-011).
+pub const PITCH_BEND_CENTER: u16 = 0x2000;
 
 /// Word 0 with Message Type 0x2, `opcode`, `group` and `channel`.
 const fn header(opcode: Midi1Opcode, group: Group, channel: Channel) -> u32 {
@@ -216,6 +323,20 @@ impl Midi1NoteOn {
         Ok(Self(
             header(Midi1Opcode::NoteOn, group, channel) | ((note as u32) << 8) | velocity as u32,
         ))
+    }
+
+    /// The Note Off that a Note On with velocity 0 gives: the same Group, Channel and note, and
+    /// release velocity 64 (MIDI 1.0 Specification p. 10, Velocity and Note-Off; Table II;
+    /// REQ-CV1-009). `None` for a velocity above 0.
+    pub const fn as_note_off(&self) -> Option<Midi1NoteOff> {
+        if self.velocity() != 0 {
+            return None;
+        }
+        // Opcode 0x9 becomes 0x8; the reserved bits are zero (try_new and from_words).
+        let word = (self.0 & !0x00F0_00FF)
+            | ((Midi1Opcode::NoteOff.into_bits() as u32) << 20)
+            | DEFAULT_VELOCITY as u32;
+        Some(Midi1NoteOff(word))
     }
 }
 
@@ -452,12 +573,24 @@ impl Midi1PitchBend {
     pub fn value(&self) -> u16 {
         ((self.msb() as u16) << 7) | self.lsb() as u16
     }
+
+    /// The signed offset of the value from the center 8192: -8192 (maximum negative swing) to
+    /// +8191 (maximum positive swing) (MIDI 1.0 Specification p. 19; REQ-CV1-011).
+    pub fn offset(&self) -> i16 {
+        self.value() as i16 - PITCH_BEND_CENTER as i16
+    }
 }
 
 impl Midi1ControlChange {
     /// The Channel Mode controller when the Index is 120 to 127, otherwise `None`.
     pub const fn channel_mode(&self) -> Option<ChannelModeController> {
         ChannelModeController::from_index(self.index())
+    }
+
+    /// The Channel Mode message with its value when the Index is 120 to 127, otherwise `None`
+    /// (REQ-CV-MODE-002).
+    pub const fn channel_mode_message(&self) -> Option<ChannelModeMessage> {
+        ChannelModeMessage::from_control(self.index(), self.data())
     }
 }
 
@@ -527,6 +660,17 @@ impl Midi1ChannelVoiceMessage {
                 .ok()
                 .map(Self::ChannelPressure),
             Midi1Opcode::PitchBend => Midi1PitchBend::from_words(words).ok().map(Self::PitchBend),
+        }
+    }
+
+    /// The note-off view: a Note Off as it is, a Note On with velocity 0 as a Note Off with
+    /// release velocity 64, otherwise `None`. A receiver must recognize both forms and should
+    /// treat them identically (MIDI 1.0 Specification p. 10; REQ-CV1-009).
+    pub const fn note_off(&self) -> Option<Midi1NoteOff> {
+        match self {
+            Self::NoteOff(m) => Some(*m),
+            Self::NoteOn(m) => m.as_note_off(),
+            _ => None,
         }
     }
 
@@ -792,5 +936,167 @@ mod tests {
             let reserved = if op == 0xC || op == 0xD { 0x0000_80FF } else { 0x0000_8080 };
             prop_assert_eq!(m.into_bits(), w & !reserved);
         });
+    }
+
+    #[test]
+    fn note_off_view_reads_note_on_velocity_0_as_note_off() {
+        // MIDI 1.0 p. 10 and Table II: 9nH kk 00H is a note off with release velocity 64.
+        let on = Midi1NoteOn::try_new(g(3), c(9), MIDDLE_C, 0).unwrap();
+        let off = Midi1NoteOff::try_new(g(3), c(9), MIDDLE_C, 0x40).unwrap();
+        assert_eq!(word(&on), 0x2399_3C00);
+        assert_eq!(on.as_note_off(), Some(off));
+        assert_eq!(word(&off), 0x2389_3C40);
+        assert_eq!(Midi1ChannelVoiceMessage::NoteOn(on).note_off(), Some(off));
+        // A Note Off keeps its own release velocity.
+        let off7 = Midi1NoteOff::try_new(g(3), c(9), MIDDLE_C, 7).unwrap();
+        assert_eq!(
+            Midi1ChannelVoiceMessage::NoteOff(off7).note_off(),
+            Some(off7)
+        );
+        // A Note On with a velocity above 0 and the other messages give none.
+        let on1 = Midi1NoteOn::try_new(g(3), c(9), MIDDLE_C, 1).unwrap();
+        assert_eq!(on1.as_note_off(), None);
+        assert_eq!(Midi1ChannelVoiceMessage::NoteOn(on1).note_off(), None);
+        let pp = Midi1PolyPressure::try_new(g(3), c(9), MIDDLE_C, 0).unwrap();
+        assert_eq!(Midi1ChannelVoiceMessage::PolyPressure(pp).note_off(), None);
+    }
+
+    #[test]
+    fn prop_note_off_view_matches_both_forms() {
+        // p. 10: both forms give the same note, channel and release velocity (64 for Note On 0).
+        proptest!(|(gi in 0u8..16, ci in 0u8..16, note in 0u8..=127, vel in 0u8..=127)| {
+            let on = Midi1NoteOn::try_new(g(gi), c(ci), note, vel).unwrap();
+            let view = Midi1ChannelVoiceMessage::NoteOn(on).note_off();
+            if vel == 0 {
+                let off = Midi1NoteOff::try_new(g(gi), c(ci), note, DEFAULT_VELOCITY).unwrap();
+                prop_assert_eq!(view, Some(off));
+                prop_assert_eq!(Midi1NoteOff::from_words(&[word(&off)]), Ok(off));
+            } else {
+                prop_assert_eq!(view, None);
+            }
+            let off = Midi1NoteOff::try_new(g(gi), c(ci), note, vel).unwrap();
+            prop_assert_eq!(Midi1ChannelVoiceMessage::NoteOff(off).note_off(), Some(off));
+        });
+    }
+
+    #[test]
+    fn middle_c_and_default_velocity() {
+        // MIDI 1.0 p. 10: Middle C is 60; velocity 64 when not velocity sensitive.
+        assert_eq!(MIDDLE_C, 60);
+        assert_eq!(DEFAULT_VELOCITY, 0x40);
+    }
+
+    #[test]
+    fn pitch_bend_offset_from_center() {
+        // MIDI 1.0 p. 19: 00 00 maximum negative, 00 40 center, 7F 7F maximum positive (LSB, MSB).
+        assert_eq!(PITCH_BEND_CENTER, 0x2000);
+        let pb = |lsb: u32, msb: u32| {
+            Midi1PitchBend::from_words(&[0x20E0_0000 | lsb << 8 | msb]).unwrap()
+        };
+        assert_eq!(
+            (pb(0x00, 0x00).value(), pb(0x00, 0x00).offset()),
+            (0, -8192)
+        );
+        assert_eq!((pb(0x00, 0x40).value(), pb(0x00, 0x40).offset()), (8192, 0));
+        assert_eq!(
+            (pb(0x7F, 0x7F).value(), pb(0x7F, 0x7F).offset()),
+            (16383, 8191)
+        );
+        assert_eq!(pb(0x01, 0x40).offset(), 1);
+        assert_eq!(pb(0x7F, 0x3F).offset(), -1);
+    }
+
+    #[test]
+    fn channel_mode_messages_match_table_iv() {
+        // Table IV p. T-5: controller and value of each Channel Mode message.
+        use ChannelModeMessage::*;
+        for (m, index, value) in [
+            (AllSoundOff, 120, 0),
+            (ResetAllControllers, 121, 0),
+            (LocalControl(false), 122, 0),
+            (LocalControl(true), 122, 127),
+            (AllNotesOff, 123, 0),
+            (OmniOff, 124, 0),
+            (OmniOn, 125, 0),
+            (MonoOn(0), 126, 0),
+            (MonoOn(4), 126, 4),
+            (MonoOn(16), 126, 16),
+            (PolyOn, 127, 0),
+        ] {
+            assert_eq!(m.controller().index(), index);
+            assert_eq!(m.value(), Ok(value));
+            let cc = m.to_control_change(g(1), c(2)).unwrap();
+            assert_eq!(word(&cc), 0x21B2_0000 | (index as u32) << 8 | value as u32);
+            assert_eq!(cc.channel_mode_message(), Some(m));
+            assert_eq!(ChannelModeMessage::from_control(index, value), Some(m));
+        }
+        assert_eq!(ChannelModeMessage::from_control(119, 0), None);
+        assert_eq!(ChannelModeMessage::from_control(128, 0), None);
+        assert_eq!(ChannelModeMessage::from_control(122, 128), None);
+        let cc7 = Midi1ControlChange::try_new(g(0), c(0), 7, 100).unwrap();
+        assert_eq!(cc7.channel_mode_message(), None);
+    }
+
+    #[test]
+    fn channel_mode_reader_ignores_or_reads_the_value() {
+        // AMB-M1-24, AMB-M1-56: the value of 120, 121, 123, 124, 125 and 127 has no meaning;
+        // Local Control uses the switch rule of p. 12; Mono On M is given as it is.
+        use ChannelModeMessage::*;
+        for v in 0..=127u8 {
+            assert_eq!(ChannelModeMessage::from_control(120, v), Some(AllSoundOff));
+            assert_eq!(
+                ChannelModeMessage::from_control(121, v),
+                Some(ResetAllControllers)
+            );
+            assert_eq!(
+                ChannelModeMessage::from_control(122, v),
+                Some(LocalControl(v >= 64))
+            );
+            assert_eq!(ChannelModeMessage::from_control(123, v), Some(AllNotesOff));
+            assert_eq!(ChannelModeMessage::from_control(124, v), Some(OmniOff));
+            assert_eq!(ChannelModeMessage::from_control(125, v), Some(OmniOn));
+            assert_eq!(ChannelModeMessage::from_control(126, v), Some(MonoOn(v)));
+            assert_eq!(ChannelModeMessage::from_control(127, v), Some(PolyOn));
+        }
+    }
+
+    #[test]
+    fn channel_mode_writer_refuses_mono_above_16() {
+        // Table IV: M is 0 to 16.
+        let m = ChannelModeMessage::MonoOn(17);
+        assert_eq!(m.value(), Err(UmpError::OutOfRange));
+        assert_eq!(m.to_control_change(g(0), c(0)), Err(UmpError::OutOfRange));
+        assert_eq!(
+            ChannelModeMessage::MonoOn(127).to_control_change(g(0), c(0)),
+            Err(UmpError::OutOfRange)
+        );
+    }
+
+    #[test]
+    fn prop_channel_mode_round_trip() {
+        // A written message reads back as itself; the writer refuses only Mono On above 16.
+        proptest!(|(index in 120u8..=127, value in 0u8..=127, gi in 0u8..16, ci in 0u8..16)| {
+            let m = ChannelModeMessage::from_control(index, value).unwrap();
+            prop_assert_eq!(m.controller().index(), index);
+            match m.to_control_change(g(gi), c(ci)) {
+                Ok(cc) => {
+                    prop_assert_eq!(cc.channel_mode_message(), Some(m));
+                    prop_assert_eq!((cc.group(), cc.channel(), cc.index()), (g(gi), c(ci), index));
+                }
+                Err(e) => {
+                    prop_assert_eq!(e, UmpError::OutOfRange);
+                    prop_assert!(index == 126 && value > 16);
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn all_notes_off_for_controllers_123_to_127() {
+        // Appendix p. A-4 and Table IV p. T-5 (AMB-M1-55): 123 to 127 perform All Notes Off.
+        for i in 120..=127u8 {
+            let m = ChannelModeController::from_index(i).unwrap();
+            assert_eq!(m.performs_all_notes_off(), i >= 123, "controller {i}");
+        }
     }
 }

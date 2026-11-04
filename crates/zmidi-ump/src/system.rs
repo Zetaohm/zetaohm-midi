@@ -174,7 +174,28 @@ impl SongPositionPointer {
     pub fn position(&self) -> u16 {
         ((self.position_msb() as u16) << 7) | self.position_lsb() as u16
     }
+
+    /// The position in Timing Clocks: position × 6, 0 to 98,298 (MIDI 1.0 Specification p. 27;
+    /// REQ-SYS-003).
+    pub fn clocks(&self) -> u32 {
+        self.position() as u32 * CLOCKS_PER_MIDI_BEAT
+    }
+
+    /// The position in ticks of a time base with `ticks_per_clock` ticks for each Timing Clock:
+    /// position × 6 × `ticks_per_clock` (4 for 96 ticks per quarter note). `None` when the result
+    /// does not fit in a `u32` (MIDI 1.0 Specification p. 27; REQ-SYS-003).
+    pub fn ticks(&self, ticks_per_clock: u32) -> Option<u32> {
+        self.clocks().checked_mul(ticks_per_clock)
+    }
 }
+
+/// Timing Clocks in one quarter note: 24 (MIDI 1.0 Specification p. 30, Timing Clock;
+/// REQ-SYS-004).
+pub const CLOCKS_PER_QUARTER_NOTE: u32 = 24;
+
+/// Timing Clocks in one MIDI beat, the unit of Song Position Pointer: 6, a sixteenth note (MIDI
+/// 1.0 Specification p. 27; REQ-SYS-004).
+pub const CLOCKS_PER_MIDI_BEAT: u32 = 6;
 
 /// Song Select, status 0xF3: a 7-bit song number in byte 3.
 #[bitfield(u32, order = Msb, conversion = false, hash = true, new = false, default = false)]
@@ -540,6 +561,28 @@ mod tests {
             MidiTimeCode::try_new(g(0), 0, 16),
             Err(UmpError::OutOfRange)
         );
+    }
+
+    #[test]
+    fn song_position_pointer_to_clocks_and_ticks() {
+        // MIDI 1.0 p. 27: SPP 10 is 60 clocks; at 96 ticks per quarter note (4 for each F8) 240.
+        let spp = |p| SongPositionPointer::try_new(g(0), p).unwrap();
+        assert_eq!(spp(10).clocks(), 60);
+        assert_eq!(spp(10).ticks(96 / CLOCKS_PER_QUARTER_NOTE), Some(240));
+        assert_eq!(spp(0).clocks(), 0);
+        assert_eq!(spp(0x3FFF).clocks(), 98_298);
+        assert_eq!(spp(0x3FFF).ticks(43_690), Some(4_294_639_620));
+        assert_eq!(spp(0x3FFF).ticks(43_700), None);
+        assert_eq!(spp(1).ticks(u32::MAX), None);
+        assert_eq!(spp(0).ticks(u32::MAX), Some(0));
+    }
+
+    #[test]
+    fn timing_clock_rate_and_midi_beat() {
+        // MIDI 1.0 p. 30: 24 clocks per quarter note; p. 27: 1 MIDI beat = 6 clocks (a 1/16 note).
+        assert_eq!(CLOCKS_PER_QUARTER_NOTE, 24);
+        assert_eq!(CLOCKS_PER_MIDI_BEAT, 6);
+        assert_eq!(CLOCKS_PER_QUARTER_NOTE / CLOCKS_PER_MIDI_BEAT, 4);
     }
 
     #[test]
