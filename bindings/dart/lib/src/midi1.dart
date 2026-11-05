@@ -696,3 +696,231 @@ List<Midi1Message> valueMessages(int channel, Parameter parameter, int value) =>
         checkInt('value', value, 0xFFFF),
       ),
     );
+
+/// The kind of a sync event (the order of ZmidiSyncEventKind, from 1).
+enum SyncEventKind {
+  /// Start: the position is 0 and the receiver waits for the next Timing Clock.
+  start,
+
+  /// The Continue message (FBH): the receiver waits at the held position for the next Timing
+  /// Clock. (`continue` is a Dart keyword.)
+  resume,
+
+  /// Stop: the receiver stopped and keeps its position.
+  stop,
+
+  /// A Timing Clock while the receiver plays: [SyncEvent.position] is the position of this clock.
+  clock,
+
+  /// An accepted Song Position Pointer: [SyncEvent.position] is the new position.
+  locate,
+
+  /// An accepted Song Select: [SyncEvent.song] is the song number.
+  song,
+}
+
+/// The run state of a sync receiver.
+enum SyncRun {
+  /// Stopped: a Timing Clock does not advance the position.
+  stopped,
+
+  /// After Start or Continue, until the first Timing Clock.
+  waiting,
+
+  /// Playing: each Timing Clock advances the position.
+  playing,
+}
+
+/// A command of the program (a front panel), with the transitions of the MIDI command.
+enum SyncCommand {
+  /// Start: position 0, then play at the next Timing Clock.
+  start,
+
+  /// Continue: play from the held position at the next Timing Clock. (`continue` is a Dart
+  /// keyword.)
+  resume,
+
+  /// Stop: stop at once and keep the position.
+  stop,
+}
+
+/// The event of one message or command for a sync receiver; a field is null when the kind has
+/// none.
+final class SyncEvent {
+  const SyncEvent._(this.kind, this.position, this.song);
+
+  /// The kind.
+  final SyncEventKind kind;
+
+  /// The position in MIDI clocks of a clock or locate event.
+  final int? position;
+
+  /// The song number of a song event.
+  final int? song;
+
+  @override
+  String toString() =>
+      'SyncEvent(${kind.name}, position: $position, song: $song)';
+}
+
+/// The MIDI 1.0 sync receiver of a sequencer or drum machine: Start, Stop, Continue, Timing Clock,
+/// Song Position Pointer and Song Select (M1 pp. 27 to 32). The position is a count of MIDI clocks.
+final class SyncReceiver {
+  /// A receiver that is stopped at position 0, with song 0, in MIDI sync mode.
+  SyncReceiver() : _b = be.SyncCore();
+
+  final be.SyncCore _b;
+  bool _freed = false;
+
+  SyncEvent? _event((int, int, int) e) {
+    if (e.$1 == 0) {
+      return null;
+    }
+    final kind = SyncEventKind.values[e.$1 - 1];
+    final position =
+        kind == SyncEventKind.clock || kind == SyncEventKind.locate;
+    return SyncEvent._(
+      kind,
+      position ? e.$2 : null,
+      kind == SyncEventKind.song ? e.$3 : null,
+    );
+  }
+
+  /// Takes one System message; gives its event, or null.
+  SyncEvent? receive(Midi1Message message) {
+    checkFreed(_freed, this);
+    return _event(_b.receive(message._raw));
+  }
+
+  /// Takes one command of the program with the transitions of the MIDI command; gives its event,
+  /// or null.
+  SyncEvent? command(SyncCommand command) {
+    checkFreed(_freed, this);
+    return _event(_b.command(command.index + 1));
+  }
+
+  /// The System Reset action of the program: position 0 and stopped; the song and the MIDI sync
+  /// mode stay.
+  void systemReset() {
+    checkFreed(_freed, this);
+    _b.systemReset();
+  }
+
+  (int, int, int, bool) get _info {
+    checkFreed(_freed, this);
+    return _b.info();
+  }
+
+  /// The position in MIDI clocks: the position of the next Timing Clock that plays.
+  int get position => _info.$1;
+
+  /// The run state.
+  SyncRun get run => SyncRun.values[_info.$2];
+
+  /// The song of the last accepted Song Select.
+  int get song => _info.$3;
+
+  /// MIDI sync mode on (the default); out of it the receiver ignores Song Position Pointer and
+  /// Song Select.
+  bool get syncMode => _info.$4;
+
+  set syncMode(bool on) {
+    checkFreed(_freed, this);
+    _b.setMode(on);
+  }
+
+  /// Frees the memory of the receiver now.
+  void free() {
+    if (!_freed) {
+      _freed = true;
+      _b.free();
+    }
+  }
+}
+
+/// The default timeout of the Active Sensing monitor: 330 ms, in microseconds.
+const activeSensingTimeoutUs = 330000;
+
+/// The default interval of the Active Sensing sender: 270 ms, in microseconds.
+const activeSensingIntervalUs = 270000;
+
+/// The MIDI 1.0 Active Sensing monitor of a receiver (M1 pp. 32, 33); the program gives each time
+/// in microseconds.
+final class ActiveSensingMonitor {
+  /// A monitor with a timeout of [timeoutUs] microseconds, not armed.
+  ActiveSensingMonitor({this.timeoutUs = activeSensingTimeoutUs})
+    : _b = be.MonitorCore(checkInt('timeoutUs', timeoutUs, 0xFFFFFFFF));
+
+  /// The timeout, in microseconds.
+  final int timeoutUs;
+  final be.MonitorCore _b;
+  bool _freed = false;
+
+  /// Takes one received byte at the time [nowUs]: FEH arms the monitor; while it is armed, each
+  /// byte restarts the timer.
+  void receiveByte(int byte, int nowUs) {
+    checkFreed(_freed, this);
+    _b.receiveByte(checkInt('byte', byte, 255), checkTime('nowUs', nowUs));
+  }
+
+  /// Takes one received message of a transport with no bytes at the time [nowUs].
+  void receive(bool activeSensing, int nowUs) {
+    checkFreed(_freed, this);
+    _b.receive(activeSensing, checkTime('nowUs', nowUs));
+  }
+
+  /// Checks the timer at the time [nowUs]: true one time when more than the timeout passed since
+  /// the last received byte; the monitor then waits for FEH again.
+  bool poll(int nowUs) {
+    checkFreed(_freed, this);
+    return _b.poll(checkTime('nowUs', nowUs));
+  }
+
+  /// The monitor received FEH and gave no timeout after it.
+  bool get isArmed {
+    checkFreed(_freed, this);
+    return _b.isArmed();
+  }
+
+  /// Frees the memory of the monitor now.
+  void free() {
+    if (!_freed) {
+      _freed = true;
+      _b.free();
+    }
+  }
+}
+
+/// The MIDI 1.0 Active Sensing sender of a transmitter (M1 p. 32); the program gives each time in
+/// microseconds.
+final class ActiveSensingSender {
+  /// A sender with an interval of [intervalUs] microseconds that starts at time 0.
+  ActiveSensingSender({this.intervalUs = activeSensingIntervalUs})
+    : _b = be.SenderCore(checkInt('intervalUs', intervalUs, 0xFFFFFFFF));
+
+  /// The interval, in microseconds.
+  final int intervalUs;
+  final be.SenderCore _b;
+  bool _freed = false;
+
+  /// The program sent a byte at the time [nowUs]; the interval starts again.
+  void sent(int nowUs) {
+    checkFreed(_freed, this);
+    _b.sent(checkTime('nowUs', nowUs));
+  }
+
+  /// Checks the interval at the time [nowUs]: true when no byte was sent for the interval; the
+  /// program then sends one FEH byte, and the interval starts again.
+  bool poll(int nowUs) {
+    checkFreed(_freed, this);
+    return _b.poll(checkTime('nowUs', nowUs));
+  }
+
+  /// Frees the memory of the sender now.
+  void free() {
+    if (!_freed) {
+      _freed = true;
+      _b.free();
+    }
+  }
+}

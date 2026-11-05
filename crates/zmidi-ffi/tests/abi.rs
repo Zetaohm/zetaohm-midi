@@ -1523,6 +1523,100 @@ mod midi1 {
         });
     }
 
+    /// REQ-FFI-MIDI1-012: the C sync receiver gives the events and information of the Rust
+    /// receiver for any System messages and commands.
+    #[test]
+    fn prop_sync_receiver_equals_rust() {
+        use zmidi_io::{SyncCommand, SyncEvent, SyncReceiver, SyncRun};
+        proptest!(|(steps in proptest::collection::vec((0u8..9, 0u8..0x80, 0u8..0x80), 0..40), off_at in 0usize..40)| {
+            let mut c = ZmidiSyncReceiver { _opaque: [0; ZMIDI_SYNC_RECEIVER_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_sync_init(&mut c) }, ZmidiStatus::Ok);
+            let mut r = SyncReceiver::new();
+            for (i, (op, a, b)) in steps.into_iter().enumerate() {
+                if i == off_at {
+                    prop_assert_eq!(unsafe { zmidi_sync_set_mode(&mut c, false) }, ZmidiStatus::Ok);
+                    r.set_sync_mode(false);
+                }
+                let mut e = ZmidiSyncEvent { kind: 99, position: 0, song: 0 };
+                let want = if op < 3 {
+                    let cmd = [SyncCommand::Start, SyncCommand::Continue, SyncCommand::Stop][op as usize];
+                    prop_assert_eq!(unsafe { zmidi_sync_command(&mut c, u32::from(op) + 1, &mut e) }, ZmidiStatus::Ok);
+                    r.command(cmd)
+                } else {
+                    let status: u8 = [0xF8, 0xFA, 0xFB, 0xFC, 0xF2, 0xF3][op as usize - 3];
+                    let m = of_word(ZmidiMidi1Kind::System, 0x1000_0000 | u32::from(status) << 16 | u32::from(a) << 8 | u32::from(b));
+                    prop_assert_eq!(unsafe { zmidi_sync_receive(&mut c, &m, &mut e) }, ZmidiStatus::Ok);
+                    r.receive(&zmidi_ump::SystemMessage::parse(&[0x1000_0000 | u32::from(status) << 16 | u32::from(a) << 8 | u32::from(b)]).unwrap())
+                };
+                let got = match e.kind {
+                    0 => None,
+                    1 => Some(SyncEvent::Start),
+                    2 => Some(SyncEvent::Continue),
+                    3 => Some(SyncEvent::Stop),
+                    4 => Some(SyncEvent::Clock { position: e.position }),
+                    5 => Some(SyncEvent::Locate { position: e.position }),
+                    _ => Some(SyncEvent::Song { number: e.song }),
+                };
+                prop_assert_eq!(got, want);
+                let mut info = ZmidiSyncInfo { position: 9, run: 9, song: 9, sync_mode: true };
+                prop_assert_eq!(unsafe { zmidi_sync_info(&c, &mut info) }, ZmidiStatus::Ok);
+                let run = match r.run() { SyncRun::Stopped => 0, SyncRun::Waiting => 1, SyncRun::Playing => 2 };
+                prop_assert_eq!((info.position, info.run, info.song, info.sync_mode), (r.position(), run, r.song(), r.sync_mode()));
+            }
+            prop_assert_eq!(unsafe { zmidi_sync_system_reset(&mut c) }, ZmidiStatus::Ok);
+            let mut e = ZmidiSyncEvent { kind: 0, position: 0, song: 0 };
+            prop_assert_eq!(unsafe { zmidi_sync_command(&mut c, 0, &mut e) }, ZmidiStatus::InvalidArgument);
+            let bad = cv(Midi1ChannelVoiceMessage::parse(&[0x2090_3C40]).unwrap());
+            prop_assert_eq!(unsafe { zmidi_sync_receive(&mut c, &bad, &mut e) }, ZmidiStatus::InvalidArgument);
+        });
+    }
+
+    /// REQ-FFI-MIDI1-013: the C Active Sensing monitor and sender give the results of the Rust
+    /// types for any bytes and times.
+    #[test]
+    fn prop_active_sensing_equals_rust() {
+        use zmidi_io::{ActiveSensingMonitor, ActiveSensingSender};
+        proptest!(|(timeout in 1u32..500_000, interval in 1u32..500_000, steps in proptest::collection::vec((0u64..400_000, any::<u8>(), 0u8..4), 1..40))| {
+            let mut cm = ZmidiActiveSensingMonitor { _opaque: [0; ZMIDI_ACTIVE_SENSING_MONITOR_WORDS] };
+            let mut cs = ZmidiActiveSensingSender { _opaque: [0; ZMIDI_ACTIVE_SENSING_SENDER_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_active_sensing_monitor_init(&mut cm, timeout) }, ZmidiStatus::Ok);
+            prop_assert_eq!(unsafe { zmidi_active_sensing_sender_init(&mut cs, interval) }, ZmidiStatus::Ok);
+            let (mut rm, mut rs) = (ActiveSensingMonitor::new(timeout), ActiveSensingSender::new(interval));
+            let mut now = 0u64;
+            for (dt, byte, op) in steps {
+                now += dt;
+                match op {
+                    0 => {
+                        prop_assert_eq!(unsafe { zmidi_active_sensing_monitor_receive_byte(&mut cm, byte, now) }, ZmidiStatus::Ok);
+                        rm.receive_byte(byte, now);
+                    }
+                    1 => {
+                        prop_assert_eq!(unsafe { zmidi_active_sensing_monitor_receive(&mut cm, byte & 1 == 1, now) }, ZmidiStatus::Ok);
+                        rm.receive(byte & 1 == 1, now);
+                    }
+                    2 => {
+                        let (mut timeout, mut armed) = (false, false);
+                        prop_assert_eq!(unsafe { zmidi_active_sensing_monitor_poll(&mut cm, now, &mut timeout, &mut armed) }, ZmidiStatus::Ok);
+                        prop_assert_eq!(timeout, rm.poll(now));
+                        prop_assert_eq!(armed, rm.is_armed());
+                        let mut still = false;
+                        prop_assert_eq!(unsafe { zmidi_active_sensing_monitor_is_armed(&cm, &mut still) }, ZmidiStatus::Ok);
+                        prop_assert_eq!(still, rm.is_armed());
+                    }
+                    _ => {
+                        let mut send = false;
+                        if byte & 1 == 1 {
+                            prop_assert_eq!(unsafe { zmidi_active_sensing_sender_sent(&mut cs, now) }, ZmidiStatus::Ok);
+                            rs.sent(now);
+                        }
+                        prop_assert_eq!(unsafe { zmidi_active_sensing_sender_poll(&mut cs, now, &mut send) }, ZmidiStatus::Ok);
+                        prop_assert_eq!(send, rs.poll(now));
+                    }
+                }
+            }
+        });
+    }
+
     /// REQ-FFI-MIDI1-007: each storage holds its Rust type.
     #[test]
     fn midi1_storage_holds_the_rust_types() {
@@ -1532,6 +1626,9 @@ mod midi1 {
         assert!(zmidi_mode_state_size() <= size_of::<ZmidiModeState>());
         assert!(zmidi_controller_state_size() <= size_of::<ZmidiControllerState>());
         assert!(zmidi_parameter_state_size() <= size_of::<ZmidiParameterState>());
+        assert!(zmidi_sync_receiver_size() <= size_of::<ZmidiSyncReceiver>());
+        assert!(zmidi_active_sensing_monitor_size() <= size_of::<ZmidiActiveSensingMonitor>());
+        assert!(zmidi_active_sensing_sender_size() <= size_of::<ZmidiActiveSensingSender>());
     }
 }
 

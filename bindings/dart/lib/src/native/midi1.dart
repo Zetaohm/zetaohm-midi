@@ -431,3 +431,142 @@ List<RawMessage> valueMessages(
     'valueMessages',
   );
 });
+
+/// The C state of a SyncReceiver.
+final class SyncCore implements Finalizable {
+  /// A new sync receiver.
+  SyncCore() {
+    _p = allocState(this, zmidi_sync_receiver_size());
+    check(zmidi_sync_init(_p), 'SyncReceiver');
+  }
+
+  final _s = Scratch();
+  late Pointer<ZmidiSyncReceiver> _p;
+
+  (int, int, int) _out(Pointer<ZmidiSyncEvent> e) =>
+      (e.ref.kind, e.ref.position, e.ref.song);
+
+  /// Takes one message; gives (kind, position, song).
+  (int, int, int) receive(RawMessage m) => _s.run((arena) {
+    final pm = arena<ZmidiMidi1Message>();
+    _messageIn(pm, m);
+    final e = arena<ZmidiSyncEvent>();
+    check(zmidi_sync_receive(_p, pm, e), 'receive');
+    return _out(e);
+  });
+
+  /// Takes one command (1 start, 2 continue, 3 stop); gives (kind, position, song).
+  (int, int, int) command(int command) => _s.run((arena) {
+    final e = arena<ZmidiSyncEvent>();
+    check(zmidi_sync_command(_p, command, e), 'command');
+    return _out(e);
+  });
+
+  /// The System Reset action.
+  void systemReset() => check(zmidi_sync_system_reset(_p), 'systemReset');
+
+  /// (position, run, song, sync mode).
+  (int, int, int, bool) info() => _s.run((arena) {
+    final i = arena<ZmidiSyncInfo>();
+    check(zmidi_sync_info(_p, i), 'info');
+    return (i.ref.position, i.ref.run, i.ref.song, i.ref.sync_mode);
+  });
+
+  /// Sets MIDI sync mode.
+  void setMode(bool on) => check(zmidi_sync_set_mode(_p, on), 'syncMode');
+
+  /// Frees the C state and the scratch block.
+  void free() {
+    if (_p != nullptr) {
+      releaseState(this, _p);
+      _p = nullptr;
+    }
+    _s.release();
+  }
+}
+
+/// The C state of an ActiveSensingMonitor.
+final class MonitorCore implements Finalizable {
+  /// A monitor with a timeout in microseconds.
+  MonitorCore(int timeoutUs) {
+    _p = allocState(this, zmidi_active_sensing_monitor_size());
+    check(
+      zmidi_active_sensing_monitor_init(_p, timeoutUs),
+      'ActiveSensingMonitor',
+    );
+  }
+
+  final _s = Scratch();
+  late Pointer<ZmidiActiveSensingMonitor> _p;
+
+  /// Takes one received byte.
+  void receiveByte(int byte, int nowUs) => check(
+    zmidi_active_sensing_monitor_receive_byte(_p, byte, nowUs),
+    'receiveByte',
+  );
+
+  /// Takes one received message.
+  void receive(bool activeSensing, int nowUs) => check(
+    zmidi_active_sensing_monitor_receive(_p, activeSensing, nowUs),
+    'receive',
+  );
+
+  /// Checks the timer; gives the timeout.
+  bool poll(int nowUs) => _s.run((arena) {
+    final timeout = arena<Bool>();
+    final armed = arena<Bool>();
+    check(zmidi_active_sensing_monitor_poll(_p, nowUs, timeout, armed), 'poll');
+    return timeout.value;
+  });
+
+  /// The armed flag.
+  bool isArmed() => _s.run((arena) {
+    final armed = arena<Bool>();
+    check(zmidi_active_sensing_monitor_is_armed(_p, armed), 'isArmed');
+    return armed.value;
+  });
+
+  /// Frees the C state and the scratch block.
+  void free() {
+    if (_p != nullptr) {
+      releaseState(this, _p);
+      _p = nullptr;
+    }
+    _s.release();
+  }
+}
+
+/// The C state of an ActiveSensingSender.
+final class SenderCore implements Finalizable {
+  /// A sender with an interval in microseconds.
+  SenderCore(int intervalUs) {
+    _p = allocState(this, zmidi_active_sensing_sender_size());
+    check(
+      zmidi_active_sensing_sender_init(_p, intervalUs),
+      'ActiveSensingSender',
+    );
+  }
+
+  final _s = Scratch();
+  late Pointer<ZmidiActiveSensingSender> _p;
+
+  /// The program sent a byte.
+  void sent(int nowUs) =>
+      check(zmidi_active_sensing_sender_sent(_p, nowUs), 'sent');
+
+  /// Checks the interval; gives true to send FEH.
+  bool poll(int nowUs) => _s.run((arena) {
+    final send = arena<Bool>();
+    check(zmidi_active_sensing_sender_poll(_p, nowUs, send), 'poll');
+    return send.value;
+  });
+
+  /// Frees the C state and the scratch block.
+  void free() {
+    if (_p != nullptr) {
+      releaseState(this, _p);
+      _p = nullptr;
+    }
+    _s.release();
+  }
+}

@@ -1,5 +1,6 @@
-/* REQ-FFI-MIDI1-008: the messages, channel-mode, controllers and parameters parts through the header,
- * with vectors from M1 v4.2.1, RP-015 and RP-018. The file needs only these parts (ZMIDI_MIDI1). */
+/* REQ-FFI-MIDI1-008: the messages, channel-mode, controllers, parameters, sync and active-sensing parts
+ * through the header, with vectors from M1 v4.2.1, RP-015 and RP-018. The file needs only these parts
+ * (ZMIDI_MIDI1). */
 #ifndef ZMIDI_MIDI1
 #define ZMIDI_MIDI1
 #endif
@@ -240,13 +241,78 @@ static void test_parameters(void) {
   CHECK(zmidi_parameter_value_messages(3, &p, 0, w, 3, &n) == ZMIDI_STATUS_BUFFER_TOO_SMALL);
 }
 
+static ZmidiMidi1Message sys(uint8_t status, uint8_t d1, uint8_t d2) {
+  ZmidiMidi1Message m = cv(status, d1, d2);
+  m.kind = ZMIDI_MIDI1_KIND_SYSTEM;
+  return m;
+}
+
+static void test_sync(void) {
+  /* M1 p. 28: Song Position Pointer 4 (24 clocks), Continue and three Timing Clocks give the 27th
+   * clock; p. 31: no advance while stopped; p. 32: Start while playing is ignored. */
+  ZmidiSyncReceiver s;
+  ZmidiSyncEvent e;
+  ZmidiSyncInfo info;
+  ZmidiMidi1Message m;
+  int i;
+  CHECK(zmidi_sync_init(&s) == ZMIDI_STATUS_OK);
+  m = sys(0xF2, 4, 0);
+  CHECK(zmidi_sync_receive(&s, &m, &e) == ZMIDI_STATUS_OK && e.kind == ZMIDI_SYNC_EVENT_KIND_LOCATE && e.position == 24);
+  m = sys(0xFB, 0, 0);
+  CHECK(zmidi_sync_receive(&s, &m, &e) == ZMIDI_STATUS_OK && e.kind == ZMIDI_SYNC_EVENT_KIND_CONTINUE);
+  m = sys(0xF8, 0, 0);
+  for (i = 0; i < 3; i++) {
+    CHECK(zmidi_sync_receive(&s, &m, &e) == ZMIDI_STATUS_OK && e.kind == ZMIDI_SYNC_EVENT_KIND_CLOCK &&
+          e.position == (uint32_t)(24 + i));
+  }
+  CHECK(zmidi_sync_info(&s, &info) == ZMIDI_STATUS_OK && info.position == 27 && info.run == 2 && info.sync_mode);
+  CHECK(zmidi_sync_command(&s, ZMIDI_SYNC_COMMAND_START, &e) == ZMIDI_STATUS_OK && e.kind == ZMIDI_SYNC_EVENT_KIND_NONE);
+  CHECK(zmidi_sync_command(&s, ZMIDI_SYNC_COMMAND_STOP, &e) == ZMIDI_STATUS_OK && e.kind == ZMIDI_SYNC_EVENT_KIND_STOP);
+  CHECK(zmidi_sync_receive(&s, &m, &e) == ZMIDI_STATUS_OK && e.kind == ZMIDI_SYNC_EVENT_KIND_NONE);
+  /* Song Select out of MIDI sync mode is ignored; the System Reset action stops at position 0. */
+  CHECK(zmidi_sync_set_mode(&s, false) == ZMIDI_STATUS_OK);
+  m = sys(0xF3, 5, 0);
+  CHECK(zmidi_sync_receive(&s, &m, &e) == ZMIDI_STATUS_OK && e.kind == ZMIDI_SYNC_EVENT_KIND_NONE);
+  CHECK(zmidi_sync_system_reset(&s) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_sync_info(&s, &info) == ZMIDI_STATUS_OK && info.position == 0 && info.run == 0 && !info.sync_mode);
+  CHECK(zmidi_sync_command(&s, 9, &e) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  m = cv(0x90, 0x3C, 0x40);
+  CHECK(zmidi_sync_receive(&s, &m, &e) == ZMIDI_STATUS_INVALID_ARGUMENT);
+}
+
+static void test_active_sensing(void) {
+  /* M1 p. 32: no timeout before the first FEH; after it, more than 330 ms with no byte gives one
+   * timeout; the sender asks for FEH after 270 ms with no byte. */
+  ZmidiActiveSensingMonitor m;
+  ZmidiActiveSensingSender s;
+  bool timeout, armed, send;
+  CHECK(zmidi_active_sensing_monitor_init(&m, ZMIDI_ACTIVE_SENSING_TIMEOUT_US) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_active_sensing_monitor_poll(&m, 10000000u, &timeout, &armed) == ZMIDI_STATUS_OK && !timeout && !armed);
+  CHECK(zmidi_active_sensing_monitor_receive_byte(&m, 0xFE, 0) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_active_sensing_monitor_receive_byte(&m, 0x90, 300000u) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_active_sensing_monitor_poll(&m, 630000u, &timeout, &armed) == ZMIDI_STATUS_OK && !timeout && armed);
+  CHECK(zmidi_active_sensing_monitor_poll(&m, 630001u, &timeout, &armed) == ZMIDI_STATUS_OK && timeout && !armed);
+  CHECK(zmidi_active_sensing_monitor_poll(&m, 2000000u, &timeout, &armed) == ZMIDI_STATUS_OK && !timeout);
+  CHECK(zmidi_active_sensing_monitor_receive(&m, true, 3000000u) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_active_sensing_monitor_poll(&m, 3000001u, &timeout, &armed) == ZMIDI_STATUS_OK && armed);
+  CHECK(zmidi_active_sensing_monitor_is_armed(&m, &armed) == ZMIDI_STATUS_OK && armed);
+  CHECK(zmidi_active_sensing_sender_init(&s, ZMIDI_ACTIVE_SENSING_INTERVAL_US) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_active_sensing_sender_poll(&s, 269999u, &send) == ZMIDI_STATUS_OK && !send);
+  CHECK(zmidi_active_sensing_sender_poll(&s, 270000u, &send) == ZMIDI_STATUS_OK && send);
+  CHECK(zmidi_active_sensing_sender_sent(&s, 400000u) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_active_sensing_sender_poll(&s, 669999u, &send) == ZMIDI_STATUS_OK && !send);
+}
+
 static void test_storage(void) {
   CHECK(zmidi_midi1_reader_size() <= sizeof(ZmidiMidi1Reader));
   CHECK(zmidi_midi1_writer_size() <= sizeof(ZmidiMidi1Writer));
   CHECK(zmidi_mode_state_size() <= sizeof(ZmidiModeState));
   CHECK(zmidi_controller_state_size() <= sizeof(ZmidiControllerState));
   CHECK(zmidi_parameter_state_size() <= sizeof(ZmidiParameterState));
-  CHECK(zmidi_abi_version() == (ZMIDI_ABI_MAJOR << 16 | ZMIDI_ABI_MINOR) && ZMIDI_ABI_MINOR >= 8);
+  CHECK(zmidi_sync_receiver_size() <= sizeof(ZmidiSyncReceiver));
+  CHECK(zmidi_active_sensing_monitor_size() <= sizeof(ZmidiActiveSensingMonitor));
+  CHECK(zmidi_active_sensing_sender_size() <= sizeof(ZmidiActiveSensingSender));
+  CHECK(zmidi_abi_version() == (ZMIDI_ABI_MAJOR << 16 | ZMIDI_ABI_MINOR) && ZMIDI_ABI_MINOR >= 9);
 }
 
 int main(void) {
@@ -254,6 +320,8 @@ int main(void) {
   test_mode();
   test_controllers();
   test_parameters();
+  test_sync();
+  test_active_sensing();
   test_storage();
   if (failures != 0) {
     printf("midi1: %d failures\n", failures);

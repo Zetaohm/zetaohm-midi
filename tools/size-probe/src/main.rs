@@ -75,7 +75,7 @@ fn main() -> ! {
         remote::run(&w);
         #[cfg(feature = "inject")]
         inject::run(&w);
-        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state"))]
+        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing"))]
         lean::run(&w);
         #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1", feature = "ble_tx_midi1", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
         transport::run(&w);
@@ -786,7 +786,7 @@ mod inject {
 }
 
 // ---------------------------------------------------------------- lean variants
-#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state"))]
+#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing"))]
 mod lean {
     use super::*;
     #[allow(unused_imports)]
@@ -971,6 +971,25 @@ mod lean {
                     }
                 }
             }
+        }
+        #[cfg(feature = "sync_state")]
+        {
+            static mut SYNC: zmidi_io::SyncReceiver = zmidi_io::SyncReceiver::new();
+            let sync = unsafe { &mut *(&raw mut SYNC) };
+            if let Some(m) = zmidi_ump::SystemMessage::parse(&w[16..]) {
+                black_box(sync.receive(&m));
+            }
+        }
+        #[cfg(feature = "active_sensing")]
+        {
+            // A monitor on a DIN input and a sender on a DIN output; the time comes from the caller.
+            static mut MON: zmidi_io::ActiveSensingMonitor = zmidi_io::ActiveSensingMonitor::new(zmidi_io::ACTIVE_SENSING_TIMEOUT_US);
+            static mut SEND: zmidi_io::ActiveSensingSender = zmidi_io::ActiveSensingSender::new(zmidi_io::ACTIVE_SENSING_INTERVAL_US);
+            let (mon, send) = unsafe { (&mut *(&raw mut MON), &mut *(&raw mut SEND)) };
+            let now = u64::from(w[1]) << 32 | u64::from(w[2]);
+            mon.receive_byte(w[0] as u8, now);
+            black_box(mon.poll(now));
+            black_box(send.poll(now));
         }
         #[cfg(feature = "bytes_out")]
         {

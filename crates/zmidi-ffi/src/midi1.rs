@@ -1,8 +1,9 @@
 //! The C ABI of the MIDI 1.0 parts of zmidi-io (DEC-019, DEC-022): the typed byte reader and writer
 //! (feature `messages`, REQ-FFI-MIDI1-002, -003), the receiver mode state (`channel-mode`,
 //! REQ-FFI-MIDI1-004, -009), the controller state (`controllers`, REQ-FFI-MIDI1-005, -010) and the
-//! parameter receiver (`parameters`, REQ-FFI-MIDI1-006, -011). The program gives the storage of
-//! each state (REQ-FFI-MIDI1-007).
+//! parameter receiver (`parameters`, REQ-FFI-MIDI1-006, -011), the sync receiver (`sync`,
+//! REQ-FFI-MIDI1-012) and the Active Sensing monitor and sender (`active-sensing`, REQ-FFI-MIDI1-013).
+//! The program gives the storage of each state (REQ-FFI-MIDI1-007).
 //!
 //! A typed MIDI 1.0 message is the flat byte struct [`ZmidiMidi1Message`], with no UMP Group
 //! (REQ-FFI-MIDI1-001). The group feature `midi1` (header macro `ZMIDI_MIDI1`) selects these parts
@@ -13,7 +14,9 @@
     feature = "messages",
     feature = "channel-mode",
     feature = "controllers",
-    feature = "parameters"
+    feature = "parameters",
+    feature = "sync",
+    feature = "active-sensing"
 ))]
 use core::mem::{align_of, size_of};
 
@@ -32,14 +35,16 @@ use zmidi_ump::Channel;
     feature = "parameters"
 ))]
 use zmidi_ump::Midi1ChannelVoiceMessage;
-#[cfg(feature = "messages")]
+#[cfg(any(feature = "messages", feature = "sync"))]
 use zmidi_ump::SystemMessage;
 
 #[cfg(any(
     feature = "messages",
     feature = "channel-mode",
     feature = "controllers",
-    feature = "parameters"
+    feature = "parameters",
+    feature = "sync",
+    feature = "active-sensing"
 ))]
 use crate::status::ZmidiStatus;
 
@@ -48,7 +53,8 @@ use crate::status::ZmidiStatus;
     feature = "messages",
     feature = "channel-mode",
     feature = "controllers",
-    feature = "parameters"
+    feature = "parameters",
+    feature = "sync"
 ))]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,7 +76,8 @@ pub enum ZmidiMidi1Kind {
     feature = "messages",
     feature = "channel-mode",
     feature = "controllers",
-    feature = "parameters"
+    feature = "parameters",
+    feature = "sync"
 ))]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -91,7 +98,8 @@ pub struct ZmidiMidi1Message {
     feature = "messages",
     feature = "channel-mode",
     feature = "controllers",
-    feature = "parameters"
+    feature = "parameters",
+    feature = "sync"
 ))]
 impl ZmidiMidi1Message {
     /// The message of a Message Type 0x2 or 0x1 word: the status and data bytes are bytes 2 to 4.
@@ -125,12 +133,28 @@ impl ZmidiMidi1Message {
     }
 
     /// The typed Channel Voice message, or `None` for another kind or an invalid byte.
+    #[cfg(any(
+        feature = "messages",
+        feature = "channel-mode",
+        feature = "controllers",
+        feature = "parameters"
+    ))]
     fn to_channel_voice(self) -> Option<Midi1ChannelVoiceMessage> {
         if self.kind != ZmidiMidi1Kind::ChannelVoice as u32 || !(0x80..=0xEF).contains(&self.status)
         {
             return None;
         }
         Midi1ChannelVoiceMessage::parse(&[self.word(0x2)?])
+    }
+
+    /// The typed System message (status F1H to FFH, not F7H), or `None` for another kind or an
+    /// invalid byte.
+    #[cfg(any(feature = "messages", feature = "sync"))]
+    fn to_system(self) -> Option<SystemMessage> {
+        if self.kind != ZmidiMidi1Kind::System as u32 || matches!(self.status, 0..=0xF0 | 0xF7) {
+            return None;
+        }
+        SystemMessage::parse(&[self.word(0x1)?])
     }
 }
 
@@ -394,13 +418,7 @@ pub unsafe extern "C" fn zmidi_midi1_writer_write(
         k if k == ZmidiMidi1Kind::ChannelVoice as u32 => {
             m.to_channel_voice().map(Midi1Message::ChannelVoice)
         }
-        k if k == ZmidiMidi1Kind::System as u32 => match m.status {
-            0xF1..=0xF6 | 0xF8..=0xFF => m
-                .word(0x1)
-                .and_then(|w| SystemMessage::parse(&[w]))
-                .map(Midi1Message::System),
-            _ => None,
-        },
+        k if k == ZmidiMidi1Kind::System as u32 => m.to_system().map(Midi1Message::System),
         k if k == ZmidiMidi1Kind::SysEx as u32 && !sysex.is_null() => {
             // SAFETY: caller contract above.
             Some(Midi1Message::SysEx(unsafe {
@@ -1455,4 +1473,498 @@ pub unsafe extern "C" fn zmidi_parameter_value_messages(
     };
     // SAFETY: caller contract above.
     unsafe { put_messages(&messages, out, capacity, count) }
+}
+
+// ------------------------------------------------------------------------------------------ sync
+
+#[cfg(feature = "sync")]
+use zmidi_io::{SyncCommand, SyncEvent, SyncReceiver, SyncRun};
+
+/// Storage words of a [`ZmidiSyncReceiver`].
+#[cfg(feature = "sync")]
+pub const ZMIDI_SYNC_RECEIVER_WORDS: usize = 1;
+
+/// Storage of one sync receiver. The program gives it; [`zmidi_sync_init`] sets it up.
+#[cfg(feature = "sync")]
+#[repr(C)]
+pub struct ZmidiSyncReceiver {
+    /// Opaque content.
+    pub _opaque: [u64; ZMIDI_SYNC_RECEIVER_WORDS],
+}
+
+#[cfg(feature = "sync")]
+const _: () = assert!(size_of::<SyncReceiver>() <= size_of::<ZmidiSyncReceiver>());
+#[cfg(feature = "sync")]
+const _: () = assert!(align_of::<SyncReceiver>() <= align_of::<ZmidiSyncReceiver>());
+
+/// The kind of a [`ZmidiSyncEvent`].
+#[cfg(feature = "sync")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZmidiSyncEventKind {
+    /// The message or command gives no event.
+    None = 0,
+    /// Start: the position is 0 and the receiver waits for the next Timing Clock.
+    Start = 1,
+    /// Continue: the receiver waits at the held position for the next Timing Clock.
+    Continue = 2,
+    /// Stop: the receiver stopped and keeps its position.
+    Stop = 3,
+    /// A Timing Clock while the receiver plays: `position` is the position of this clock.
+    Clock = 4,
+    /// An accepted Song Position Pointer: `position` is the new position.
+    Locate = 5,
+    /// An accepted Song Select: `song` is the song number.
+    Song = 6,
+}
+
+/// A start, stop or continue command of the program (a front panel).
+#[cfg(feature = "sync")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZmidiSyncCommand {
+    /// Start: position 0, then play at the next Timing Clock.
+    Start = 1,
+    /// Continue: play from the held position at the next Timing Clock.
+    Continue = 2,
+    /// Stop: stop at once and keep the position.
+    Stop = 3,
+}
+
+/// The event of one message or command.
+#[cfg(feature = "sync")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZmidiSyncEvent {
+    /// A [`ZmidiSyncEventKind`] value.
+    pub kind: u32,
+    /// The position in MIDI clocks of a Clock or Locate event.
+    pub position: u32,
+    /// The song number of a Song event.
+    pub song: u8,
+}
+
+/// The information of a sync receiver.
+#[cfg(feature = "sync")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZmidiSyncInfo {
+    /// The position in MIDI clocks: the position of the next Timing Clock that plays.
+    pub position: u32,
+    /// The run state: 0 stopped, 1 waits for the first Timing Clock, 2 plays.
+    pub run: u8,
+    /// The song of the last accepted Song Select.
+    pub song: u8,
+    /// MIDI sync mode on.
+    pub sync_mode: bool,
+}
+
+#[cfg(feature = "sync")]
+fn sync_event(event: Option<SyncEvent>) -> ZmidiSyncEvent {
+    use ZmidiSyncEventKind as K;
+    let (kind, position, song) = match event {
+        None => (K::None, 0, 0),
+        Some(SyncEvent::Start) => (K::Start, 0, 0),
+        Some(SyncEvent::Continue) => (K::Continue, 0, 0),
+        Some(SyncEvent::Stop) => (K::Stop, 0, 0),
+        Some(SyncEvent::Clock { position }) => (K::Clock, position, 0),
+        Some(SyncEvent::Locate { position }) => (K::Locate, position, 0),
+        Some(SyncEvent::Song { number }) => (K::Song, 0, number),
+    };
+    ZmidiSyncEvent {
+        kind: kind as u32,
+        position,
+        song,
+    }
+}
+
+/// Runs `f` on the sync receiver at `state`.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_sync_init`].
+#[cfg(feature = "sync")]
+unsafe fn with_sync(
+    state: *mut ZmidiSyncReceiver,
+    f: impl FnOnce(&mut SyncReceiver),
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    match unsafe { state.cast::<SyncReceiver>().as_mut() } {
+        Some(s) => {
+            f(s);
+            ZmidiStatus::Ok
+        }
+        None => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Sets up `state`: stopped at position 0, song 0, MIDI sync mode on.
+///
+/// # Safety
+/// `state` is null or points to writable storage of a [`ZmidiSyncReceiver`].
+#[cfg(feature = "sync")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_sync_init(state: *mut ZmidiSyncReceiver) -> ZmidiStatus {
+    if state.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: the storage is large and aligned enough (asserts above) and writable (caller).
+    unsafe { state.cast::<SyncReceiver>().write(SyncReceiver::new()) };
+    ZmidiStatus::Ok
+}
+
+/// Takes one System `message` and writes its event into `event` (the kind none when the message
+/// gives no event). A message that is not a valid System message gives
+/// [`ZmidiStatus::InvalidArgument`] and changes nothing.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_sync_init`]; `message` is readable; `event` is writable.
+#[cfg(feature = "sync")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_sync_receive(
+    state: *mut ZmidiSyncReceiver,
+    message: *const ZmidiMidi1Message,
+    event: *mut ZmidiSyncEvent,
+) -> ZmidiStatus {
+    if state.is_null() || event.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: caller contract above.
+    let Some(m) = (unsafe { message.as_ref() }).and_then(|m| m.to_system()) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    // SAFETY: caller contract above.
+    unsafe { *event = sync_event((*state.cast::<SyncReceiver>()).receive(&m)) };
+    ZmidiStatus::Ok
+}
+
+/// Takes one `command` of the program (a [`ZmidiSyncCommand`] value) with the transitions of the
+/// MIDI command, and writes its event into `event`. An unknown command gives
+/// [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `state` was set up by [`zmidi_sync_init`]; `event` is writable.
+#[cfg(feature = "sync")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_sync_command(
+    state: *mut ZmidiSyncReceiver,
+    command: u32,
+    event: *mut ZmidiSyncEvent,
+) -> ZmidiStatus {
+    if state.is_null() || event.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    let command = match command {
+        1 => SyncCommand::Start,
+        2 => SyncCommand::Continue,
+        3 => SyncCommand::Stop,
+        _ => return ZmidiStatus::InvalidArgument,
+    };
+    // SAFETY: caller contract above.
+    unsafe { *event = sync_event((*state.cast::<SyncReceiver>()).command(command)) };
+    ZmidiStatus::Ok
+}
+
+/// The System Reset action of the program: position 0 and stopped; the song and the MIDI sync mode
+/// stay.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_sync_init`].
+#[cfg(feature = "sync")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_sync_system_reset(state: *mut ZmidiSyncReceiver) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    unsafe { with_sync(state, SyncReceiver::system_reset) }
+}
+
+/// Writes the information of `state` into `info`.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_sync_init`]; `info` is null or writable.
+#[cfg(feature = "sync")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_sync_info(
+    state: *const ZmidiSyncReceiver,
+    info: *mut ZmidiSyncInfo,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(s), Some(info)) = (unsafe { state.cast::<SyncReceiver>().as_ref() }, unsafe {
+        info.as_mut()
+    }) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    *info = ZmidiSyncInfo {
+        position: s.position(),
+        run: match s.run() {
+            SyncRun::Stopped => 0,
+            SyncRun::Waiting => 1,
+            SyncRun::Playing => 2,
+        },
+        song: s.song(),
+        sync_mode: s.sync_mode(),
+    };
+    ZmidiStatus::Ok
+}
+
+/// Sets MIDI sync mode on or off; out of it the receiver ignores Song Position Pointer and Song
+/// Select.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_sync_init`].
+#[cfg(feature = "sync")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_sync_set_mode(
+    state: *mut ZmidiSyncReceiver,
+    on: bool,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    unsafe { with_sync(state, |s| s.set_sync_mode(on)) }
+}
+
+/// Gives `size_of` the Rust sync receiver, for a binding that checks its copy of the layout
+/// (DEC-019 rule 6).
+#[cfg(feature = "sync")]
+#[no_mangle]
+pub extern "C" fn zmidi_sync_receiver_size() -> usize {
+    size_of::<SyncReceiver>()
+}
+
+// -------------------------------------------------------------------------------- active-sensing
+
+#[cfg(feature = "active-sensing")]
+use zmidi_io::{ActiveSensingMonitor, ActiveSensingSender};
+
+/// Storage words of a [`ZmidiActiveSensingMonitor`].
+#[cfg(feature = "active-sensing")]
+pub const ZMIDI_ACTIVE_SENSING_MONITOR_WORDS: usize = 2;
+/// Storage words of a [`ZmidiActiveSensingSender`].
+#[cfg(feature = "active-sensing")]
+pub const ZMIDI_ACTIVE_SENSING_SENDER_WORDS: usize = 2;
+/// The default timeout of the monitor: 330 ms, in microseconds.
+#[cfg(feature = "active-sensing")]
+pub const ZMIDI_ACTIVE_SENSING_TIMEOUT_US: u32 = 330_000;
+/// The default interval of the sender: 270 ms, in microseconds.
+#[cfg(feature = "active-sensing")]
+pub const ZMIDI_ACTIVE_SENSING_INTERVAL_US: u32 = 270_000;
+
+#[cfg(feature = "active-sensing")]
+const _: () = assert!(ZMIDI_ACTIVE_SENSING_TIMEOUT_US == zmidi_io::ACTIVE_SENSING_TIMEOUT_US);
+#[cfg(feature = "active-sensing")]
+const _: () = assert!(ZMIDI_ACTIVE_SENSING_INTERVAL_US == zmidi_io::ACTIVE_SENSING_INTERVAL_US);
+
+/// Storage of one Active Sensing monitor. The program gives it;
+/// [`zmidi_active_sensing_monitor_init`] sets it up.
+#[cfg(feature = "active-sensing")]
+#[repr(C)]
+pub struct ZmidiActiveSensingMonitor {
+    /// Opaque content.
+    pub _opaque: [u64; ZMIDI_ACTIVE_SENSING_MONITOR_WORDS],
+}
+
+/// Storage of one Active Sensing sender. The program gives it;
+/// [`zmidi_active_sensing_sender_init`] sets it up.
+#[cfg(feature = "active-sensing")]
+#[repr(C)]
+pub struct ZmidiActiveSensingSender {
+    /// Opaque content.
+    pub _opaque: [u64; ZMIDI_ACTIVE_SENSING_SENDER_WORDS],
+}
+
+#[cfg(feature = "active-sensing")]
+const _: () = assert!(size_of::<ActiveSensingMonitor>() <= size_of::<ZmidiActiveSensingMonitor>());
+#[cfg(feature = "active-sensing")]
+const _: () =
+    assert!(align_of::<ActiveSensingMonitor>() <= align_of::<ZmidiActiveSensingMonitor>());
+#[cfg(feature = "active-sensing")]
+const _: () = assert!(size_of::<ActiveSensingSender>() <= size_of::<ZmidiActiveSensingSender>());
+#[cfg(feature = "active-sensing")]
+const _: () = assert!(align_of::<ActiveSensingSender>() <= align_of::<ZmidiActiveSensingSender>());
+
+/// Sets up `monitor` with a timeout of `timeout_us` microseconds, not armed.
+///
+/// # Safety
+/// `monitor` is null or points to writable storage of a [`ZmidiActiveSensingMonitor`].
+#[cfg(feature = "active-sensing")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_active_sensing_monitor_init(
+    monitor: *mut ZmidiActiveSensingMonitor,
+    timeout_us: u32,
+) -> ZmidiStatus {
+    if monitor.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: the storage is large and aligned enough (asserts above) and writable (caller).
+    unsafe {
+        monitor
+            .cast::<ActiveSensingMonitor>()
+            .write(ActiveSensingMonitor::new(timeout_us))
+    };
+    ZmidiStatus::Ok
+}
+
+/// Takes one received byte at the time `now_us`: FEH arms the monitor; while it is armed, each
+/// byte restarts the timer.
+///
+/// # Safety
+/// `monitor` is null or was set up by [`zmidi_active_sensing_monitor_init`].
+#[cfg(feature = "active-sensing")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_active_sensing_monitor_receive_byte(
+    monitor: *mut ZmidiActiveSensingMonitor,
+    byte: u8,
+    now_us: u64,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    match unsafe { monitor.cast::<ActiveSensingMonitor>().as_mut() } {
+        Some(m) => {
+            m.receive_byte(byte, now_us);
+            ZmidiStatus::Ok
+        }
+        None => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Takes one received message of a transport with no bytes at the time `now_us`;
+/// `active_sensing` is true for an Active Sensing message.
+///
+/// # Safety
+/// `monitor` is null or was set up by [`zmidi_active_sensing_monitor_init`].
+#[cfg(feature = "active-sensing")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_active_sensing_monitor_receive(
+    monitor: *mut ZmidiActiveSensingMonitor,
+    active_sensing: bool,
+    now_us: u64,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    match unsafe { monitor.cast::<ActiveSensingMonitor>().as_mut() } {
+        Some(m) => {
+            m.receive(active_sensing, now_us);
+            ZmidiStatus::Ok
+        }
+        None => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Checks the timer at the time `now_us`; writes true into `timeout` one time when more than the
+/// timeout passed since the last received byte, and the monitor then waits for FEH again. Writes
+/// whether the monitor is armed after the check into `armed`.
+///
+/// # Safety
+/// `monitor` was set up by [`zmidi_active_sensing_monitor_init`]; `timeout` and `armed` are
+/// writable.
+#[cfg(feature = "active-sensing")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_active_sensing_monitor_poll(
+    monitor: *mut ZmidiActiveSensingMonitor,
+    now_us: u64,
+    timeout: *mut bool,
+    armed: *mut bool,
+) -> ZmidiStatus {
+    if monitor.is_null() || timeout.is_null() || armed.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: caller contract above.
+    unsafe {
+        let m = &mut *monitor.cast::<ActiveSensingMonitor>();
+        *timeout = m.poll(now_us);
+        *armed = m.is_armed();
+    }
+    ZmidiStatus::Ok
+}
+
+/// Writes whether `monitor` is armed (it received FEH and gave no timeout after it) into `armed`,
+/// with no check of the timer.
+///
+/// # Safety
+/// `monitor` was set up by [`zmidi_active_sensing_monitor_init`]; `armed` is writable.
+#[cfg(feature = "active-sensing")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_active_sensing_monitor_is_armed(
+    monitor: *const ZmidiActiveSensingMonitor,
+    armed: *mut bool,
+) -> ZmidiStatus {
+    if monitor.is_null() || armed.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: caller contract above.
+    unsafe { *armed = (*monitor.cast::<ActiveSensingMonitor>()).is_armed() };
+    ZmidiStatus::Ok
+}
+
+/// Gives `size_of` the Rust monitor, for a binding that checks its copy of the layout (DEC-019 rule
+/// 6).
+#[cfg(feature = "active-sensing")]
+#[no_mangle]
+pub extern "C" fn zmidi_active_sensing_monitor_size() -> usize {
+    size_of::<ActiveSensingMonitor>()
+}
+
+/// Sets up `sender` with an interval of `interval_us` microseconds that starts at time 0.
+///
+/// # Safety
+/// `sender` is null or points to writable storage of a [`ZmidiActiveSensingSender`].
+#[cfg(feature = "active-sensing")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_active_sensing_sender_init(
+    sender: *mut ZmidiActiveSensingSender,
+    interval_us: u32,
+) -> ZmidiStatus {
+    if sender.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: the storage is large and aligned enough (asserts above) and writable (caller).
+    unsafe {
+        sender
+            .cast::<ActiveSensingSender>()
+            .write(ActiveSensingSender::new(interval_us))
+    };
+    ZmidiStatus::Ok
+}
+
+/// Tells the sender that the program sent a byte at the time `now_us`; the interval starts again.
+///
+/// # Safety
+/// `sender` is null or was set up by [`zmidi_active_sensing_sender_init`].
+#[cfg(feature = "active-sensing")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_active_sensing_sender_sent(
+    sender: *mut ZmidiActiveSensingSender,
+    now_us: u64,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    match unsafe { sender.cast::<ActiveSensingSender>().as_mut() } {
+        Some(s) => {
+            s.sent(now_us);
+            ZmidiStatus::Ok
+        }
+        None => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Checks the interval at the time `now_us`; writes true into `send` when no byte was sent for the
+/// interval: the program then sends one FEH byte, and the interval starts again.
+///
+/// # Safety
+/// `sender` was set up by [`zmidi_active_sensing_sender_init`]; `send` is writable.
+#[cfg(feature = "active-sensing")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_active_sensing_sender_poll(
+    sender: *mut ZmidiActiveSensingSender,
+    now_us: u64,
+    send: *mut bool,
+) -> ZmidiStatus {
+    if sender.is_null() || send.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: caller contract above.
+    unsafe { *send = (*sender.cast::<ActiveSensingSender>()).poll(now_us) };
+    ZmidiStatus::Ok
+}
+
+/// Gives `size_of` the Rust sender, for a binding that checks its copy of the layout (DEC-019 rule
+/// 6).
+#[cfg(feature = "active-sensing")]
+#[no_mangle]
+pub extern "C" fn zmidi_active_sensing_sender_size() -> usize {
+    size_of::<ActiveSensingSender>()
 }

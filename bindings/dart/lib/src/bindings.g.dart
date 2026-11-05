@@ -15,6 +15,221 @@ import 'dart:ffi' as ffi;
 @ffi.Native<ffi.Uint32 Function()>()
 external int zmidi_abi_version();
 
+/// Sets up `monitor` with a timeout of `timeout_us` microseconds, not armed.
+///
+/// # Safety
+/// `monitor` is null or points to writable storage of a [`ZmidiActiveSensingMonitor`].
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiActiveSensingMonitor>, ffi.Uint32)
+>(symbol: 'zmidi_active_sensing_monitor_init')
+external int _zmidi_active_sensing_monitor_init(
+  ffi.Pointer<ZmidiActiveSensingMonitor> monitor,
+  int timeout_us,
+);
+
+ZmidiStatus zmidi_active_sensing_monitor_init(
+  ffi.Pointer<ZmidiActiveSensingMonitor> monitor,
+  int timeout_us,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_active_sensing_monitor_init(monitor, timeout_us),
+  );
+}
+
+/// Writes whether `monitor` is armed (it received FEH and gave no timeout after it) into `armed`,
+/// with no check of the timer.
+///
+/// # Safety
+/// `monitor` was set up by [`zmidi_active_sensing_monitor_init`]; `armed` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiActiveSensingMonitor>,
+    ffi.Pointer<ffi.Bool>,
+  )
+>(symbol: 'zmidi_active_sensing_monitor_is_armed')
+external int _zmidi_active_sensing_monitor_is_armed(
+  ffi.Pointer<ZmidiActiveSensingMonitor> monitor,
+  ffi.Pointer<ffi.Bool> armed,
+);
+
+ZmidiStatus zmidi_active_sensing_monitor_is_armed(
+  ffi.Pointer<ZmidiActiveSensingMonitor> monitor,
+  ffi.Pointer<ffi.Bool> armed,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_active_sensing_monitor_is_armed(monitor, armed),
+  );
+}
+
+/// Checks the timer at the time `now_us`; writes true into `timeout` one time when more than the
+/// timeout passed since the last received byte, and the monitor then waits for FEH again. Writes
+/// whether the monitor is armed after the check into `armed`.
+///
+/// # Safety
+/// `monitor` was set up by [`zmidi_active_sensing_monitor_init`]; `timeout` and `armed` are
+/// writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiActiveSensingMonitor>,
+    ffi.Uint64,
+    ffi.Pointer<ffi.Bool>,
+    ffi.Pointer<ffi.Bool>,
+  )
+>(symbol: 'zmidi_active_sensing_monitor_poll')
+external int _zmidi_active_sensing_monitor_poll(
+  ffi.Pointer<ZmidiActiveSensingMonitor> monitor,
+  int now_us,
+  ffi.Pointer<ffi.Bool> timeout,
+  ffi.Pointer<ffi.Bool> armed,
+);
+
+ZmidiStatus zmidi_active_sensing_monitor_poll(
+  ffi.Pointer<ZmidiActiveSensingMonitor> monitor,
+  int now_us,
+  ffi.Pointer<ffi.Bool> timeout,
+  ffi.Pointer<ffi.Bool> armed,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_active_sensing_monitor_poll(monitor, now_us, timeout, armed),
+  );
+}
+
+/// Takes one received message of a transport with no bytes at the time `now_us`;
+/// `active_sensing` is true for an Active Sensing message.
+///
+/// # Safety
+/// `monitor` is null or was set up by [`zmidi_active_sensing_monitor_init`].
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiActiveSensingMonitor>,
+    ffi.Bool,
+    ffi.Uint64,
+  )
+>(symbol: 'zmidi_active_sensing_monitor_receive')
+external int _zmidi_active_sensing_monitor_receive(
+  ffi.Pointer<ZmidiActiveSensingMonitor> monitor,
+  bool active_sensing,
+  int now_us,
+);
+
+ZmidiStatus zmidi_active_sensing_monitor_receive(
+  ffi.Pointer<ZmidiActiveSensingMonitor> monitor,
+  bool active_sensing,
+  int now_us,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_active_sensing_monitor_receive(monitor, active_sensing, now_us),
+  );
+}
+
+/// Takes one received byte at the time `now_us`: FEH arms the monitor; while it is armed, each
+/// byte restarts the timer.
+///
+/// # Safety
+/// `monitor` is null or was set up by [`zmidi_active_sensing_monitor_init`].
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiActiveSensingMonitor>,
+    ffi.Uint8,
+    ffi.Uint64,
+  )
+>(symbol: 'zmidi_active_sensing_monitor_receive_byte')
+external int _zmidi_active_sensing_monitor_receive_byte(
+  ffi.Pointer<ZmidiActiveSensingMonitor> monitor,
+  int byte,
+  int now_us,
+);
+
+ZmidiStatus zmidi_active_sensing_monitor_receive_byte(
+  ffi.Pointer<ZmidiActiveSensingMonitor> monitor,
+  int byte,
+  int now_us,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_active_sensing_monitor_receive_byte(monitor, byte, now_us),
+  );
+}
+
+/// Gives `size_of` the Rust monitor, for a binding that checks its copy of the layout (DEC-019 rule
+/// 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_active_sensing_monitor_size();
+
+/// Sets up `sender` with an interval of `interval_us` microseconds that starts at time 0.
+///
+/// # Safety
+/// `sender` is null or points to writable storage of a [`ZmidiActiveSensingSender`].
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiActiveSensingSender>, ffi.Uint32)
+>(symbol: 'zmidi_active_sensing_sender_init')
+external int _zmidi_active_sensing_sender_init(
+  ffi.Pointer<ZmidiActiveSensingSender> sender,
+  int interval_us,
+);
+
+ZmidiStatus zmidi_active_sensing_sender_init(
+  ffi.Pointer<ZmidiActiveSensingSender> sender,
+  int interval_us,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_active_sensing_sender_init(sender, interval_us),
+  );
+}
+
+/// Checks the interval at the time `now_us`; writes true into `send` when no byte was sent for the
+/// interval: the program then sends one FEH byte, and the interval starts again.
+///
+/// # Safety
+/// `sender` was set up by [`zmidi_active_sensing_sender_init`]; `send` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiActiveSensingSender>,
+    ffi.Uint64,
+    ffi.Pointer<ffi.Bool>,
+  )
+>(symbol: 'zmidi_active_sensing_sender_poll')
+external int _zmidi_active_sensing_sender_poll(
+  ffi.Pointer<ZmidiActiveSensingSender> sender,
+  int now_us,
+  ffi.Pointer<ffi.Bool> send,
+);
+
+ZmidiStatus zmidi_active_sensing_sender_poll(
+  ffi.Pointer<ZmidiActiveSensingSender> sender,
+  int now_us,
+  ffi.Pointer<ffi.Bool> send,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_active_sensing_sender_poll(sender, now_us, send),
+  );
+}
+
+/// Tells the sender that the program sent a byte at the time `now_us`; the interval starts again.
+///
+/// # Safety
+/// `sender` is null or was set up by [`zmidi_active_sensing_sender_init`].
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiActiveSensingSender>, ffi.Uint64)
+>(symbol: 'zmidi_active_sensing_sender_sent')
+external int _zmidi_active_sensing_sender_sent(
+  ffi.Pointer<ZmidiActiveSensingSender> sender,
+  int now_us,
+);
+
+ZmidiStatus zmidi_active_sensing_sender_sent(
+  ffi.Pointer<ZmidiActiveSensingSender> sender,
+  int now_us,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_active_sensing_sender_sent(sender, now_us),
+  );
+}
+
+/// Gives `size_of` the Rust sender, for a binding that checks its copy of the layout (DEC-019 rule
+/// 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_active_sensing_sender_size();
+
 /// Writes a bank (0 to 3FFFH) and program (0 to 127) selection on `channel` (0 to 15) as Bank
 /// Select MSB, Bank Select LSB and Program Change into `out` (`capacity` entries, at least 3), and
 /// 3 into `count`.
@@ -4153,6 +4368,131 @@ ZmidiStatus zmidi_pe_write_pending(
   );
 }
 
+/// Takes one `command` of the program (a [`ZmidiSyncCommand`] value) with the transitions of the
+/// MIDI command, and writes its event into `event`. An unknown command gives
+/// [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `state` was set up by [`zmidi_sync_init`]; `event` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiSyncReceiver>,
+    ffi.Uint32,
+    ffi.Pointer<ZmidiSyncEvent>,
+  )
+>(symbol: 'zmidi_sync_command')
+external int _zmidi_sync_command(
+  ffi.Pointer<ZmidiSyncReceiver> state,
+  int command,
+  ffi.Pointer<ZmidiSyncEvent> event,
+);
+
+ZmidiStatus zmidi_sync_command(
+  ffi.Pointer<ZmidiSyncReceiver> state,
+  int command,
+  ffi.Pointer<ZmidiSyncEvent> event,
+) {
+  return ZmidiStatus.fromValue(_zmidi_sync_command(state, command, event));
+}
+
+/// Writes the information of `state` into `info`.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_sync_init`]; `info` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiSyncReceiver>,
+    ffi.Pointer<ZmidiSyncInfo>,
+  )
+>(symbol: 'zmidi_sync_info')
+external int _zmidi_sync_info(
+  ffi.Pointer<ZmidiSyncReceiver> state,
+  ffi.Pointer<ZmidiSyncInfo> info,
+);
+
+ZmidiStatus zmidi_sync_info(
+  ffi.Pointer<ZmidiSyncReceiver> state,
+  ffi.Pointer<ZmidiSyncInfo> info,
+) {
+  return ZmidiStatus.fromValue(_zmidi_sync_info(state, info));
+}
+
+/// Sets up `state`: stopped at position 0, song 0, MIDI sync mode on.
+///
+/// # Safety
+/// `state` is null or points to writable storage of a [`ZmidiSyncReceiver`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiSyncReceiver>)>(
+  symbol: 'zmidi_sync_init',
+)
+external int _zmidi_sync_init(ffi.Pointer<ZmidiSyncReceiver> state);
+
+ZmidiStatus zmidi_sync_init(ffi.Pointer<ZmidiSyncReceiver> state) {
+  return ZmidiStatus.fromValue(_zmidi_sync_init(state));
+}
+
+/// Takes one System `message` and writes its event into `event` (the kind none when the message
+/// gives no event). A message that is not a valid System message gives
+/// [`ZmidiStatus::InvalidArgument`] and changes nothing.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_sync_init`]; `message` is readable; `event` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiSyncReceiver>,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.Pointer<ZmidiSyncEvent>,
+  )
+>(symbol: 'zmidi_sync_receive')
+external int _zmidi_sync_receive(
+  ffi.Pointer<ZmidiSyncReceiver> state,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiSyncEvent> event,
+);
+
+ZmidiStatus zmidi_sync_receive(
+  ffi.Pointer<ZmidiSyncReceiver> state,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiSyncEvent> event,
+) {
+  return ZmidiStatus.fromValue(_zmidi_sync_receive(state, message, event));
+}
+
+/// Gives `size_of` the Rust sync receiver, for a binding that checks its copy of the layout
+/// (DEC-019 rule 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_sync_receiver_size();
+
+/// Sets MIDI sync mode on or off; out of it the receiver ignores Song Position Pointer and Song
+/// Select.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_sync_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiSyncReceiver>, ffi.Bool)>(
+  symbol: 'zmidi_sync_set_mode',
+)
+external int _zmidi_sync_set_mode(
+  ffi.Pointer<ZmidiSyncReceiver> state,
+  bool on,
+);
+
+ZmidiStatus zmidi_sync_set_mode(ffi.Pointer<ZmidiSyncReceiver> state, bool on) {
+  return ZmidiStatus.fromValue(_zmidi_sync_set_mode(state, on));
+}
+
+/// The System Reset action of the program: position 0 and stopped; the song and the MIDI sync mode
+/// stay.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_sync_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiSyncReceiver>)>(
+  symbol: 'zmidi_sync_system_reset',
+)
+external int _zmidi_sync_system_reset(ffi.Pointer<ZmidiSyncReceiver> state);
+
+ZmidiStatus zmidi_sync_system_reset(ffi.Pointer<ZmidiSyncReceiver> state) {
+  return ZmidiStatus.fromValue(_zmidi_sync_system_reset(state));
+}
+
 /// Scales `value` from `src_bits` down to `dst_bits` (M2-115) into `out`.
 ///
 /// # Safety
@@ -5313,7 +5653,15 @@ ZmidiStatus zmidi_usb_link_write_packet(
 
 const int ZMIDI_ABI_MAJOR = 0;
 
-const int ZMIDI_ABI_MINOR = 8;
+const int ZMIDI_ABI_MINOR = 9;
+
+const int ZMIDI_ACTIVE_SENSING_INTERVAL_US = 270000;
+
+const int ZMIDI_ACTIVE_SENSING_MONITOR_WORDS = 2;
+
+const int ZMIDI_ACTIVE_SENSING_SENDER_WORDS = 2;
+
+const int ZMIDI_ACTIVE_SENSING_TIMEOUT_US = 330000;
 
 const int ZMIDI_BLE_READER_WORDS = 25;
 
@@ -5375,6 +5723,8 @@ const int ZMIDI_PE_RESOURCES_MAX = 16;
 
 const int ZMIDI_PE_WORDS = 488;
 
+const int ZMIDI_SYNC_RECEIVER_WORDS = 1;
+
 const int ZMIDI_UMP_TO_BYTES_WORDS = 1;
 
 const int ZMIDI_USB_FUNCTION_WORDS = 103;
@@ -5390,6 +5740,22 @@ const int ZMIDI_USB_MAX_ENDPOINTS = 4;
 const int ZMIDI_USB_MAX_SETTINGS = 2;
 
 const int ZMIDI_USB_SETUP_LEN = 8;
+
+/// Storage of one Active Sensing monitor. The program gives it;
+/// [`zmidi_active_sensing_monitor_init`] sets it up.
+final class ZmidiActiveSensingMonitor extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([2])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// Storage of one Active Sensing sender. The program gives it;
+/// [`zmidi_active_sensing_sender_init`] sets it up.
+final class ZmidiActiveSensingSender extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([2])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
 
 /// Storage of one packet reader. The program gives it; [`zmidi_ble_reader_init`] sets it up.
 final class ZmidiBleReader extends ffi.Struct {
@@ -7436,6 +7802,129 @@ enum ZmidiStatus {
     5 => ZMIDI_STATUS_NOT_SUPPORTED,
     _ => throw ArgumentError('Unknown value for ZmidiStatus: $value'),
   };
+}
+
+/// A start, stop or continue command of the program (a front panel).
+enum ZmidiSyncCommand {
+  /// Start: position 0, then play at the next Timing Clock.
+  ZMIDI_SYNC_COMMAND_START(1),
+
+  /// Continue: play from the held position at the next Timing Clock.
+  ZMIDI_SYNC_COMMAND_CONTINUE(2),
+
+  /// Stop: stop at once and keep the position.
+  ZMIDI_SYNC_COMMAND_STOP(3);
+
+  final int value;
+  const ZmidiSyncCommand(this.value);
+
+  static ZmidiSyncCommand fromValue(int value) => switch (value) {
+    1 => ZMIDI_SYNC_COMMAND_START,
+    2 => ZMIDI_SYNC_COMMAND_CONTINUE,
+    3 => ZMIDI_SYNC_COMMAND_STOP,
+    _ => throw ArgumentError('Unknown value for ZmidiSyncCommand: $value'),
+  };
+}
+
+/// The event of one message or command.
+final class ZmidiSyncEvent extends ffi.Struct {
+  /// A [`ZmidiSyncEventKind`] value.
+  @ffi.Uint32()
+  external int kind;
+
+  /// The position in MIDI clocks of a Clock or Locate event.
+  @ffi.Uint32()
+  external int position;
+
+  /// The song number of a Song event.
+  @ffi.Uint8()
+  external int song;
+
+  static ffi.Pointer<ZmidiSyncEvent> $allocate(
+    ffi.Allocator $allocator, {
+    required int kind,
+    required int position,
+    required int song,
+  }) => $allocator<ZmidiSyncEvent>()
+    ..ref.kind = kind
+    ..ref.position = position
+    ..ref.song = song;
+}
+
+/// The kind of a [`ZmidiSyncEvent`].
+enum ZmidiSyncEventKind {
+  /// The message or command gives no event.
+  ZMIDI_SYNC_EVENT_KIND_NONE(0),
+
+  /// Start: the position is 0 and the receiver waits for the next Timing Clock.
+  ZMIDI_SYNC_EVENT_KIND_START(1),
+
+  /// Continue: the receiver waits at the held position for the next Timing Clock.
+  ZMIDI_SYNC_EVENT_KIND_CONTINUE(2),
+
+  /// Stop: the receiver stopped and keeps its position.
+  ZMIDI_SYNC_EVENT_KIND_STOP(3),
+
+  /// A Timing Clock while the receiver plays: `position` is the position of this clock.
+  ZMIDI_SYNC_EVENT_KIND_CLOCK(4),
+
+  /// An accepted Song Position Pointer: `position` is the new position.
+  ZMIDI_SYNC_EVENT_KIND_LOCATE(5),
+
+  /// An accepted Song Select: `song` is the song number.
+  ZMIDI_SYNC_EVENT_KIND_SONG(6);
+
+  final int value;
+  const ZmidiSyncEventKind(this.value);
+
+  static ZmidiSyncEventKind fromValue(int value) => switch (value) {
+    0 => ZMIDI_SYNC_EVENT_KIND_NONE,
+    1 => ZMIDI_SYNC_EVENT_KIND_START,
+    2 => ZMIDI_SYNC_EVENT_KIND_CONTINUE,
+    3 => ZMIDI_SYNC_EVENT_KIND_STOP,
+    4 => ZMIDI_SYNC_EVENT_KIND_CLOCK,
+    5 => ZMIDI_SYNC_EVENT_KIND_LOCATE,
+    6 => ZMIDI_SYNC_EVENT_KIND_SONG,
+    _ => throw ArgumentError('Unknown value for ZmidiSyncEventKind: $value'),
+  };
+}
+
+/// The information of a sync receiver.
+final class ZmidiSyncInfo extends ffi.Struct {
+  /// The position in MIDI clocks: the position of the next Timing Clock that plays.
+  @ffi.Uint32()
+  external int position;
+
+  /// The run state: 0 stopped, 1 waits for the first Timing Clock, 2 plays.
+  @ffi.Uint8()
+  external int run;
+
+  /// The song of the last accepted Song Select.
+  @ffi.Uint8()
+  external int song;
+
+  /// MIDI sync mode on.
+  @ffi.Bool()
+  external bool sync_mode;
+
+  static ffi.Pointer<ZmidiSyncInfo> $allocate(
+    ffi.Allocator $allocator, {
+    required int position,
+    required int run,
+    required int song,
+    required bool sync_mode,
+  }) => $allocator<ZmidiSyncInfo>()
+    ..ref.position = position
+    ..ref.run = run
+    ..ref.song = song
+    ..ref.sync_mode = sync_mode;
+}
+
+/// Storage of one sync receiver. The program gives it; [`zmidi_sync_init`] sets it up.
+final class ZmidiSyncReceiver extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([1])
+  external ffi.Array<ffi.Uint64> _opaque;
 }
 
 /// One UMP as plain values (REQ-FFI-UMP-002).

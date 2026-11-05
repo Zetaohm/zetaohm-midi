@@ -5,6 +5,10 @@
 use pyo3::prelude::*;
 use pyo3::types::PyBytes;
 use zmidi_io::{
+    ActiveSensingMonitor as RsActiveSensingMonitor, ActiveSensingSender as RsActiveSensingSender,
+    SyncCommand, SyncEvent as RsSyncEvent, SyncReceiver as RsSyncReceiver, SyncRun,
+};
+use zmidi_io::{
     ControllerEvent as RsControllerEvent, ControllerState as RsControllerState,
     Midi1Event as RsEvent, Midi1Message as RsMessage, Midi1Reader as RsReader,
     Midi1Writer as RsWriter, ModeAction as RsModeAction, ModeConfig, ModeState as RsModeState,
@@ -825,4 +829,210 @@ pub fn value_messages(
     zmidi_io::value_messages(self::channel(channel)?, parameter.rust(), value)
         .map(|m| m.map(Midi1Message::channel_voice).to_vec())
         .map_err(|_| invalid("value must be 0 to 16383"))
+}
+
+impl Midi1Message {
+    /// The typed System message, or an InvalidValueError.
+    fn to_system(&self) -> PyResult<SystemMessage> {
+        (self.kind == "system")
+            .then(|| SystemMessage::parse(&[self.word(0x1)]))
+            .flatten()
+            .ok_or_else(|| invalid("the message is not a System message"))
+    }
+}
+
+/// The event of one message or command for a sync receiver.
+#[pyclass(frozen, eq, module = "zetaohm_midi._native")]
+#[derive(Clone, PartialEq, Eq)]
+pub struct SyncEvent {
+    /// "start", "continue", "stop", "clock", "locate" or "song".
+    #[pyo3(get)]
+    kind: &'static str,
+    /// The position in MIDI clocks of a "clock" event (the position of this clock) or a "locate"
+    /// event (the new position).
+    #[pyo3(get)]
+    position: Option<u32>,
+    /// The song number of a "song" event.
+    #[pyo3(get)]
+    song: Option<u8>,
+}
+
+impl SyncEvent {
+    fn of(e: RsSyncEvent) -> Self {
+        let (kind, position, song) = match e {
+            RsSyncEvent::Start => ("start", None, None),
+            RsSyncEvent::Continue => ("continue", None, None),
+            RsSyncEvent::Stop => ("stop", None, None),
+            RsSyncEvent::Clock { position } => ("clock", Some(position), None),
+            RsSyncEvent::Locate { position } => ("locate", Some(position), None),
+            RsSyncEvent::Song { number } => ("song", None, Some(number)),
+        };
+        Self {
+            kind,
+            position,
+            song,
+        }
+    }
+}
+
+#[pymethods]
+impl SyncEvent {
+    fn __repr__(&self) -> String {
+        format!(
+            "SyncEvent(kind={:?}, position={}, song={})",
+            self.kind,
+            opt(self.position),
+            opt(self.song)
+        )
+    }
+}
+
+/// The MIDI 1.0 sync receiver of a sequencer or drum machine: Start, Stop, Continue, Timing Clock,
+/// Song Position Pointer and Song Select (M1 pp. 27 to 32). The position is a count of MIDI clocks.
+#[pyclass(module = "zetaohm_midi._native")]
+pub struct SyncReceiver(RsSyncReceiver);
+
+#[pymethods]
+impl SyncReceiver {
+    /// A receiver that is stopped at position 0, with song 0, in MIDI sync mode.
+    #[new]
+    fn new() -> Self {
+        Self(RsSyncReceiver::new())
+    }
+
+    /// Takes one System message and gives its event, or None.
+    fn receive(&mut self, message: &Midi1Message) -> PyResult<Option<SyncEvent>> {
+        Ok(self.0.receive(&message.to_system()?).map(SyncEvent::of))
+    }
+
+    /// Takes one command of the program ("start", "continue" or "stop") with the transitions of
+    /// the MIDI command, and gives its event, or None.
+    fn command(&mut self, command: &str) -> PyResult<Option<SyncEvent>> {
+        let command = match command {
+            "start" => SyncCommand::Start,
+            "continue" => SyncCommand::Continue,
+            "stop" => SyncCommand::Stop,
+            _ => return Err(invalid("command must be start, continue or stop")),
+        };
+        Ok(self.0.command(command).map(SyncEvent::of))
+    }
+
+    /// The System Reset action of the program: position 0 and stopped; the song and the MIDI sync
+    /// mode stay.
+    fn system_reset(&mut self) {
+        self.0.system_reset();
+    }
+
+    /// The position in MIDI clocks: the position of the next Timing Clock that plays.
+    #[getter]
+    fn position(&self) -> u32 {
+        self.0.position()
+    }
+
+    /// The run state: "stopped", "waiting" (for the first Timing Clock) or "playing".
+    #[getter]
+    fn run(&self) -> &'static str {
+        match self.0.run() {
+            SyncRun::Stopped => "stopped",
+            SyncRun::Waiting => "waiting",
+            SyncRun::Playing => "playing",
+        }
+    }
+
+    /// The song of the last accepted Song Select.
+    #[getter]
+    fn song(&self) -> u8 {
+        self.0.song()
+    }
+
+    /// MIDI sync mode on (the default); out of it the receiver ignores Song Position Pointer and
+    /// Song Select.
+    #[getter]
+    fn sync_mode(&self) -> bool {
+        self.0.sync_mode()
+    }
+
+    #[setter]
+    fn set_sync_mode(&mut self, on: bool) {
+        self.0.set_sync_mode(on);
+    }
+}
+
+/// The MIDI 1.0 Active Sensing monitor of a receiver (M1 pp. 32, 33). The program gives the time of
+/// each call in microseconds. The defaults of the constructors are the zmidi-io constants (a test
+/// checks them).
+#[pyclass(module = "zetaohm_midi._native")]
+pub struct ActiveSensingMonitor(RsActiveSensingMonitor);
+
+#[pymethods]
+impl ActiveSensingMonitor {
+    /// A monitor with a timeout of `timeout_us` microseconds (330 ms by default), not armed.
+    #[new]
+    #[pyo3(signature = (timeout_us=330_000))]
+    fn new(timeout_us: u32) -> Self {
+        Self(RsActiveSensingMonitor::new(timeout_us))
+    }
+
+    /// Takes one received byte at the time `now_us`: FEH arms the monitor; while it is armed, each
+    /// byte restarts the timer.
+    fn receive_byte(&mut self, byte: u8, now_us: u64) {
+        self.0.receive_byte(byte, now_us);
+    }
+
+    /// Takes one received message of a transport with no bytes at the time `now_us`;
+    /// `active_sensing` is true for an Active Sensing message.
+    fn receive(&mut self, active_sensing: bool, now_us: u64) {
+        self.0.receive(active_sensing, now_us);
+    }
+
+    /// Checks the timer at the time `now_us`: True one time when more than the timeout passed since
+    /// the last received byte; the monitor then waits for FEH again.
+    fn poll(&mut self, now_us: u64) -> bool {
+        self.0.poll(now_us)
+    }
+
+    /// The monitor received FEH and gave no timeout after it.
+    #[getter]
+    fn is_armed(&self) -> bool {
+        self.0.is_armed()
+    }
+
+    /// The timeout, in microseconds.
+    #[getter]
+    fn timeout_us(&self) -> u32 {
+        self.0.timeout_us()
+    }
+}
+
+/// The MIDI 1.0 Active Sensing sender of a transmitter (M1 p. 32). The program gives the time of
+/// each call in microseconds.
+#[pyclass(module = "zetaohm_midi._native")]
+pub struct ActiveSensingSender(RsActiveSensingSender);
+
+#[pymethods]
+impl ActiveSensingSender {
+    /// A sender with an interval of `interval_us` microseconds (270 ms by default) that starts at
+    /// time 0.
+    #[new]
+    #[pyo3(signature = (interval_us=270_000))]
+    fn new(interval_us: u32) -> Self {
+        Self(RsActiveSensingSender::new(interval_us))
+    }
+
+    /// The program sent a byte at the time `now_us`; the interval starts again.
+    fn sent(&mut self, now_us: u64) {
+        self.0.sent(now_us);
+    }
+
+    /// Checks the interval at the time `now_us`: True when no byte was sent for the interval; the
+    /// program then sends one FEH byte, and the interval starts again.
+    fn poll(&mut self, now_us: u64) -> bool {
+        self.0.poll(now_us)
+    }
+
+    /// The interval, in microseconds.
+    #[getter]
+    fn interval_us(&self) -> u32 {
+        self.0.interval_us()
+    }
 }

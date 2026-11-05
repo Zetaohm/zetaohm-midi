@@ -344,3 +344,95 @@ List<RawMessage> valueMessages(
     value.toJS,
   ]),
 );
+
+const _syncKinds = ['', 'start', 'continue', 'stop', 'clock', 'locate', 'song'];
+const _syncRuns = ['stopped', 'waiting', 'playing'];
+
+/// The TypeScript SyncReceiver.
+final class SyncCore {
+  /// A new sync receiver.
+  SyncCore() : _o = tsNew('SyncReceiver', []);
+
+  final JSObject _o;
+
+  (int, int, int) _out(JSObject? e) => e == null
+      ? (0, 0, 0)
+      : (
+          _index(_syncKinds, prop(e, 'kind')),
+          intOrNull(prop(e, 'position')) ?? 0,
+          intOrNull(prop(e, 'song')) ?? 0,
+        );
+
+  /// Takes one message; gives (kind, position, song).
+  (int, int, int) receive(RawMessage m) =>
+      _out(call<JSObject?>(_o, 'receive', [_messageIn(m)]));
+
+  /// Takes one command (1 start, 2 continue, 3 stop); gives (kind, position, song).
+  (int, int, int) command(int command) => _out(
+    call<JSObject?>(_o, 'command', [
+      _syncKinds[command < 4 ? command : 0].toJS,
+    ]),
+  );
+
+  /// The System Reset action.
+  void systemReset() => call<JSAny?>(_o, 'systemReset');
+
+  /// (position, run, song, sync mode).
+  (int, int, int, bool) info() => (
+    intOf(prop(_o, 'position')),
+    _index(_syncRuns, prop(_o, 'run')),
+    intOf(prop(_o, 'song')),
+    boolOf(prop(_o, 'syncMode')),
+  );
+
+  /// Sets MIDI sync mode.
+  void setMode(bool on) =>
+      guard(() => _o.setProperty('syncMode'.toJS, on.toJS));
+
+  /// Frees the WASM memory.
+  void free() => call<JSAny?>(_o, 'free');
+}
+
+/// The TypeScript ActiveSensingMonitor.
+final class MonitorCore {
+  /// A monitor with a timeout in microseconds.
+  MonitorCore(int timeoutUs)
+    : _o = tsNew('ActiveSensingMonitor', [timeoutUs.toJS]);
+
+  final JSObject _o;
+
+  /// Takes one received byte.
+  void receiveByte(int byte, int nowUs) =>
+      call<JSAny?>(_o, 'receiveByte', [byte.toJS, nowUs.toJS]);
+
+  /// Takes one received message.
+  void receive(bool activeSensing, int nowUs) =>
+      call<JSAny?>(_o, 'receive', [activeSensing.toJS, nowUs.toJS]);
+
+  /// Checks the timer; gives the timeout.
+  bool poll(int nowUs) => boolOf(call(_o, 'poll', [nowUs.toJS]));
+
+  /// The armed flag.
+  bool isArmed() => boolOf(prop(_o, 'isArmed'));
+
+  /// Frees the WASM memory.
+  void free() => call<JSAny?>(_o, 'free');
+}
+
+/// The TypeScript ActiveSensingSender.
+final class SenderCore {
+  /// A sender with an interval in microseconds.
+  SenderCore(int intervalUs)
+    : _o = tsNew('ActiveSensingSender', [intervalUs.toJS]);
+
+  final JSObject _o;
+
+  /// The program sent a byte.
+  void sent(int nowUs) => call<JSAny?>(_o, 'sent', [nowUs.toJS]);
+
+  /// Checks the interval; gives true to send FEH.
+  bool poll(int nowUs) => boolOf(call(_o, 'poll', [nowUs.toJS]));
+
+  /// Frees the WASM memory.
+  void free() => call<JSAny?>(_o, 'free');
+}

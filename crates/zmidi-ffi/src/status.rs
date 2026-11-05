@@ -23,7 +23,7 @@ pub enum ZmidiStatus {
 /// Major version of the C ABI. It changes when a type, a storage size or a function changes.
 pub const ZMIDI_ABI_MAJOR: u32 = 0;
 /// Minor version of the C ABI. It changes when a function or a status value is added.
-pub const ZMIDI_ABI_MINOR: u32 = 8;
+pub const ZMIDI_ABI_MINOR: u32 = 9;
 
 /// Gives the ABI version, `major << 16 | minor`. A binding compares it at load time with the
 /// version of its copy of the header.

@@ -37,7 +37,7 @@ midi2 = ["ump", "io", "ci", "ci-pe", "file", "net", "usb", "ble"]
 # no Clip File, zmidi-ble with no MIDI 2.0 Protocol, zmidi-usb with no USB MIDI 2.0 setting.
 ump-midi1 = ["zmidi-ump/system-common", "zmidi-ump/channel-voice1", "zmidi-ump/sysex7"]
 ump = ["ump-midi1", "zmidi-ump/full"]
-io-midi1 = ["dep:zmidi-io", "zmidi-io/messages", "zmidi-io/channel-mode", "zmidi-io/controllers", "zmidi-io/parameters"]
+io-midi1 = ["dep:zmidi-io", "zmidi-io/messages", "zmidi-io/channel-mode", "zmidi-io/controllers", "zmidi-io/parameters", "zmidi-io/sync", "zmidi-io/active-sensing"]
 io = ["io-midi1", "zmidi-io/full"]
 ci = ["dep:zmidi-ci", "zmidi-ci/full"]
 ci-pe = ["dep:zmidi-ci-pe", "zmidi-ci-pe/initiator"]

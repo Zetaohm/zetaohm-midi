@@ -257,6 +257,8 @@ fn header_compiles_as_c99_for_each_selection() {
         "ZMIDI_CHANNEL_MODE",
         "ZMIDI_CONTROLLERS",
         "ZMIDI_PARAMETERS",
+        "ZMIDI_SYNC",
+        "ZMIDI_ACTIVE_SENSING",
     ] {
         assert!(c99_compiles(&format!("h-{one}.c"), src, &[one]), "{one}");
     }

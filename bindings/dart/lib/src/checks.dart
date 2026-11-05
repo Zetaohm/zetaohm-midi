@@ -11,10 +11,10 @@ export 'limits.dart' if (dart.library.js_interop) 'web/limits.dart';
 const abiMajor = 0;
 
 /// The lowest minor version of the C ABI that has every function that this package calls
-/// (ZMIDI_ABI_MINOR 8: the MIDI 1.0 parts; 7: zmidi_bytes_to_ump_feed; 5: the USB descriptor
+/// (ZMIDI_ABI_MINOR 9: the MIDI 1.0 sync receiver and Active Sensing; 8: the MIDI 1.0 parts; 7: zmidi_bytes_to_ump_feed; 5: the USB descriptor
 /// writer and the Group Terminal Block requests; 4: zmidi_ci_pe_end; 3: the Property Exchange
 /// engine; 2: the Profile and Process Inquiry calls of ci and the net-auth calls).
-const abiMinor = 8;
+const abiMinor = 9;
 
 /// Throws when the C ABI version [v] (major << 16 | minor) has another major version than
 /// [abiMajor], or a minor version below [abiMinor].

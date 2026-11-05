@@ -58,6 +58,12 @@
 #ifndef ZMIDI_PARAMETERS
 #define ZMIDI_PARAMETERS
 #endif
+#ifndef ZMIDI_SYNC
+#define ZMIDI_SYNC
+#endif
+#ifndef ZMIDI_ACTIVE_SENSING
+#define ZMIDI_ACTIVE_SENSING
+#endif
 #endif
 #if defined(ZMIDI_IO) && !defined(ZMIDI_IO_MIDI1)
 #define ZMIDI_IO_MIDI1
@@ -281,6 +287,41 @@
 #define ZMIDI_PARAMETER_STATE_WORDS 1
 #endif
 
+#if defined(ZMIDI_SYNC)
+/**
+ * Storage words of a [`ZmidiSyncReceiver`].
+ */
+#define ZMIDI_SYNC_RECEIVER_WORDS 1
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Storage words of a [`ZmidiActiveSensingMonitor`].
+ */
+#define ZMIDI_ACTIVE_SENSING_MONITOR_WORDS 2
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Storage words of a [`ZmidiActiveSensingSender`].
+ */
+#define ZMIDI_ACTIVE_SENSING_SENDER_WORDS 2
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * The default timeout of the monitor: 330 ms, in microseconds.
+ */
+#define ZMIDI_ACTIVE_SENSING_TIMEOUT_US 330000
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * The default interval of the sender: 270 ms, in microseconds.
+ */
+#define ZMIDI_ACTIVE_SENSING_INTERVAL_US 270000
+#endif
+
 #if (defined(ZMIDI_NET) && (defined(ZMIDI_PTR64) && !defined(ZMIDI_NET_AUTH)))
 /**
  * Storage words of a [`ZmidiNetHost`] on a 64-bit target.
@@ -418,7 +459,7 @@
 /**
  * Minor version of the C ABI. It changes when a function or a status value is added.
  */
-#define ZMIDI_ABI_MINOR 8
+#define ZMIDI_ABI_MINOR 9
 
 #if (defined(ZMIDI_USB_MIDI1) && defined(ZMIDI_PTR64))
 /**
@@ -816,7 +857,7 @@ typedef enum ZmidiControllerEventKind {
 } ZmidiControllerEventKind;
 #endif
 
-#if (defined(ZMIDI_MESSAGES) || defined(ZMIDI_CHANNEL_MODE) || defined(ZMIDI_CONTROLLERS) || defined(ZMIDI_PARAMETERS))
+#if (defined(ZMIDI_MESSAGES) || defined(ZMIDI_CHANNEL_MODE) || defined(ZMIDI_CONTROLLERS) || defined(ZMIDI_PARAMETERS) || defined(ZMIDI_SYNC))
 /**
  * The kind of a [`ZmidiMidi1Message`].
  */
@@ -1497,6 +1538,62 @@ typedef enum ZmidiStatus {
   ZMIDI_STATUS_NOT_SUPPORTED = 5,
 } ZmidiStatus;
 
+#if defined(ZMIDI_SYNC)
+/**
+ * A start, stop or continue command of the program (a front panel).
+ */
+typedef enum ZmidiSyncCommand {
+  /**
+   * Start: position 0, then play at the next Timing Clock.
+   */
+  ZMIDI_SYNC_COMMAND_START = 1,
+  /**
+   * Continue: play from the held position at the next Timing Clock.
+   */
+  ZMIDI_SYNC_COMMAND_CONTINUE = 2,
+  /**
+   * Stop: stop at once and keep the position.
+   */
+  ZMIDI_SYNC_COMMAND_STOP = 3,
+} ZmidiSyncCommand;
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * The kind of a [`ZmidiSyncEvent`].
+ */
+typedef enum ZmidiSyncEventKind {
+  /**
+   * The message or command gives no event.
+   */
+  ZMIDI_SYNC_EVENT_KIND_NONE = 0,
+  /**
+   * Start: the position is 0 and the receiver waits for the next Timing Clock.
+   */
+  ZMIDI_SYNC_EVENT_KIND_START = 1,
+  /**
+   * Continue: the receiver waits at the held position for the next Timing Clock.
+   */
+  ZMIDI_SYNC_EVENT_KIND_CONTINUE = 2,
+  /**
+   * Stop: the receiver stopped and keeps its position.
+   */
+  ZMIDI_SYNC_EVENT_KIND_STOP = 3,
+  /**
+   * A Timing Clock while the receiver plays: `position` is the position of this clock.
+   */
+  ZMIDI_SYNC_EVENT_KIND_CLOCK = 4,
+  /**
+   * An accepted Song Position Pointer: `position` is the new position.
+   */
+  ZMIDI_SYNC_EVENT_KIND_LOCATE = 5,
+  /**
+   * An accepted Song Select: `song` is the song number.
+   */
+  ZMIDI_SYNC_EVENT_KIND_SONG = 6,
+} ZmidiSyncEventKind;
+#endif
+
 #if defined(ZMIDI_USB_MIDI1)
 /**
  * The result of [`zmidi_usb_gtb_setup`] (REQ-USB-GTB-017 to REQ-USB-GTB-019).
@@ -2030,7 +2127,7 @@ typedef struct ZmidiMidi1Reader {
 } ZmidiMidi1Reader;
 #endif
 
-#if (defined(ZMIDI_MESSAGES) || defined(ZMIDI_CHANNEL_MODE) || defined(ZMIDI_CONTROLLERS) || defined(ZMIDI_PARAMETERS))
+#if (defined(ZMIDI_MESSAGES) || defined(ZMIDI_CHANNEL_MODE) || defined(ZMIDI_CONTROLLERS) || defined(ZMIDI_PARAMETERS) || defined(ZMIDI_SYNC))
 /**
  * One typed MIDI 1.0 message as flat bytes, with no UMP Group (REQ-FFI-MIDI1-001).
  */
@@ -2280,6 +2377,88 @@ typedef struct ZmidiParameterEvent {
    */
   uint8_t value;
 } ZmidiParameterEvent;
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * Storage of one sync receiver. The program gives it; [`zmidi_sync_init`] sets it up.
+ */
+typedef struct ZmidiSyncReceiver {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_SYNC_RECEIVER_WORDS];
+} ZmidiSyncReceiver;
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * The event of one message or command.
+ */
+typedef struct ZmidiSyncEvent {
+  /**
+   * A [`ZmidiSyncEventKind`] value.
+   */
+  uint32_t kind;
+  /**
+   * The position in MIDI clocks of a Clock or Locate event.
+   */
+  uint32_t position;
+  /**
+   * The song number of a Song event.
+   */
+  uint8_t song;
+} ZmidiSyncEvent;
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * The information of a sync receiver.
+ */
+typedef struct ZmidiSyncInfo {
+  /**
+   * The position in MIDI clocks: the position of the next Timing Clock that plays.
+   */
+  uint32_t position;
+  /**
+   * The run state: 0 stopped, 1 waits for the first Timing Clock, 2 plays.
+   */
+  uint8_t run;
+  /**
+   * The song of the last accepted Song Select.
+   */
+  uint8_t song;
+  /**
+   * MIDI sync mode on.
+   */
+  bool sync_mode;
+} ZmidiSyncInfo;
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Storage of one Active Sensing monitor. The program gives it;
+ * [`zmidi_active_sensing_monitor_init`] sets it up.
+ */
+typedef struct ZmidiActiveSensingMonitor {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_ACTIVE_SENSING_MONITOR_WORDS];
+} ZmidiActiveSensingMonitor;
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Storage of one Active Sensing sender. The program gives it;
+ * [`zmidi_active_sensing_sender_init`] sets it up.
+ */
+typedef struct ZmidiActiveSensingSender {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_ACTIVE_SENSING_SENDER_WORDS];
+} ZmidiActiveSensingSender;
 #endif
 
 #if defined(ZMIDI_NET)
@@ -4353,6 +4532,200 @@ enum ZmidiStatus zmidi_parameter_value_messages(uint8_t channel,
                                                 struct ZmidiMidi1Message *out,
                                                 uintptr_t capacity,
                                                 uintptr_t *count);
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * Sets up `state`: stopped at position 0, song 0, MIDI sync mode on.
+ *
+ * # Safety
+ * `state` is null or points to writable storage of a [`ZmidiSyncReceiver`].
+ */
+enum ZmidiStatus zmidi_sync_init(struct ZmidiSyncReceiver *state);
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * Takes one System `message` and writes its event into `event` (the kind none when the message
+ * gives no event). A message that is not a valid System message gives
+ * [`ZmidiStatus::InvalidArgument`] and changes nothing.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_sync_init`]; `message` is readable; `event` is writable.
+ */
+enum ZmidiStatus zmidi_sync_receive(struct ZmidiSyncReceiver *state,
+                                    const struct ZmidiMidi1Message *message,
+                                    struct ZmidiSyncEvent *event);
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * Takes one `command` of the program (a [`ZmidiSyncCommand`] value) with the transitions of the
+ * MIDI command, and writes its event into `event`. An unknown command gives
+ * [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_sync_init`]; `event` is writable.
+ */
+enum ZmidiStatus zmidi_sync_command(struct ZmidiSyncReceiver *state,
+                                    uint32_t command,
+                                    struct ZmidiSyncEvent *event);
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * The System Reset action of the program: position 0 and stopped; the song and the MIDI sync mode
+ * stay.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_sync_init`].
+ */
+enum ZmidiStatus zmidi_sync_system_reset(struct ZmidiSyncReceiver *state);
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * Writes the information of `state` into `info`.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_sync_init`]; `info` is null or writable.
+ */
+enum ZmidiStatus zmidi_sync_info(const struct ZmidiSyncReceiver *state, struct ZmidiSyncInfo *info);
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * Sets MIDI sync mode on or off; out of it the receiver ignores Song Position Pointer and Song
+ * Select.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_sync_init`].
+ */
+enum ZmidiStatus zmidi_sync_set_mode(struct ZmidiSyncReceiver *state, bool on);
+#endif
+
+#if defined(ZMIDI_SYNC)
+/**
+ * Gives `size_of` the Rust sync receiver, for a binding that checks its copy of the layout
+ * (DEC-019 rule 6).
+ */
+uintptr_t zmidi_sync_receiver_size(void);
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Sets up `monitor` with a timeout of `timeout_us` microseconds, not armed.
+ *
+ * # Safety
+ * `monitor` is null or points to writable storage of a [`ZmidiActiveSensingMonitor`].
+ */
+enum ZmidiStatus zmidi_active_sensing_monitor_init(struct ZmidiActiveSensingMonitor *monitor,
+                                                   uint32_t timeout_us);
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Takes one received byte at the time `now_us`: FEH arms the monitor; while it is armed, each
+ * byte restarts the timer.
+ *
+ * # Safety
+ * `monitor` is null or was set up by [`zmidi_active_sensing_monitor_init`].
+ */
+enum ZmidiStatus zmidi_active_sensing_monitor_receive_byte(struct ZmidiActiveSensingMonitor *monitor,
+                                                           uint8_t byte,
+                                                           uint64_t now_us);
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Takes one received message of a transport with no bytes at the time `now_us`;
+ * `active_sensing` is true for an Active Sensing message.
+ *
+ * # Safety
+ * `monitor` is null or was set up by [`zmidi_active_sensing_monitor_init`].
+ */
+enum ZmidiStatus zmidi_active_sensing_monitor_receive(struct ZmidiActiveSensingMonitor *monitor,
+                                                      bool active_sensing,
+                                                      uint64_t now_us);
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Checks the timer at the time `now_us`; writes true into `timeout` one time when more than the
+ * timeout passed since the last received byte, and the monitor then waits for FEH again. Writes
+ * whether the monitor is armed after the check into `armed`.
+ *
+ * # Safety
+ * `monitor` was set up by [`zmidi_active_sensing_monitor_init`]; `timeout` and `armed` are
+ * writable.
+ */
+enum ZmidiStatus zmidi_active_sensing_monitor_poll(struct ZmidiActiveSensingMonitor *monitor,
+                                                   uint64_t now_us,
+                                                   bool *timeout,
+                                                   bool *armed);
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Writes whether `monitor` is armed (it received FEH and gave no timeout after it) into `armed`,
+ * with no check of the timer.
+ *
+ * # Safety
+ * `monitor` was set up by [`zmidi_active_sensing_monitor_init`]; `armed` is writable.
+ */
+enum ZmidiStatus zmidi_active_sensing_monitor_is_armed(const struct ZmidiActiveSensingMonitor *monitor,
+                                                       bool *armed);
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Gives `size_of` the Rust monitor, for a binding that checks its copy of the layout (DEC-019 rule
+ * 6).
+ */
+uintptr_t zmidi_active_sensing_monitor_size(void);
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Sets up `sender` with an interval of `interval_us` microseconds that starts at time 0.
+ *
+ * # Safety
+ * `sender` is null or points to writable storage of a [`ZmidiActiveSensingSender`].
+ */
+enum ZmidiStatus zmidi_active_sensing_sender_init(struct ZmidiActiveSensingSender *sender,
+                                                  uint32_t interval_us);
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Tells the sender that the program sent a byte at the time `now_us`; the interval starts again.
+ *
+ * # Safety
+ * `sender` is null or was set up by [`zmidi_active_sensing_sender_init`].
+ */
+enum ZmidiStatus zmidi_active_sensing_sender_sent(struct ZmidiActiveSensingSender *sender,
+                                                  uint64_t now_us);
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Checks the interval at the time `now_us`; writes true into `send` when no byte was sent for the
+ * interval: the program then sends one FEH byte, and the interval starts again.
+ *
+ * # Safety
+ * `sender` was set up by [`zmidi_active_sensing_sender_init`]; `send` is writable.
+ */
+enum ZmidiStatus zmidi_active_sensing_sender_poll(struct ZmidiActiveSensingSender *sender,
+                                                  uint64_t now_us,
+                                                  bool *send);
+#endif
+
+#if defined(ZMIDI_ACTIVE_SENSING)
+/**
+ * Gives `size_of` the Rust sender, for a binding that checks its copy of the layout (DEC-019 rule
+ * 6).
+ */
+uintptr_t zmidi_active_sensing_sender_size(void);
 #endif
 
 #if defined(ZMIDI_NET)

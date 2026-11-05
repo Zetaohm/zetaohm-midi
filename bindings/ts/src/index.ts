@@ -36,11 +36,16 @@ export { ClipWriter, readClip } from "./file.js";
 export type { ClipEvent, ClipOptions, ClipProfile } from "./file.js";
 export { BytesToUmp, UmpToBytes } from "./io.js";
 export {
+  ACTIVE_SENSING_INTERVAL_US,
+  ACTIVE_SENSING_TIMEOUT_US,
+  ActiveSensingMonitor,
+  ActiveSensingSender,
   ControllerState,
   Midi1Reader,
   Midi1Writer,
   ModeState,
   ParameterState,
+  SyncReceiver,
   applyParameter,
   bankProgramMessages,
   changeMessage,
@@ -62,6 +67,10 @@ export type {
   Parameter,
   ParameterChange,
   ParameterEvent,
+  SyncCommand,
+  SyncEvent,
+  SyncEventKind,
+  SyncRun,
 } from "./midi1.js";
 export {
   downscale,

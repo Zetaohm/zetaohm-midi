@@ -52,8 +52,9 @@ arm-none-eabi-size "$build/thumbv7em-ci-responder/fw_ci" |
   awk 'NR == 2 { printf "ffi-check: fw_ci (ci-device, ci-property-exchange) on Cortex-M4F: flash %d B, RAM %d B\n", $1 + $2, $2 + $3 }'
 
 # REQ-FFI-ABI-005, M7 of DEC-022: fw_midi1 with the feature midi1 only: a flash budget, and no
-# symbol of a MIDI 2.0 module (the rule of scripts/size-check.py). 11,244 B on 2026-11-04: the DIN
-# reader, writer, mode, 16 controller and 16 parameter states, and the io, ble and usb parts.
+# symbol of a MIDI 2.0 module (the rule of scripts/size-check.py). 11,760 B on 2026-11-05: the DIN
+# reader, writer, mode, 16 controller and 16 parameter states, the sync receiver, the Active Sensing
+# monitor, and the io, ble and usb parts.
 echo "ffi-check: thumbv7em-none-eabihf, fw_midi1 with midi1" >&2
 cmake -S "$ffi/tests/cmake" -B "$build/thumbv7em-midi1" -DCMAKE_TOOLCHAIN_FILE=thumbv7em.cmake \
   -DZMIDI_CHECK_MIDI1_ONLY=ON $fetch >/dev/null

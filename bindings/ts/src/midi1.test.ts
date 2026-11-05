@@ -2,12 +2,15 @@
 import { beforeAll, describe, expect, test } from "vitest";
 
 import {
+  ActiveSensingMonitor,
+  ActiveSensingSender,
   ControllerState,
   InvalidValueError,
   Midi1Reader,
   Midi1Writer,
   ModeState,
   ParameterState,
+  SyncReceiver,
   applyParameter,
   bankProgramMessages,
   changeMessage,
@@ -174,5 +177,50 @@ describe("midi1", () => {
     expect(() => selectMessages(0, { msb: 0x80, lsb: 0, registered: true })).toThrow(InvalidValueError);
     expect(() => changeMessage(0, "jump" as "increment")).toThrow(InvalidValueError);
     expect(() => new Midi1Writer().write(new Midi1Reader(0).feed(b(0xf0, 0xf7))[0]!)).toThrow(InvalidValueError);
+  });
+
+  test("the sync receiver: M1 examples", () => {
+    // M1 p. 28: SPP 4 (24 clocks), Continue and three Timing Clocks give the 27th clock.
+    const s = new SyncReceiver();
+    expect(s.receive(midi1Message(0xf2, 4, 0))).toEqual({ kind: "locate", position: 24, song: null });
+    expect(s.receive(midi1Message(0xfb))?.kind).toBe("continue");
+    expect(s.run).toBe("waiting");
+    const clocks = [0, 1, 2].map(() => s.receive(midi1Message(0xf8))?.position);
+    expect(clocks).toEqual([24, 25, 26]);
+    expect([s.position, s.run]).toEqual([27, "playing"]);
+    // p. 32: Start while playing is ignored; the front panel has the same transitions.
+    expect(s.command("start")).toBeNull();
+    expect(s.command("stop")?.kind).toBe("stop");
+    expect(s.receive(midi1Message(0xf8))).toBeNull();
+    // p. 29: Song Select out of MIDI sync mode is ignored; the System Reset action stops at 0.
+    s.syncMode = false;
+    expect(s.receive(midi1Message(0xf3, 5))).toBeNull();
+    s.systemReset();
+    expect([s.position, s.run, s.song, s.syncMode]).toEqual([0, "stopped", 0, false]);
+    expect(() => s.command("pause" as "stop")).toThrow(InvalidValueError);
+    expect(() => s.receive(midi1Message(0x90, 60, 64))).toThrow(InvalidValueError);
+    s.free();
+  });
+
+  test("the Active Sensing monitor and sender", () => {
+    // M1 p. 32: no timeout before FEH; over 330 ms with no byte gives one timeout; send FEH after
+    // 270 ms with no byte.
+    const m = new ActiveSensingMonitor();
+    expect(m.timeoutUs).toBe(330_000);
+    expect(m.poll(10_000_000)).toBe(false);
+    m.receiveByte(0xfe, 0);
+    m.receiveByte(0x90, 300_000);
+    expect([m.isArmed, m.poll(630_000)]).toEqual([true, false]);
+    expect(m.poll(630_001)).toBe(true);
+    expect([m.isArmed, m.poll(2_000_000)]).toEqual([false, false]);
+    m.receive(true, 3_000_000);
+    expect(m.isArmed).toBe(true);
+    const s = new ActiveSensingSender();
+    expect(s.intervalUs).toBe(270_000);
+    expect([s.poll(269_999), s.poll(270_000)]).toEqual([false, true]);
+    s.sent(400_000);
+    expect([s.poll(669_999), s.poll(670_000)]).toEqual([false, true]);
+    m.free();
+    s.free();
   });
 });

@@ -112,6 +112,10 @@ mode_state = ["io", "zmidi-io/channel-mode"]
 # parameters, DEC-022).
 ctl_state = ["io", "zmidi-io/controllers"]
 param_state = ["io", "zmidi-io/parameters"]
+# The MIDI 1.0 sync receiver and the Active Sensing monitor and sender (zmidi-io sync and
+# active-sensing, DEC-022).
+sync_state = ["io", "zmidi-io/sync"]
+active_sensing = ["io", "zmidi-io/active-sensing"]
 up_lean = ["ump_full"]
 # MIDI 1.0 to 2.0 Protocol, word API (Midi1ToMidi2Group::translate_words), one Group.
 up_words = ["ump_full"]

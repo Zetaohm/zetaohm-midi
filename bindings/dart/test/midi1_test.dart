@@ -198,6 +198,62 @@ void main() {
     },
   );
 
+  test('the sync receiver with the M1 examples', () {
+    // M1 p. 28: SPP 4 (24 clocks), Continue and three Timing Clocks give the 27th clock.
+    final s = SyncReceiver();
+    final l = s.receive(Midi1Message(0xF2, 4, 0))!;
+    expect([l.kind, l.position], [SyncEventKind.locate, 24]);
+    expect(s.receive(Midi1Message(0xFB))!.kind, SyncEventKind.resume);
+    expect(s.run, SyncRun.waiting);
+    final clocks = [for (var i = 0; i < 3; i++) s.receive(Midi1Message(0xF8))!];
+    expect(clocks.map((c) => [c.kind, c.position]), [
+      [SyncEventKind.clock, 24],
+      [SyncEventKind.clock, 25],
+      [SyncEventKind.clock, 26],
+    ]);
+    expect([s.position, s.run], [27, SyncRun.playing]);
+    // p. 32: Start while playing is ignored; the front panel has the same transitions.
+    expect(s.command(SyncCommand.start), isNull);
+    expect(s.command(SyncCommand.stop)!.kind, SyncEventKind.stop);
+    expect(s.receive(Midi1Message(0xF8)), isNull);
+    expect(s.command(SyncCommand.resume)!.kind, SyncEventKind.resume);
+    // p. 29: Song Select out of MIDI sync mode is ignored; the System Reset action stops at 0.
+    s.syncMode = false;
+    expect(s.receive(Midi1Message(0xF3, 5)), isNull);
+    s.systemReset();
+    expect(
+      [s.position, s.run, s.song, s.syncMode],
+      [0, SyncRun.stopped, 0, false],
+    );
+    expect(
+      () => s.receive(Midi1Message(0x90, 60, 64)),
+      throwsA(isA<InvalidValueException>()),
+    );
+    s.free();
+  });
+
+  test('the Active Sensing monitor and sender', () {
+    // M1 p. 32: no timeout before FEH; over 330 ms with no byte gives one timeout; send FEH after
+    // 270 ms with no byte.
+    final m = ActiveSensingMonitor();
+    expect([m.timeoutUs, m.poll(10000000)], [activeSensingTimeoutUs, false]);
+    m.receiveByte(0xFE, 0);
+    m.receiveByte(0x90, 300000);
+    expect([m.isArmed, m.poll(630000)], [true, false]);
+    expect([m.poll(630001), m.isArmed], [true, false]);
+    expect(m.poll(2000000), isFalse);
+    m.receive(true, 3000000);
+    expect(m.isArmed, isTrue);
+    final s = ActiveSensingSender();
+    expect(s.intervalUs, activeSensingIntervalUs);
+    expect([s.poll(269999), s.poll(270000)], [false, true]);
+    s.sent(400000);
+    expect([s.poll(669999), s.poll(670000)], [false, true]);
+    expect([activeSensingTimeoutUs, activeSensingIntervalUs], [330000, 270000]);
+    m.free();
+    s.free();
+  });
+
   test('MIDI 1.0 bad values', () {
     final invalid = throwsA(isA<InvalidValueException>());
     expect(() => Midi1Message(0x90, 0x80), invalid);

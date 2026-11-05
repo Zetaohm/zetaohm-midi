@@ -74,8 +74,10 @@ messages = ["dep:zmidi-io", "dep:zmidi-ump", "zmidi-io/messages"]
 channel-mode = ["dep:zmidi-io", "dep:zmidi-ump", "zmidi-io/channel-mode"]
 controllers = ["dep:zmidi-io", "dep:zmidi-ump", "zmidi-io/controllers"]
 parameters = ["dep:zmidi-io", "dep:zmidi-ump", "zmidi-io/parameters"]
+sync = ["dep:zmidi-io", "dep:zmidi-ump", "zmidi-io/sync"]
+active-sensing = ["dep:zmidi-io", "zmidi-io/active-sensing"]
 # All MIDI 1.0 parts, with no MIDI 2.0 code (M7 of DEC-022, REQ-FFI-ABI-004).
-midi1 = ["io-midi1", "ble-midi1", "usb-midi1", "messages", "channel-mode", "controllers", "parameters"]
+midi1 = ["io-midi1", "ble-midi1", "usb-midi1", "messages", "channel-mode", "controllers", "parameters", "sync", "active-sensing"]
 # A `#[panic_handler]` for bare-metal (`target_os = "none"`) and WASM builds of the staticlib
 # (DEC-019). It has no effect on other targets.
 panic-handler = []

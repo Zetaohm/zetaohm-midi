@@ -85,6 +85,15 @@ static ZmidiControllerState f_ZmidiControllerState, s_ZmidiControllerState;
 #if defined(ZMIDI_PARAMETERS)
 static ZmidiParameterState f_ZmidiParameterState, s_ZmidiParameterState;
 #endif
+#if defined(ZMIDI_SYNC)
+static ZmidiSyncReceiver f_ZmidiSyncReceiver, s_ZmidiSyncReceiver;
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+static ZmidiActiveSensingMonitor f_ZmidiActiveSensingMonitor, s_ZmidiActiveSensingMonitor;
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+static ZmidiActiveSensingSender f_ZmidiActiveSensingSender, s_ZmidiActiveSensingSender;
+#endif
 
 #if defined(ZMIDI_FILE)
 static void clip_reader_fixture(void) {
@@ -176,6 +185,15 @@ static void snapshot(void) {
 #if defined(ZMIDI_PARAMETERS)
   memcpy(&s_ZmidiParameterState, &f_ZmidiParameterState, sizeof f_ZmidiParameterState);
 #endif
+#if defined(ZMIDI_SYNC)
+  memcpy(&s_ZmidiSyncReceiver, &f_ZmidiSyncReceiver, sizeof f_ZmidiSyncReceiver);
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  memcpy(&s_ZmidiActiveSensingMonitor, &f_ZmidiActiveSensingMonitor, sizeof f_ZmidiActiveSensingMonitor);
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  memcpy(&s_ZmidiActiveSensingSender, &f_ZmidiActiveSensingSender, sizeof f_ZmidiActiveSensingSender);
+#endif
 }
 
 /* Asserts the status and that no state changed. */
@@ -232,6 +250,15 @@ static void check(enum ZmidiStatus st, const char *what) {
 #endif
 #if defined(ZMIDI_PARAMETERS)
   same &= memcmp(&s_ZmidiParameterState, &f_ZmidiParameterState, sizeof f_ZmidiParameterState) == 0;
+#endif
+#if defined(ZMIDI_SYNC)
+  same &= memcmp(&s_ZmidiSyncReceiver, &f_ZmidiSyncReceiver, sizeof f_ZmidiSyncReceiver) == 0;
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  same &= memcmp(&s_ZmidiActiveSensingMonitor, &f_ZmidiActiveSensingMonitor, sizeof f_ZmidiActiveSensingMonitor) == 0;
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  same &= memcmp(&s_ZmidiActiveSensingSender, &f_ZmidiActiveSensingSender, sizeof f_ZmidiActiveSensingSender) == 0;
 #endif
   if (st != ZMIDI_STATUS_INVALID_ARGUMENT) { fprintf(stderr, "%s: status %d\n", what, (int)st); failures++; }
   if (!same) { fprintf(stderr, "%s: a state changed\n", what); failures++; }
@@ -291,6 +318,15 @@ int main(void) {
 #endif
 #if defined(ZMIDI_PARAMETERS)
   if (zmidi_parameters_init(&f_ZmidiParameterState) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiParameterState fixture\n"); failures++; }
+#endif
+#if defined(ZMIDI_SYNC)
+  if (zmidi_sync_init(&f_ZmidiSyncReceiver) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiSyncReceiver fixture\n"); failures++; }
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  if (zmidi_active_sensing_monitor_init(&f_ZmidiActiveSensingMonitor, 1) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiActiveSensingMonitor fixture\n"); failures++; }
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  if (zmidi_active_sensing_sender_init(&f_ZmidiActiveSensingSender, 1) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiActiveSensingSender fixture\n"); failures++; }
 #endif
 #if defined(ZMIDI_CI_PROPERTY_EXCHANGE)
   if (zmidi_pe_wait(&f_ZmidiPe, 1, 0, 0, 100) != ZMIDI_STATUS_REJECTED ||
@@ -862,6 +898,78 @@ int main(void) {
   check(zmidi_parameter_value_messages((uint8_t)1, (const struct ZmidiParameter *)(void *)mem[0], (uint16_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_parameter_value_messages: out");
   snapshot();
   check(zmidi_parameter_value_messages((uint8_t)1, (const struct ZmidiParameter *)(void *)mem[0], (uint16_t)1, (struct ZmidiMidi1Message *)(void *)mem[1], (uintptr_t)1, NULL), "zmidi_parameter_value_messages: count");
+#endif
+#if defined(ZMIDI_SYNC)
+  snapshot();
+  check(zmidi_sync_init(NULL), "zmidi_sync_init: state");
+#endif
+#if defined(ZMIDI_SYNC)
+  snapshot();
+  check(zmidi_sync_receive(NULL, (const struct ZmidiMidi1Message *)(void *)mem[0], (struct ZmidiSyncEvent *)(void *)mem[1]), "zmidi_sync_receive: state");
+  snapshot();
+  check(zmidi_sync_receive(&f_ZmidiSyncReceiver, NULL, (struct ZmidiSyncEvent *)(void *)mem[0]), "zmidi_sync_receive: message");
+  snapshot();
+  check(zmidi_sync_receive(&f_ZmidiSyncReceiver, (const struct ZmidiMidi1Message *)(void *)mem[0], NULL), "zmidi_sync_receive: event");
+#endif
+#if defined(ZMIDI_SYNC)
+  snapshot();
+  check(zmidi_sync_command(NULL, (uint32_t)1, (struct ZmidiSyncEvent *)(void *)mem[0]), "zmidi_sync_command: state");
+  snapshot();
+  check(zmidi_sync_command(&f_ZmidiSyncReceiver, (uint32_t)1, NULL), "zmidi_sync_command: event");
+#endif
+#if defined(ZMIDI_SYNC)
+  snapshot();
+  check(zmidi_sync_system_reset(NULL), "zmidi_sync_system_reset: state");
+#endif
+#if defined(ZMIDI_SYNC)
+  snapshot();
+  check(zmidi_sync_info(NULL, (struct ZmidiSyncInfo *)(void *)mem[0]), "zmidi_sync_info: state");
+  snapshot();
+  check(zmidi_sync_info(&f_ZmidiSyncReceiver, NULL), "zmidi_sync_info: info");
+#endif
+#if defined(ZMIDI_SYNC)
+  snapshot();
+  check(zmidi_sync_set_mode(NULL, (bool)1), "zmidi_sync_set_mode: state");
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  snapshot();
+  check(zmidi_active_sensing_monitor_init(NULL, (uint32_t)1), "zmidi_active_sensing_monitor_init: monitor");
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  snapshot();
+  check(zmidi_active_sensing_monitor_receive_byte(NULL, (uint8_t)1, (uint64_t)1), "zmidi_active_sensing_monitor_receive_byte: monitor");
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  snapshot();
+  check(zmidi_active_sensing_monitor_receive(NULL, (bool)1, (uint64_t)1), "zmidi_active_sensing_monitor_receive: monitor");
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  snapshot();
+  check(zmidi_active_sensing_monitor_poll(NULL, (uint64_t)1, (bool *)(void *)mem[0], (bool *)(void *)mem[1]), "zmidi_active_sensing_monitor_poll: monitor");
+  snapshot();
+  check(zmidi_active_sensing_monitor_poll(&f_ZmidiActiveSensingMonitor, (uint64_t)1, NULL, (bool *)(void *)mem[0]), "zmidi_active_sensing_monitor_poll: timeout");
+  snapshot();
+  check(zmidi_active_sensing_monitor_poll(&f_ZmidiActiveSensingMonitor, (uint64_t)1, (bool *)(void *)mem[0], NULL), "zmidi_active_sensing_monitor_poll: armed");
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  snapshot();
+  check(zmidi_active_sensing_monitor_is_armed(NULL, (bool *)(void *)mem[0]), "zmidi_active_sensing_monitor_is_armed: monitor");
+  snapshot();
+  check(zmidi_active_sensing_monitor_is_armed(&f_ZmidiActiveSensingMonitor, NULL), "zmidi_active_sensing_monitor_is_armed: armed");
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  snapshot();
+  check(zmidi_active_sensing_sender_init(NULL, (uint32_t)1), "zmidi_active_sensing_sender_init: sender");
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  snapshot();
+  check(zmidi_active_sensing_sender_sent(NULL, (uint64_t)1), "zmidi_active_sensing_sender_sent: sender");
+#endif
+#if defined(ZMIDI_ACTIVE_SENSING)
+  snapshot();
+  check(zmidi_active_sensing_sender_poll(NULL, (uint64_t)1, (bool *)(void *)mem[0]), "zmidi_active_sensing_sender_poll: sender");
+  snapshot();
+  check(zmidi_active_sensing_sender_poll(&f_ZmidiActiveSensingSender, (uint64_t)1, NULL), "zmidi_active_sensing_sender_poll: send");
 #endif
 #if defined(ZMIDI_NET)
   snapshot();

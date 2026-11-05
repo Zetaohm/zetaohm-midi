@@ -58,6 +58,12 @@ after_includes = """
 #ifndef ZMIDI_PARAMETERS
 #define ZMIDI_PARAMETERS
 #endif
+#ifndef ZMIDI_SYNC
+#define ZMIDI_SYNC
+#endif
+#ifndef ZMIDI_ACTIVE_SENSING
+#define ZMIDI_ACTIVE_SENSING
+#endif
 #endif
 #if defined(ZMIDI_IO) && !defined(ZMIDI_IO_MIDI1)
 #define ZMIDI_IO_MIDI1
@@ -93,6 +99,8 @@ aligned_n = "ZMIDI_ALIGNED"
 "feature = channel-mode" = "ZMIDI_CHANNEL_MODE"
 "feature = controllers" = "ZMIDI_CONTROLLERS"
 "feature = parameters" = "ZMIDI_PARAMETERS"
+"feature = sync" = "ZMIDI_SYNC"
+"feature = active-sensing" = "ZMIDI_ACTIVE_SENSING"
 "feature = midi1" = "ZMIDI_MIDI1"
 "target_pointer_width = 64" = "ZMIDI_PTR64"
 
@@ -103,4 +111,11 @@ prefix_with_name = true
 # The kinds of the MIDI 1.0 parts (module Midi1): no signature names them (the structs hold a
 # uint32_t), so the header exports them by name for their constants.
 [export]
-include = ["ZmidiMidi1Kind", "ZmidiModeActionKind", "ZmidiControllerEventKind", "ZmidiParameterChange"]
+include = [
+  "ZmidiMidi1Kind",
+  "ZmidiModeActionKind",
+  "ZmidiControllerEventKind",
+  "ZmidiParameterChange",
+  "ZmidiSyncEventKind",
+  "ZmidiSyncCommand",
+]

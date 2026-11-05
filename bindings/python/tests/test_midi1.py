@@ -138,3 +138,51 @@ def test_bad_values() -> None:
         zm.change_message(0, "jump")
     with pytest.raises(zm.InvalidValueError):
         zm.Midi1Writer().write(zm.Midi1Reader(sysex_capacity=0).feed(bytes([0xF0, 0xF7]))[0])
+
+
+def test_sync_receiver_m1_examples() -> None:
+    # M1 p. 28: SPP 4 (24 clocks), Continue and three Timing Clocks give the 27th clock.
+    s = zm.SyncReceiver()
+    e = s.receive(zm.Midi1Message(0xF2, 4, 0))
+    assert e is not None and (e.kind, e.position) == ("locate", 24)
+    e = s.receive(zm.Midi1Message(0xFB))
+    assert e is not None and e.kind == "continue"
+    assert s.run == "waiting"
+    clocks = [s.receive(zm.Midi1Message(0xF8)) for _ in range(3)]
+    assert [(c.kind, c.position) for c in clocks if c is not None] == [("clock", 24), ("clock", 25), ("clock", 26)]
+    assert (s.position, s.run) == (27, "playing")
+    # p. 32: Start while playing is ignored; the front panel has the same transitions.
+    assert s.command("start") is None
+    e = s.command("stop")
+    assert e is not None and e.kind == "stop"
+    assert s.receive(zm.Midi1Message(0xF8)) is None
+    # p. 29: Song Select out of MIDI sync mode is ignored; the System Reset action stops at 0.
+    s.sync_mode = False
+    assert s.receive(zm.Midi1Message(0xF3, 5)) is None
+    s.system_reset()
+    assert (s.position, s.run, s.song, s.sync_mode) == (0, "stopped", 0, False)
+    with pytest.raises(zm.InvalidValueError):
+        s.command("pause")
+    with pytest.raises(zm.InvalidValueError):
+        s.receive(zm.Midi1Message(0x90, 60, 64))
+
+
+def test_active_sensing_monitor_and_sender() -> None:
+    # M1 p. 32: no timeout before FEH; over 330 ms with no byte gives one timeout; send FEH after
+    # 270 ms with no byte.
+    m = zm.ActiveSensingMonitor()
+    assert m.timeout_us == 330_000 and not m.poll(10_000_000)
+    m.receive_byte(0xFE, 0)
+    m.receive_byte(0x90, 300_000)
+    assert m.is_armed and not m.poll(630_000)
+    assert m.poll(630_001) and not m.is_armed
+    assert not m.poll(2_000_000)
+    m.receive(True, 3_000_000)
+    assert m.is_armed
+    s = zm.ActiveSensingSender()
+    assert s.interval_us == 270_000
+    assert not s.poll(269_999) and s.poll(270_000)
+    s.sent(400_000)
+    assert not s.poll(669_999) and s.poll(670_000)
+    # The defaults are the zmidi-io constants ACTIVE_SENSING_TIMEOUT_US and ACTIVE_SENSING_INTERVAL_US.
+    assert (zm.ActiveSensingMonitor().timeout_us, zm.ActiveSensingSender().interval_us) == (330_000, 270_000)

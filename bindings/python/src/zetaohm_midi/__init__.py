@@ -1,6 +1,8 @@
 """MIDI 2.0 for Python: the Rust crates of zetaohm-midi through PyO3 (DEC-019)."""
 
 from zetaohm_midi._native import (
+    ActiveSensingMonitor,
+    ActiveSensingSender,
     BleReader,
     BleWriter,
     BytesToUmp,
@@ -28,6 +30,8 @@ from zetaohm_midi._native import (
     PeResource,
     PeSubscription,
     RejectedError,
+    SyncEvent,
+    SyncReceiver,
     Ump,
     UmpToBytes,
     UsbAlt0,
@@ -60,6 +64,8 @@ from zetaohm_midi._native import (
 )
 
 __all__ = [
+    "ActiveSensingMonitor",
+    "ActiveSensingSender",
     "BleReader",
     "BleWriter",
     "BytesToUmp",
@@ -87,6 +93,8 @@ __all__ = [
     "PeResource",
     "PeSubscription",
     "RejectedError",
+    "SyncEvent",
+    "SyncReceiver",
     "Ump",
     "UmpToBytes",
     "UsbAlt0",

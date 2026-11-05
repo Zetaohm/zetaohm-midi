@@ -46,8 +46,9 @@ pub mod _native {
     #[pymodule_export]
     use crate::midi1::{
         bank_program_messages, change_message, controller14_messages, reset_value, select_messages,
-        value_messages, ControllerEvent, ControllerState, Midi1Message, Midi1Reader, Midi1Writer,
-        ModeAction, ModeState, Parameter, ParameterEvent, ParameterState,
+        value_messages, ActiveSensingMonitor, ActiveSensingSender, ControllerEvent,
+        ControllerState, Midi1Message, Midi1Reader, Midi1Writer, ModeAction, ModeState, Parameter,
+        ParameterEvent, ParameterState, SyncEvent, SyncReceiver,
     };
     #[pymodule_export]
     use crate::net::{NetClient, NetEvent, NetHost};

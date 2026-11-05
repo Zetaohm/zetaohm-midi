@@ -1,6 +1,7 @@
 /* A bare-metal link check of the MIDI 1.0-only build (REQ-FFI-ABI-005, M7 of DEC-022): a 16-channel
- * MIDI 1.0 receiver on DIN bytes with the mode, controller and parameter states, an echo writer,
- * and the MIDI 1.0-only io, ble and usb parts. The ELF must hold no MIDI 2.0 code. */
+ * MIDI 1.0 receiver on DIN bytes with the mode, controller and parameter states, the sync receiver,
+ * the Active Sensing monitor, an echo writer, and the MIDI 1.0-only io, ble and usb parts. The ELF
+ * must hold no MIDI 2.0 code. */
 #include "zmidi.h"
 
 static ZmidiMidi1Reader reader;
@@ -12,10 +13,13 @@ static uint16_t pitch_bend_sensitivity[16];
 static ZmidiBytesToUmp to_ump;
 static ZmidiBleReader ble;
 static ZmidiUsbLink usb;
+static ZmidiSyncReceiver sync;
+static ZmidiActiveSensingMonitor sensing;
 static uint8_t sysex[64];
 volatile uint8_t rx;
 volatile uint8_t packet[16];
 volatile uint32_t sink;
+volatile uint64_t now_us;
 
 static void reset_controllers(uint8_t channel) {
   uint8_t c;
@@ -74,13 +78,23 @@ void Reset_Handler(void) {
   (void)zmidi_bytes_to_ump_init(&to_ump, 0, 1);
   (void)zmidi_ble_reader_init(&ble, 0, 1);
   (void)zmidi_usb_link_init(&usb, &link);
+  (void)zmidi_sync_init(&sync);
+  (void)zmidi_active_sensing_monitor_init(&sensing, ZMIDI_ACTIVE_SENSING_TIMEOUT_US);
   for (;;) {
     uint8_t byte = rx;
+    bool timeout, armed;
+    ZmidiSyncEvent se;
+    (void)zmidi_active_sensing_monitor_receive_byte(&sensing, byte, now_us);
+    if (zmidi_active_sensing_monitor_poll(&sensing, now_us, &timeout, &armed) == ZMIDI_STATUS_OK && timeout) {
+      sink = 0xFE;
+    }
     if (zmidi_midi1_reader_push(&reader, byte, sysex, sizeof sysex, m, ZMIDI_MIDI1_READER_MAX_EVENTS, &n) ==
         ZMIDI_STATUS_OK) {
       for (i = 0; i < n; i++) {
         if (m[i].kind == ZMIDI_MIDI1_KIND_CHANNEL_VOICE) {
           voice(&m[i]);
+        } else if (m[i].kind == ZMIDI_MIDI1_KIND_SYSTEM && zmidi_sync_receive(&sync, &m[i], &se) == ZMIDI_STATUS_OK) {
+          sink = se.kind + se.position;
         }
         if (zmidi_midi1_writer_write(&writer, &m[i], sysex, out, sizeof out, &k) == ZMIDI_STATUS_OK) {
           sink = out[0] + (uint32_t)k;

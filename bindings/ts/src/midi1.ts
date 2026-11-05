@@ -15,6 +15,7 @@ import {
   readBytes,
   scoped,
   sizeOf,
+  u64,
   view,
 } from "./wasm.js";
 
@@ -667,4 +668,206 @@ export function valueMessages(channel: number, parameter: Parameter, value: numb
     writeParameter(pp, parameter);
     return written(4, (out, count) => fn("zmidi_parameter_value_messages")(int("channel", channel, 15), pp, int("value", value, 0xffff), out, 4, count), "valueMessages");
   });
+}
+
+/** The kind of a sync event. */
+export type SyncEventKind = "start" | "continue" | "stop" | "clock" | "locate" | "song";
+
+/** The run state of a sync receiver. */
+export type SyncRun = "stopped" | "waiting" | "playing";
+
+/** A start, stop or continue command of the program (a front panel). */
+export type SyncCommand = "start" | "continue" | "stop";
+
+/** The event of one message or command for a sync receiver; a field is null when the kind has none. */
+export interface SyncEvent {
+  readonly kind: SyncEventKind;
+  /** The position in MIDI clocks of a "clock" event (this clock) or a "locate" event (the new position). */
+  readonly position: number | null;
+  /** The song number of a "song" event. */
+  readonly song: number | null;
+}
+
+const SYNC_KINDS: readonly (SyncEventKind | null)[] = [null, "start", "continue", "stop", "clock", "locate", "song"];
+const SYNC_COMMANDS: readonly SyncCommand[] = ["start", "continue", "stop"];
+const SYNC_RUNS: readonly SyncRun[] = ["stopped", "waiting", "playing"];
+
+const SYNC_EVENT = layout([
+  ["kind", "u32"],
+  ["position", "u32"],
+  ["song", "u8"],
+]);
+
+const SYNC_INFO = layout([
+  ["position", "u32"],
+  ["run", "u8"],
+  ["song", "u8"],
+  ["sync_mode", "bool"],
+]);
+
+function readSyncEvent(p: number): SyncEvent | null {
+  const v = view();
+  const kind = SYNC_KINDS[v.getUint32(p + SYNC_EVENT.off.kind, true)] ?? null;
+  if (kind === null) {
+    return null;
+  }
+  return {
+    kind,
+    position: kind === "clock" || kind === "locate" ? v.getUint32(p + SYNC_EVENT.off.position, true) : null,
+    song: kind === "song" ? v.getUint8(p + SYNC_EVENT.off.song) : null,
+  };
+}
+
+/**
+ * The MIDI 1.0 sync receiver of a sequencer or drum machine: Start, Stop, Continue, Timing Clock, Song
+ * Position Pointer and Song Select (M1 pp. 27 to 32). The position is a count of MIDI clocks.
+ */
+export class SyncReceiver {
+  readonly #b = new Blocks(this);
+
+  /** A receiver that is stopped at position 0, with song 0, in MIDI sync mode. */
+  constructor() {
+    const p = this.#b.add(alloc(sizeOf("zmidi_sync_receiver_size")));
+    check(fn("zmidi_sync_init")(p), "SyncReceiver");
+  }
+
+  /** Takes one System message; gives its event, or null. */
+  receive(message: Midi1Message): SyncEvent | null {
+    const [pm, pe] = this.#b.carve([MESSAGE.size, SYNC_EVENT.size]);
+    writeMessage(pm, message);
+    check(fn("zmidi_sync_receive")(this.#b.main, pm, pe), "receive");
+    return readSyncEvent(pe);
+  }
+
+  /** Takes one command of the program with the transitions of the MIDI command; gives its event, or null. */
+  command(command: SyncCommand): SyncEvent | null {
+    const n = SYNC_COMMANDS.indexOf(command);
+    if (n < 0) {
+      throw new InvalidValueError("command must be start, continue or stop");
+    }
+    const [pe] = this.#b.carve([SYNC_EVENT.size]);
+    check(fn("zmidi_sync_command")(this.#b.main, n + 1, pe), "command");
+    return readSyncEvent(pe);
+  }
+
+  /** The System Reset action of the program: position 0 and stopped; the song and the MIDI sync mode stay. */
+  systemReset(): void {
+    check(fn("zmidi_sync_system_reset")(this.#b.main), "systemReset");
+  }
+
+  #info(): { position: number; run: SyncRun; song: number; syncMode: boolean } {
+    return scoped([SYNC_INFO.size], (p) => {
+      check(fn("zmidi_sync_info")(this.#b.main, p), "info");
+      const v = view();
+      return {
+        position: v.getUint32(p + SYNC_INFO.off.position, true),
+        run: SYNC_RUNS[v.getUint8(p + SYNC_INFO.off.run)] ?? "stopped",
+        song: v.getUint8(p + SYNC_INFO.off.song),
+        syncMode: v.getUint8(p + SYNC_INFO.off.sync_mode) !== 0,
+      };
+    });
+  }
+
+  /** The position in MIDI clocks: the position of the next Timing Clock that plays. */
+  get position(): number {
+    return this.#info().position;
+  }
+
+  /** The run state. */
+  get run(): SyncRun {
+    return this.#info().run;
+  }
+
+  /** The song of the last accepted Song Select. */
+  get song(): number {
+    return this.#info().song;
+  }
+
+  /** MIDI sync mode on (the default); out of it the receiver ignores Song Position Pointer and Song Select. */
+  get syncMode(): boolean {
+    return this.#info().syncMode;
+  }
+
+  set syncMode(on: boolean) {
+    check(fn("zmidi_sync_set_mode")(this.#b.main, on ? 1 : 0), "syncMode");
+  }
+
+  /** Frees the WASM memory of the receiver now. */
+  free(): void {
+    this.#b.release();
+  }
+}
+
+/** The default timeout of the Active Sensing monitor: 330 ms, in microseconds. */
+export const ACTIVE_SENSING_TIMEOUT_US = 330_000;
+
+/** The default interval of the Active Sensing sender: 270 ms, in microseconds. */
+export const ACTIVE_SENSING_INTERVAL_US = 270_000;
+
+/** The MIDI 1.0 Active Sensing monitor of a receiver (M1 pp. 32, 33); the program gives each time in microseconds. */
+export class ActiveSensingMonitor {
+  readonly #b = new Blocks(this);
+
+  /** A monitor with a timeout of `timeoutUs` microseconds, not armed. */
+  constructor(readonly timeoutUs = ACTIVE_SENSING_TIMEOUT_US) {
+    const p = this.#b.add(alloc(sizeOf("zmidi_active_sensing_monitor_size")));
+    check(fn("zmidi_active_sensing_monitor_init")(p, int("timeoutUs", timeoutUs, 0xffffffff)), "ActiveSensingMonitor");
+  }
+
+  /** Takes one received byte at the time `nowUs`: FEH arms the monitor; while it is armed, each byte restarts the timer. */
+  receiveByte(byte: number, nowUs: number): void {
+    check(fn("zmidi_active_sensing_monitor_receive_byte")(this.#b.main, int("byte", byte, 255), u64("nowUs", nowUs)), "receiveByte");
+  }
+
+  /** Takes one received message of a transport with no bytes at the time `nowUs`. */
+  receive(activeSensing: boolean, nowUs: number): void {
+    check(fn("zmidi_active_sensing_monitor_receive")(this.#b.main, activeSensing ? 1 : 0, u64("nowUs", nowUs)), "receive");
+  }
+
+  /** Checks the timer at the time `nowUs`: true one time when more than the timeout passed since the last received byte. */
+  poll(nowUs: number): boolean {
+    const [timeout, armed] = this.#b.carve([1, 1]);
+    check(fn("zmidi_active_sensing_monitor_poll")(this.#b.main, u64("nowUs", nowUs), timeout, armed), "poll");
+    return view().getUint8(timeout) !== 0;
+  }
+
+  /** The monitor received FEH and gave no timeout after it. */
+  get isArmed(): boolean {
+    const [armed] = this.#b.carve([1]);
+    check(fn("zmidi_active_sensing_monitor_is_armed")(this.#b.main, armed), "isArmed");
+    return view().getUint8(armed) !== 0;
+  }
+
+  /** Frees the WASM memory of the monitor now. */
+  free(): void {
+    this.#b.release();
+  }
+}
+
+/** The MIDI 1.0 Active Sensing sender of a transmitter (M1 p. 32); the program gives each time in microseconds. */
+export class ActiveSensingSender {
+  readonly #b = new Blocks(this);
+
+  /** A sender with an interval of `intervalUs` microseconds that starts at time 0. */
+  constructor(readonly intervalUs = ACTIVE_SENSING_INTERVAL_US) {
+    const p = this.#b.add(alloc(sizeOf("zmidi_active_sensing_sender_size")));
+    check(fn("zmidi_active_sensing_sender_init")(p, int("intervalUs", intervalUs, 0xffffffff)), "ActiveSensingSender");
+  }
+
+  /** The program sent a byte at the time `nowUs`; the interval starts again. */
+  sent(nowUs: number): void {
+    check(fn("zmidi_active_sensing_sender_sent")(this.#b.main, u64("nowUs", nowUs)), "sent");
+  }
+
+  /** Checks the interval at the time `nowUs`: true when no byte was sent for the interval; send one FEH byte. */
+  poll(nowUs: number): boolean {
+    const [send] = this.#b.carve([1]);
+    check(fn("zmidi_active_sensing_sender_poll")(this.#b.main, u64("nowUs", nowUs), send), "poll");
+    return view().getUint8(send) !== 0;
+  }
+
+  /** Frees the WASM memory of the sender now. */
+  free(): void {
+    this.#b.release();
+  }
 }
