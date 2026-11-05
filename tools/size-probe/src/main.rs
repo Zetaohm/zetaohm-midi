@@ -75,7 +75,7 @@ fn main() -> ! {
         remote::run(&w);
         #[cfg(feature = "inject")]
         inject::run(&w);
-        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing"))]
+        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx"))]
         lean::run(&w);
         #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1", feature = "ble_tx_midi1", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
         transport::run(&w);
@@ -786,7 +786,7 @@ mod inject {
 }
 
 // ---------------------------------------------------------------- lean variants
-#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing"))]
+#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx"))]
 mod lean {
     use super::*;
     #[allow(unused_imports)]
@@ -990,6 +990,37 @@ mod lean {
             mon.receive_byte(w[0] as u8, now);
             black_box(mon.poll(now));
             black_box(send.poll(now));
+        }
+        #[cfg(feature = "mpe_rx")]
+        {
+            // An MPE synth input: a parameter receiver for each channel (RPN 0 and the MCM) and
+            // the MPE receiver; the pitch offset of the channel of each message.
+            static mut PAR: [zmidi_io::ParameterState; 16] = [zmidi_io::ParameterState::new(); 16];
+            static mut MPE: zmidi_io::MpeReceiver = zmidi_io::MpeReceiver::new();
+            let (par, mpe) = unsafe { (&mut *(&raw mut PAR), &mut *(&raw mut MPE)) };
+            if let Some(m) = zmidi_ump::Midi1ChannelVoiceMessage::parse(&w[16..]) {
+                if let Some(state) = par.get_mut(m.channel().index() as usize) {
+                    let e = state.receive(&m);
+                    black_box(mpe.receive(&m, e));
+                    black_box(mpe.pitch_offset(m.channel()));
+                }
+            }
+        }
+        #[cfg(feature = "mpe_tx")]
+        {
+            // An MPE controller output: the note allocator and the note writer of the Lower Zone.
+            static mut ALLOC: zmidi_io::MpeNoteAllocator = zmidi_io::MpeNoteAllocator::new();
+            let alloc = unsafe { &mut *(&raw mut ALLOC) };
+            let layout = zmidi_io::MpeLayout::DEFAULT;
+            let note = w[0] as u8 & 0x7F;
+            if w[1] & 1 == 0 {
+                if let Some(c) = alloc.note_on(layout, zmidi_io::MpeZone::Lower, note) {
+                    let bend = zmidi_io::pitch_bend_value(w[2] as i32, zmidi_io::MpeSensitivity::MEMBER_DEFAULT);
+                    black_box(zmidi_io::note_messages(c, note, 100, bend, 64, 0).ok());
+                }
+            } else {
+                alloc.note_off(zmidi_ump::Channel::from_bits(w[3] as u8));
+            }
         }
         #[cfg(feature = "bytes_out")]
         {

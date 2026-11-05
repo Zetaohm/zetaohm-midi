@@ -254,6 +254,180 @@ void main() {
     s.free();
   });
 
+  test('the MPE receiver with the M1-100 examples', () {
+    // Appendix B.5 with the corrected data byte 0x0B (AMB-M1-100-04): Upper 5 to 15, Lower keeps
+    // 2 to 4; the reset mask is the Upper Zone after the MCM.
+    final params = [for (var i = 0; i < 16; i++) ParameterState()];
+    final r = MpeReceiver();
+    List<MpeEvent> feed(List<List<int>> msgs) => [
+      for (final b in msgs)
+        () {
+          final m = Midi1Message(b[0], b[1], b.length > 2 ? b[2] : 0);
+          return r.receive(m, params[b[0] & 0x0F].receive(m));
+        }(),
+    ];
+    MpeEvent mcm(int ch, int mm) => feed([
+      [0xB0 | ch, 0x65, 0],
+      [0xB0 | ch, 0x64, 6],
+      [0xB0 | ch, 0x06, mm],
+    ])[2];
+    expect(
+      [mcm(0, 7).kind, mcm(15, 0x0B).reset],
+      [MpeEventKind.layout, 0xFFF0],
+    );
+    expect(r.layout, MpeLayout(3, 11));
+    expect(r.layout.role(4), (MpeRole.member, MpeZone.upper));
+    expect(
+      [
+        r.sensitivity(MpeZone.upper, true),
+        r.sensitivity(MpeZone.upper, false),
+        r.mode(MpeZone.upper),
+      ],
+      [const MpeSensitivity(2), const MpeSensitivity(48), 3],
+    );
+    // 2.2.5: RPN 0 on one Member Channel sets the Member sensitivity of the Zone.
+    final e = feed([
+      [0xB5, 0x65, 0],
+      [0xB5, 0x64, 0],
+      [0xB5, 0x06, 24],
+    ])[2];
+    expect(
+      [e.kind, e.zone, e.manager],
+      [MpeEventKind.sensitivity, MpeZone.upper, false],
+    );
+    // 0x41 << 7 | 0x2B at 24 semitones is a quarter tone (AMB-M1-100-08).
+    expect(
+      feed([
+        [0xE6, 0x2B, 0x41],
+      ]).single.kind,
+      MpeEventKind.zone,
+    );
+    expect([r.pitchBend(6), r.pressure(6), r.brightness(6)], [8363, 0, 64]);
+    expect((r.pitchOffset(6)! - 5000).abs(), lessThanOrEqualTo(50));
+    // Appendix E: Polyphonic Key Pressure on a Member Channel is ignored; All Sound Off on the
+    // Manager Channel is given (AMB-M1-100-12).
+    expect(
+      feed([
+        [0xA6, 60, 64],
+      ]).single.kind,
+      MpeEventKind.ignored,
+    );
+    final aso = feed([
+      [0xBF, 0x78, 0],
+    ]).single;
+    expect([aso.kind, aso.manager], [MpeEventKind.zone, true]);
+    expect(
+      mpeClass(MpeMessageKind.allSoundOff, true, false),
+      MpeClass.prohibited,
+    );
+    expect(
+      mpeClass(MpeMessageKind.programChange, false, true, true),
+      MpeClass.optional,
+    );
+    // B.6: the Upper Zone with 14 Member Channels leaves the Lower Zone none.
+    mcm(15, 0x0E);
+    expect(
+      [r.layout, r.layout.role(0)],
+      [MpeLayout(0, 14), (MpeRole.noZone, null)],
+    );
+    expect(r.setLayout(MpeLayout.defaultLayout), 0xFFFF);
+    expect(r.pitchOffset(0), 0);
+    r.free();
+    for (final p in params) {
+      p.free();
+    }
+  });
+
+  test(
+    'the MPE sender helpers with Appendix C, Table 4 and the note allocator',
+    () {
+      List<List<int>> bytes(List<Midi1Message> ms) => [
+        for (final m in ms) [m.status, m.data1, m.data2],
+      ];
+      // C.4 and C.6: +7 semitones at 48 is 9387; 16383 at 2 is 2 semitones.
+      expect(pitchUnitsPerSemitone, 10000);
+      expect(
+        [
+          pitchBendValue(70000, 48),
+          pitchBendValue(20000, 2),
+          pitchBendValue(-500000, 48),
+        ],
+        [9387, 16383, 0],
+      );
+      expect(pitchOffset(16383, 2), 20000);
+      expect((pitchOffset(9387, 48) - 70000).abs(), lessThanOrEqualTo(100));
+      // Table 4 with the corrected Pitch Bend (AMB-M1-100-08): a quarter tone up at 48 semitones.
+      expect(
+        bytes(noteMessages(2, 0x3C, 0x38, pitchBendValue(5000, 48), 0x40, 0)),
+        [
+          [0xE2, 0x55, 0x40],
+          [0xB2, 0x4A, 0x40],
+          [0xD2, 0x00, 0],
+          [0x92, 0x3C, 0x38],
+        ],
+      );
+      // Appendix B.1, the Mode message with M = 7, RPN 0 of a Zone.
+      expect(bytes(mcmMessages(MpeZone.lower, 15)), [
+        [0xB0, 0x65, 0],
+        [0xB0, 0x64, 6],
+        [0xB0, 0x06, 0x0F],
+      ]);
+      final two = MpeLayout(7, 7);
+      expect(bytes([modeMessage(two, MpeZone.upper, true)]), [
+        [0xB8, 0x7E, 7],
+      ]);
+      final zs = zoneSensitivityMessages(two, MpeZone.upper, 2, 48);
+      expect(
+        [zs.length, zs[2], zs[5]],
+        [24, Midi1Message(0xBF, 0x06, 2), Midi1Message(0xB8, 0x06, 48)],
+      );
+      expect(sensitivityMessages(3, 12)[2], Midi1Message(0xB3, 0x06, 12));
+      expect(two.withMcm(MpeZone.upper, 14), MpeLayout(0, 14));
+      expect(
+        [
+          two.lowestMember(MpeZone.upper),
+          MpeLayout(7).lowestMember(MpeZone.upper),
+        ],
+        [8, null],
+      );
+      // A.3: an unoccupied channel first, then the oldest last Note Off; the same-note option.
+      final small = MpeLayout(3);
+      final a = MpeNoteAllocator();
+      expect(
+        [
+          for (final n in [60, 62, 64]) a.noteOn(small, MpeZone.lower, n),
+        ],
+        [1, 2, 3],
+      );
+      a.noteOff(2);
+      a.noteOff(1);
+      expect(
+        [
+          a.noteOn(small, MpeZone.lower, 70),
+          a.activeNotes(2),
+          a.noteOn(small, MpeZone.upper, 70),
+        ],
+        [2, 1, null],
+      );
+      final s = MpeNoteAllocator(sameNote: true);
+      s.noteOn(small, MpeZone.lower, 60);
+      s.noteOn(small, MpeZone.lower, 62);
+      s.noteOff(1);
+      s.noteOff(2);
+      expect(s.noteOn(small, MpeZone.lower, 60), 1);
+      s.reset();
+      expect([s.sameNote, s.activeNotes(1)], [true, 0]);
+      final invalid = throwsA(isA<InvalidValueException>());
+      expect(() => MpeLayout(7, 8), invalid);
+      expect(() => mcmMessages(MpeZone.lower, 16), invalid);
+      expect(() => noteMessages(2, 60, 0), invalid);
+      expect(() => modeMessage(small, MpeZone.upper, true), invalid);
+      expect(() => pitchOffset(16384, 48), invalid);
+      a.free();
+      s.free();
+    },
+  );
+
   test('MIDI 1.0 bad values', () {
     final invalid = throwsA(isA<InvalidValueException>());
     expect(() => Midi1Message(0x90, 0x80), invalid);

@@ -186,3 +186,97 @@ def test_active_sensing_monitor_and_sender() -> None:
     assert not s.poll(669_999) and s.poll(670_000)
     # The defaults are the zmidi-io constants ACTIVE_SENSING_TIMEOUT_US and ACTIVE_SENSING_INTERVAL_US.
     assert (zm.ActiveSensingMonitor().timeout_us, zm.ActiveSensingSender().interval_us) == (330_000, 270_000)
+
+
+def _mpe_feed(params: list[zm.ParameterState], rx: zm.MpeReceiver, *msgs: tuple[int, ...]) -> list[zm.MpeEvent]:
+    out = []
+    for b in msgs:
+        m = zm.Midi1Message(*b)
+        out.append(rx.receive(m, params[b[0] & 0x0F].receive(m)))
+    return out
+
+
+def test_mpe_receiver_m1_100_examples() -> None:
+    # M1-100 Appendix B.5 with the corrected data byte 0x0B (AMB-M1-100-04): Upper 5 to 15,
+    # Lower keeps 2 to 4; the reset mask is the Upper Zone after the MCM.
+    params = [zm.ParameterState() for _ in range(16)]
+    rx = zm.MpeReceiver()
+    *_, e = _mpe_feed(params, rx, (0xB0, 0x65, 0), (0xB0, 0x64, 6), (0xB0, 0x06, 7))
+    assert (e.kind, e.reset) == ("layout", 0x00FF)
+    *_, e = _mpe_feed(params, rx, (0xBF, 0x65, 0), (0xBF, 0x64, 6), (0xBF, 0x06, 0x0B))
+    assert (e.kind, e.reset) == ("layout", 0xFFF0)
+    assert rx.layout == zm.MpeLayout(3, 11)
+    assert rx.layout.role(4) == ("member", "upper") and rx.layout.role(0) == ("manager", "lower")
+    assert (rx.sensitivity("upper", True), rx.sensitivity("upper", False), rx.mode("upper")) == ((2, 0), (48, 0), 3)
+    # 2.2.5: RPN 0 on one Member Channel sets the Member sensitivity of the Zone.
+    *_, e = _mpe_feed(params, rx, (0xB5, 0x65, 0), (0xB5, 0x64, 0), (0xB5, 0x06, 24))
+    assert (e.kind, e.zone, e.manager) == ("sensitivity", "upper", False)
+    # 0x41 << 7 | 0x2B at 24 semitones is a quarter tone (AMB-M1-100-08).
+    (e,) = _mpe_feed(params, rx, (0xE6, 0x2B, 0x41))
+    assert (e.kind, e.zone, e.manager) == ("zone", "upper", False)
+    offset = rx.pitch_offset(6)
+    assert offset is not None and abs(offset - 5_000) <= 50
+    assert (rx.pitch_bend(6), rx.pressure(6), rx.brightness(6)) == (8363, 0, 64)
+    # Appendix E: Polyphonic Key Pressure on a Member Channel is ignored; All Sound Off on the
+    # Manager Channel is given (AMB-M1-100-12).
+    assert _mpe_feed(params, rx, (0xA6, 60, 64))[0].kind == "ignored"
+    assert _mpe_feed(params, rx, (0xBF, 0x78, 0))[0].kind == "zone"
+    assert zm.mpe_class("all_sound_off", manager=True, transmit=False) == "prohibited"
+    assert zm.mpe_class("program_change", manager=False, transmit=True, mono=True) == "optional"
+    # B.6: the Upper Zone with 14 Member Channels leaves the Lower Zone none.
+    *_, e = _mpe_feed(params, rx, (0xBF, 0x65, 0), (0xBF, 0x64, 6), (0xBF, 0x06, 0x0E))
+    assert rx.layout == zm.MpeLayout(0, 14) and rx.layout.role(0) == ("no_zone", None)
+    assert rx.set_layout(zm.MpeLayout.DEFAULT) == 0xFFFF and rx.layout.lowest_member("lower") == 1
+
+
+def test_mpe_sender_helpers() -> None:
+    # C.4 and C.6: +7 semitones at 48 is 9387; 16383 at 2 is 2 semitones.
+    assert zm.PITCH_UNITS_PER_SEMITONE == 10_000
+    assert zm.pitch_bend_value(70_000, 48) == 9387
+    assert zm.pitch_bend_value(20_000, 2) == 16383
+    assert zm.pitch_offset(16383, 2) == 20_000
+    assert abs(zm.pitch_offset(9387, 48) - 70_000) <= 100
+    # Table 4 with the corrected Pitch Bend (AMB-M1-100-08): a quarter tone up at 48 semitones.
+    ms = zm.note_messages(2, 0x3C, 0x38, zm.pitch_bend_value(5_000, 48), 0x40, 0)
+    assert [(m.status, m.data1, m.data2) for m in ms] == [
+        (0xE2, 0x55, 0x40), (0xB2, 0x4A, 0x40), (0xD2, 0x00, 0), (0x92, 0x3C, 0x38),
+    ]
+    # Appendix B.1 and the Mode message on the lowest Member Channel with M = 7.
+    assert [(m.status, m.data1, m.data2) for m in zm.mcm_messages("lower", 15)] == [
+        (0xB0, 0x65, 0), (0xB0, 0x64, 6), (0xB0, 0x06, 0x0F),
+    ]
+    two = zm.MpeLayout(7, 7)
+    m = zm.mode_message(two, "upper", True)
+    assert (m.status, m.data1, m.data2) == (0xB8, 0x7E, 7)
+    zs = zm.zone_sensitivity_messages(two, "upper", 2, 48)
+    assert len(zs) == 24 and zs[2] == zm.Midi1Message(0xBF, 0x06, 2) and zs[5] == zm.Midi1Message(0xB8, 0x06, 48)
+    assert zm.sensitivity_messages(3, 12)[2] == zm.Midi1Message(0xB3, 0x06, 12)
+    assert two.with_mcm("upper", 14) == zm.MpeLayout(0, 14)
+    # A.3: an unoccupied channel first, then the oldest last Note Off; with the same-note option,
+    # the free channel that last played the note.
+    small = zm.MpeLayout(3, 0)
+    a = zm.MpeNoteAllocator()
+    assert [a.note_on(small, "lower", n) for n in (60, 62, 64)] == [1, 2, 3]
+    a.note_off(2)
+    a.note_off(1)
+    assert a.note_on(small, "lower", 70) == 2 and a.active_notes(2) == 1
+    assert a.note_on(small, "upper", 70) is None
+    b = zm.MpeNoteAllocator(same_note=True)
+    b.note_on(small, "lower", 60)
+    b.note_on(small, "lower", 62)
+    b.note_off(1)
+    b.note_off(2)
+    assert b.note_on(small, "lower", 60) == 1
+    b.reset()
+    assert b.same_note and b.active_notes(1) == 0
+    for bad in (
+        lambda: zm.MpeLayout(7, 8),
+        lambda: zm.mcm_messages("lower", 16),
+        lambda: zm.mcm_messages("middle", 1),
+        lambda: zm.note_messages(2, 60, 0),
+        lambda: zm.mode_message(small, "upper", True),
+        lambda: zm.mpe_class("jump", True, True),
+        lambda: zm.pitch_offset(16384, 48),
+    ):
+        with pytest.raises(zm.InvalidValueError):
+            bad()

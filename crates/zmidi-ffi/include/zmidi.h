@@ -64,6 +64,13 @@
 #ifndef ZMIDI_ACTIVE_SENSING
 #define ZMIDI_ACTIVE_SENSING
 #endif
+#ifndef ZMIDI_MPE
+#define ZMIDI_MPE
+#endif
+#endif
+/* The MPE receiver takes the events of the parameter receiver, as the Cargo feature mpe does. */
+#if defined(ZMIDI_MPE) && !defined(ZMIDI_PARAMETERS)
+#define ZMIDI_PARAMETERS
 #endif
 #if defined(ZMIDI_IO) && !defined(ZMIDI_IO_MIDI1)
 #define ZMIDI_IO_MIDI1
@@ -322,6 +329,20 @@
 #define ZMIDI_ACTIVE_SENSING_INTERVAL_US 270000
 #endif
 
+#if defined(ZMIDI_MPE)
+/**
+ * Storage words of a [`ZmidiMpeReceiver`].
+ */
+#define ZMIDI_MPE_RECEIVER_WORDS 10
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Storage words of a [`ZmidiMpeNoteAllocator`].
+ */
+#define ZMIDI_MPE_NOTE_ALLOCATOR_WORDS 13
+#endif
+
 #if (defined(ZMIDI_NET) && (defined(ZMIDI_PTR64) && !defined(ZMIDI_NET_AUTH)))
 /**
  * Storage words of a [`ZmidiNetHost`] on a 64-bit target.
@@ -459,7 +480,7 @@
 /**
  * Minor version of the C ABI. It changes when a function or a status value is added.
  */
-#define ZMIDI_ABI_MINOR 9
+#define ZMIDI_ABI_MINOR 10
 
 #if (defined(ZMIDI_USB_MIDI1) && defined(ZMIDI_PTR64))
 /**
@@ -923,6 +944,186 @@ typedef enum ZmidiModeActionKind {
    */
   ZMIDI_MODE_ACTION_KIND_MODE_CHANGE = 7,
 } ZmidiModeActionKind;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * The class of a message kind in Appendix E.
+ */
+typedef enum ZmidiMpeClass {
+  /**
+   * M: Mandatory.
+   */
+  ZMIDI_MPE_CLASS_MANDATORY = 0,
+  /**
+   * O: Optional.
+   */
+  ZMIDI_MPE_CLASS_OPTIONAL = 1,
+  /**
+   * P: Prohibited.
+   */
+  ZMIDI_MPE_CLASS_PROHIBITED = 2,
+} ZmidiMpeClass;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * The kind of a [`ZmidiMpeEvent`].
+ */
+typedef enum ZmidiMpeEventKind {
+  /**
+   * The channel is in no Zone: a conventional MIDI 1.0 message.
+   */
+  ZMIDI_MPE_EVENT_KIND_NO_ZONE = 0,
+  /**
+   * A message on a channel of `zone`; `manager` is true on the Manager Channel.
+   */
+  ZMIDI_MPE_EVENT_KIND_ZONE = 1,
+  /**
+   * An MCM changed the layout; `reset` holds the channels to reset (bit n: channel n).
+   */
+  ZMIDI_MPE_EVENT_KIND_LAYOUT = 2,
+  /**
+   * RPN 0 changed the Manager (`manager` true) or Member sensitivity of `zone`.
+   */
+  ZMIDI_MPE_EVENT_KIND_SENSITIVITY = 3,
+  /**
+   * A Mode message changed the MIDI Mode of `zone`.
+   */
+  ZMIDI_MPE_EVENT_KIND_MODE = 4,
+  /**
+   * A message that MPE prohibits or that has no function.
+   */
+  ZMIDI_MPE_EVENT_KIND_IGNORED = 5,
+} ZmidiMpeEventKind;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * A message kind of Appendix E, the `message` argument of [`zmidi_mpe_class`].
+ */
+typedef enum ZmidiMpeMessage {
+  /**
+   * RPN 00H 06H, the MPE Configuration Message.
+   */
+  ZMIDI_MPE_MESSAGE_MCM = 0,
+  /**
+   * RPN 0, Pitch Bend Sensitivity.
+   */
+  ZMIDI_MPE_MESSAGE_PITCH_BEND_SENSITIVITY = 1,
+  /**
+   * Pitch Bend.
+   */
+  ZMIDI_MPE_MESSAGE_PITCH_BEND = 2,
+  /**
+   * Channel Pressure.
+   */
+  ZMIDI_MPE_MESSAGE_CHANNEL_PRESSURE = 3,
+  /**
+   * Control Change 74.
+   */
+  ZMIDI_MPE_MESSAGE_BRIGHTNESS = 4,
+  /**
+   * Polyphonic Key Pressure.
+   */
+  ZMIDI_MPE_MESSAGE_POLY_PRESSURE = 5,
+  /**
+   * Control Change 120.
+   */
+  ZMIDI_MPE_MESSAGE_ALL_SOUND_OFF = 6,
+  /**
+   * Control Change 121.
+   */
+  ZMIDI_MPE_MESSAGE_RESET_ALL_CONTROLLERS = 7,
+  /**
+   * Control Change 122.
+   */
+  ZMIDI_MPE_MESSAGE_LOCAL_CONTROL = 8,
+  /**
+   * Control Change 123.
+   */
+  ZMIDI_MPE_MESSAGE_ALL_NOTES_OFF = 9,
+  /**
+   * Control Change 124.
+   */
+  ZMIDI_MPE_MESSAGE_OMNI_OFF = 10,
+  /**
+   * Control Change 125.
+   */
+  ZMIDI_MPE_MESSAGE_OMNI_ON = 11,
+  /**
+   * Control Change 126.
+   */
+  ZMIDI_MPE_MESSAGE_MONO_MODE_ON = 12,
+  /**
+   * Control Change 127.
+   */
+  ZMIDI_MPE_MESSAGE_POLY_MODE_ON = 13,
+  /**
+   * Each other Control Change.
+   */
+  ZMIDI_MPE_MESSAGE_OTHER_CONTROL_CHANGE = 14,
+  /**
+   * Each other RPN.
+   */
+  ZMIDI_MPE_MESSAGE_OTHER_RPN = 15,
+  /**
+   * Each NRPN.
+   */
+  ZMIDI_MPE_MESSAGE_NRPN = 16,
+  /**
+   * Program Change.
+   */
+  ZMIDI_MPE_MESSAGE_PROGRAM_CHANGE = 17,
+  /**
+   * Bank Select.
+   */
+  ZMIDI_MPE_MESSAGE_BANK_SELECT = 18,
+  /**
+   * Note On and Note Off.
+   */
+  ZMIDI_MPE_MESSAGE_NOTE = 19,
+  /**
+   * System messages.
+   */
+  ZMIDI_MPE_MESSAGE_SYSTEM = 20,
+} ZmidiMpeMessage;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * The role of a channel.
+ */
+typedef enum ZmidiMpeRole {
+  /**
+   * The channel is in no Zone.
+   */
+  ZMIDI_MPE_ROLE_NO_ZONE = 0,
+  /**
+   * The Manager Channel of a Zone.
+   */
+  ZMIDI_MPE_ROLE_MANAGER = 1,
+  /**
+   * A Member Channel of a Zone.
+   */
+  ZMIDI_MPE_ROLE_MEMBER = 2,
+} ZmidiMpeRole;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * A Zone: the `zone` argument and field values.
+ */
+typedef enum ZmidiMpeZone {
+  /**
+   * Manager Channel 1, Member Channels from Channel 2 upwards.
+   */
+  ZMIDI_MPE_ZONE_LOWER = 0,
+  /**
+   * Manager Channel 16, Member Channels from Channel 15 downwards.
+   */
+  ZMIDI_MPE_ZONE_UPPER = 1,
+} ZmidiMpeZone;
 #endif
 
 #if defined(ZMIDI_NET)
@@ -2459,6 +2660,141 @@ typedef struct ZmidiActiveSensingSender {
    */
   uint64_t _opaque[ZMIDI_ACTIVE_SENSING_SENDER_WORDS];
 } ZmidiActiveSensingSender;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * A Zone layout: the Member Channel count of each Zone (0 for an inactive Zone, at most 15; two
+ * active Zones have at most 14 in all).
+ */
+typedef struct ZmidiMpeLayout {
+  /**
+   * Member Channels of the Lower Zone.
+   */
+  uint8_t lower;
+  /**
+   * Member Channels of the Upper Zone.
+   */
+  uint8_t upper;
+} ZmidiMpeLayout;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Storage of one MPE receiver (all 16 channels of one input). The program gives it;
+ * [`zmidi_mpe_receiver_init`] sets it up.
+ */
+typedef struct ZmidiMpeReceiver {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_MPE_RECEIVER_WORDS];
+} ZmidiMpeReceiver;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * The event of one received message.
+ */
+typedef struct ZmidiMpeEvent {
+  /**
+   * A [`ZmidiMpeEventKind`] value.
+   */
+  uint32_t kind;
+  /**
+   * A [`ZmidiMpeZone`] value for the kinds zone, sensitivity and mode; 0 otherwise.
+   */
+  uint32_t zone;
+  /**
+   * The Manager Channel (kind zone) or the Manager sensitivity (kind sensitivity).
+   */
+  bool manager;
+  /**
+   * The channels to reset for the kind layout (bit n: the channel with packet value n).
+   */
+  uint16_t reset;
+} ZmidiMpeEvent;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * A Pitch Bend Sensitivity: semitones and cents, 0 to 127 each.
+ */
+typedef struct ZmidiMpeSensitivity {
+  /**
+   * Semitones.
+   */
+  uint8_t semitones;
+  /**
+   * Cents.
+   */
+  uint8_t cents;
+} ZmidiMpeSensitivity;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * The state of an MPE receiver.
+ */
+typedef struct ZmidiMpeInfo {
+  /**
+   * The layout.
+   */
+  struct ZmidiMpeLayout layout;
+  /**
+   * The MIDI Mode of each Zone (index: [`ZmidiMpeZone`]): 3 or 4.
+   */
+  uint8_t mode[2];
+  /**
+   * The Manager Channel sensitivity of each Zone.
+   */
+  struct ZmidiMpeSensitivity manager[2];
+  /**
+   * The Member Channel sensitivity of each Zone.
+   */
+  struct ZmidiMpeSensitivity member[2];
+} ZmidiMpeInfo;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * The values of one channel of an MPE receiver.
+ */
+typedef struct ZmidiMpeChannel {
+  /**
+   * The last Pitch Bend, 0 to 16383.
+   */
+  uint16_t pitch_bend;
+  /**
+   * The last Channel Pressure.
+   */
+  uint8_t pressure;
+  /**
+   * The last Control Change 74.
+   */
+  uint8_t brightness;
+  /**
+   * The channel is in a Zone; `pitch_offset` is then valid.
+   */
+  bool in_zone;
+  /**
+   * The pitch offset in hundredths of a cent: the Manager plus the Member Pitch Bend.
+   */
+  int32_t pitch_offset;
+} ZmidiMpeChannel;
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Storage of one MPE note allocator of a sender. The program gives it;
+ * [`zmidi_mpe_note_allocator_init`] sets it up.
+ */
+typedef struct ZmidiMpeNoteAllocator {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_MPE_NOTE_ALLOCATOR_WORDS];
+} ZmidiMpeNoteAllocator;
 #endif
 
 #if defined(ZMIDI_NET)
@@ -4726,6 +5062,350 @@ enum ZmidiStatus zmidi_active_sensing_sender_poll(struct ZmidiActiveSensingSende
  * 6).
  */
 uintptr_t zmidi_active_sensing_sender_size(void);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the layout of `lower` and `upper` Member Channels into `layout`. A count above 15, or
+ * two active Zones with more than 14 Member Channels, gives [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `layout` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_layout_new(uint8_t lower, uint8_t upper, struct ZmidiMpeLayout *layout);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the layout of `lower` and `upper` Member Channels after one MCM with `members` for `zone` (the overlap rule of AMB-M1-100-03;
+ * a value above 15 gives the same layout) into `out`.
+ *
+ * # Safety
+ * `out` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_layout_with_mcm(uint8_t lower,
+                                           uint8_t upper,
+                                           uint32_t zone,
+                                           uint8_t members,
+                                           struct ZmidiMpeLayout *out);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the role of `channel` (0 to 15) in the layout of `lower` and `upper` Member Channels into `role` (a [`ZmidiMpeRole`] value) and its Zone into
+ * `zone` (0 for no Zone).
+ *
+ * # Safety
+ * `role` and `zone` are writable.
+ */
+enum ZmidiStatus zmidi_mpe_layout_role(uint8_t lower,
+                                       uint8_t upper,
+                                       uint8_t channel,
+                                       uint32_t *role,
+                                       uint32_t *zone);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes whether `zone` is active into `active` and its lowest Member Channel (0 to 15; 0 for an
+ * inactive Zone) into `channel`.
+ *
+ * # Safety
+ * `active` and `channel` are writable.
+ */
+enum ZmidiStatus zmidi_mpe_layout_lowest_member(uint8_t lower,
+                                                uint8_t upper,
+                                                uint32_t zone,
+                                                bool *active,
+                                                uint8_t *channel);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the C.3 Pitch Bend value (0 to 16383) of a sender for `offset` (hundredths of a cent)
+ * at a sensitivity of `semitones` and `cents` into `value`.
+ *
+ * # Safety
+ * `value` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_pitch_bend_value(int32_t offset,
+                                            uint8_t semitones,
+                                            uint8_t cents,
+                                            uint16_t *value);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the C.5 pitch offset (hundredths of a cent) of a received Pitch Bend `value` (0 to
+ * 16383) at a sensitivity of `semitones` and `cents` into `offset`.
+ *
+ * # Safety
+ * `offset` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_pitch_offset(uint16_t value,
+                                        uint8_t semitones,
+                                        uint8_t cents,
+                                        int32_t *offset);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the Appendix E class (a [`ZmidiMpeClass`] value) of `message` (a [`ZmidiMpeMessage`]
+ * value) on the Manager Channel or a Member Channel, to send or to receive, with the MIDI Mode
+ * (`mono` for Mode 4) into `class`.
+ *
+ * # Safety
+ * `class` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_class(uint32_t message,
+                                 bool manager,
+                                 bool transmit,
+                                 bool mono,
+                                 uint32_t *class_);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Sets up `state`: no Zone, Mode 3, the controls of each channel at 8192, 0 and 64.
+ *
+ * # Safety
+ * `state` is null or points to writable storage of a [`ZmidiMpeReceiver`].
+ */
+enum ZmidiStatus zmidi_mpe_receiver_init(struct ZmidiMpeReceiver *state);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Takes one Channel Voice `message` and the `parameter` event that [`zmidi_parameters_receive`]
+ * of its channel gave for it (change none for no event), and writes the event into `event`. A
+ * message that is not a valid Channel Voice message, or an invalid parameter event, gives
+ * [`ZmidiStatus::InvalidArgument`] and changes nothing.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_mpe_receiver_init`]; `message` and `parameter` are readable;
+ * `event` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_receive(struct ZmidiMpeReceiver *state,
+                                   const struct ZmidiMidi1Message *message,
+                                   const struct ZmidiParameterEvent *parameter,
+                                   struct ZmidiMpeEvent *event);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Sets the layout of `lower` and `upper` Member Channels of the program (a power-up default or a
+ * front panel setting) and writes the channels to reset into `reset`. An invalid layout gives [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_mpe_receiver_init`]; `reset` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_set_layout(struct ZmidiMpeReceiver *state,
+                                      uint8_t lower,
+                                      uint8_t upper,
+                                      uint16_t *reset);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the layout, the MIDI Mode and the sensitivities of each Zone into `info`.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_mpe_receiver_init`]; `info` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_info(const struct ZmidiMpeReceiver *state, struct ZmidiMpeInfo *info);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the values of `channel` (0 to 15) into `out`.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_mpe_receiver_init`]; `out` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_channel(const struct ZmidiMpeReceiver *state,
+                                   uint8_t channel,
+                                   struct ZmidiMpeChannel *out);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Gives `size_of` the Rust receiver, for a binding that checks its copy of the layout (DEC-019
+ * rule 6).
+ */
+uintptr_t zmidi_mpe_receiver_size(void);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the MCM of `zone` with `members` (0 to 15) into `out` (`capacity` entries, at least 3),
+ * and 3 into `count`.
+ *
+ * # Safety
+ * `out` points to `capacity` writable entries; `count` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_mcm_messages(uint32_t zone,
+                                        uint8_t members,
+                                        struct ZmidiMidi1Message *out,
+                                        uintptr_t capacity,
+                                        uintptr_t *count);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes RPN 0 with `semitones` (0 to 96) and no Data Entry LSB on `channel` (0 to 15) into `out`
+ * (`capacity` entries, at least 3), and 3 into `count`.
+ *
+ * # Safety
+ * `out` points to `capacity` writable entries; `count` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_sensitivity_messages(uint8_t channel,
+                                                uint8_t semitones,
+                                                struct ZmidiMidi1Message *out,
+                                                uintptr_t capacity,
+                                                uintptr_t *count);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes RPN 0 with `manager` semitones on the Manager Channel and with `member` semitones on
+ * each Member Channel of `zone` into `out` (`capacity` entries, 3 for each channel), and the
+ * count into `count`. An inactive Zone or a value above 96 gives
+ * [`ZmidiStatus::InvalidArgument`]; a small `capacity` gives [`ZmidiStatus::BufferTooSmall`].
+ *
+ * # Safety
+ * `out` points to `capacity` writable entries; `count` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_zone_sensitivity_messages(uint8_t lower,
+                                                     uint8_t upper,
+                                                     uint32_t zone,
+                                                     uint8_t manager,
+                                                     uint8_t member,
+                                                     struct ZmidiMidi1Message *out,
+                                                     uintptr_t capacity,
+                                                     uintptr_t *count);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the Mode message of `zone` on its lowest Member Channel into `out`: Mono Mode On with M =
+ * the Member Channel count (`mono`), or Poly Mode On. An inactive Zone gives
+ * [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `out` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_mode_message(uint8_t lower,
+                                        uint8_t upper,
+                                        uint32_t zone,
+                                        bool mono,
+                                        struct ZmidiMidi1Message *out);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the start of a note on `channel` (0 to 15) into `out` (`capacity` entries, at least 4):
+ * Pitch Bend, Control Change 74, Channel Pressure and Note On; 4 into `count`. Velocity 0 or a
+ * value out of range gives [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `out` points to `capacity` writable entries; `count` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_note_messages(uint8_t channel,
+                                         uint8_t note,
+                                         uint8_t velocity,
+                                         uint16_t pitch_bend,
+                                         uint8_t brightness,
+                                         uint8_t pressure,
+                                         struct ZmidiMidi1Message *out,
+                                         uintptr_t capacity,
+                                         uintptr_t *count);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Sets up `state`: no active note, the same-note option off.
+ *
+ * # Safety
+ * `state` is null or points to writable storage of a [`ZmidiMpeNoteAllocator`].
+ */
+enum ZmidiStatus zmidi_mpe_note_allocator_init(struct ZmidiMpeNoteAllocator *state);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Gives the Member Channel of `zone` for a new `note`: writes whether the Zone is active into
+ * `found` and the channel (0 to 15) into `channel`.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_mpe_note_allocator_init`]; `found` and `channel` are writable.
+ */
+enum ZmidiStatus zmidi_mpe_note_on(struct ZmidiMpeNoteAllocator *state,
+                                   uint8_t lower,
+                                   uint8_t upper,
+                                   uint32_t zone,
+                                   uint8_t note,
+                                   bool *found,
+                                   uint8_t *channel);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * One note on `channel` (0 to 15) ended.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_mpe_note_allocator_init`].
+ */
+enum ZmidiStatus zmidi_mpe_note_off(struct ZmidiMpeNoteAllocator *state, uint8_t channel);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the count of active notes on `channel` (0 to 15) into `count`.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_mpe_note_allocator_init`]; `count` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_active_notes(const struct ZmidiMpeNoteAllocator *state,
+                                        uint8_t channel,
+                                        uint8_t *count);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Writes the same-note option into `on`.
+ *
+ * # Safety
+ * `state` was set up by [`zmidi_mpe_note_allocator_init`]; `on` is writable.
+ */
+enum ZmidiStatus zmidi_mpe_same_note(const struct ZmidiMpeNoteAllocator *state, bool *on);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Sets the same-note option.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_mpe_note_allocator_init`].
+ */
+enum ZmidiStatus zmidi_mpe_set_same_note(struct ZmidiMpeNoteAllocator *state, bool on);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * No active note and no age; the same-note option stays.
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_mpe_note_allocator_init`].
+ */
+enum ZmidiStatus zmidi_mpe_note_reset(struct ZmidiMpeNoteAllocator *state);
+#endif
+
+#if defined(ZMIDI_MPE)
+/**
+ * Gives `size_of` the Rust note allocator, for a binding that checks its copy of the layout
+ * (DEC-019 rule 6).
+ */
+uintptr_t zmidi_mpe_note_allocator_size(void);
 #endif
 
 #if defined(ZMIDI_NET)

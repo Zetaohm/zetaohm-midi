@@ -436,3 +436,241 @@ final class SenderCore {
   /// Frees the WASM memory.
   void free() => call<JSAny?>(_o, 'free');
 }
+
+/// A parameter event for the MPE receiver: (change, registered, MSB, LSB, value); change 0 is
+/// none.
+typedef RawParameterEvent = (int, bool, int, int, int);
+
+/// The MPE information: lower, upper, the mode of each Zone, the Manager and the Member
+/// sensitivity (semitones, cents) of each Zone.
+typedef MpeInfo = (int, int, List<int>, List<(int, int)>, List<(int, int)>);
+
+const _zones = ['lower', 'upper'];
+const _roles = ['noZone', 'manager', 'member'];
+const _mpeKinds = [
+  'noZone',
+  'zone',
+  'layout',
+  'sensitivity',
+  'mode',
+  'ignored',
+];
+const _classes = ['mandatory', 'optional', 'prohibited'];
+const _mpeMessages = [
+  'mcm',
+  'pitchBendSensitivity',
+  'pitchBend',
+  'channelPressure',
+  'brightness',
+  'polyPressure',
+  'allSoundOff',
+  'resetAllControllers',
+  'localControl',
+  'allNotesOff',
+  'omniOff',
+  'omniOn',
+  'monoModeOn',
+  'polyModeOn',
+  'otherControlChange',
+  'otherRpn',
+  'nrpn',
+  'programChange',
+  'bankSelect',
+  'note',
+  'system',
+];
+
+JSString _zone(int zone) => _zones[zone < 2 ? zone : 0].toJS;
+
+JSObject _layout(int lower, int upper) =>
+    jsObject({'lower': lower.toJS, 'upper': upper.toJS});
+
+(int, int) _layoutOut(JSAny? a) {
+  final o = a! as JSObject;
+  return (intOf(prop(o, 'lower')), intOf(prop(o, 'upper')));
+}
+
+/// A layout after the check: (lower, upper).
+(int, int) mpeLayoutNew(int lower, int upper) =>
+    _layoutOut(tsCall('mpeLayout', [lower.toJS, upper.toJS]));
+
+/// The layout after one MCM: (lower, upper).
+(int, int) mpeLayoutWithMcm(int lower, int upper, int zone, int members) =>
+    _layoutOut(
+      tsCall('mpeLayoutWithMcm', [
+        _layout(lower, upper),
+        _zone(zone),
+        members.toJS,
+      ]),
+    );
+
+/// The role (0 no Zone, 1 Manager, 2 Member) and the Zone of a channel.
+(int, int) mpeRole(int lower, int upper, int channel) {
+  final o = tsCall<JSObject>('mpeRole', [_layout(lower, upper), channel.toJS]);
+  return (_index(_roles, prop(o, 'role')), _index(_zones, prop(o, 'zone')));
+}
+
+/// The lowest Member Channel of a Zone, or null.
+int? mpeLowestMember(int lower, int upper, int zone) =>
+    intOrNull(tsCall('mpeLowestMember', [_layout(lower, upper), _zone(zone)]));
+
+/// The C.3 Pitch Bend value.
+int pitchBendValue(int offset, int semitones, int cents) =>
+    intOf(tsCall('pitchBendValue', [offset.toJS, semitones.toJS, cents.toJS]));
+
+/// The C.5 pitch offset.
+int pitchOffset(int value, int semitones, int cents) =>
+    intOf(tsCall('pitchOffset', [value.toJS, semitones.toJS, cents.toJS]));
+
+/// The Appendix E class (0 Mandatory, 1 Optional, 2 Prohibited).
+int mpeClass(int message, bool manager, bool transmit, bool mono) => _index(
+  _classes,
+  tsCall('mpeClass', [
+    _mpeMessages[message < _mpeMessages.length ? message : 0].toJS,
+    manager.toJS,
+    transmit.toJS,
+    mono.toJS,
+  ]),
+);
+
+/// The three messages of an MCM.
+List<RawMessage> mcmMessages(int zone, int members) =>
+    _messagesOut(tsCall('mcmMessages', [_zone(zone), members.toJS]));
+
+/// The three messages of RPN 0 on one channel.
+List<RawMessage> sensitivityMessages(int channel, int semitones) =>
+    _messagesOut(tsCall('sensitivityMessages', [channel.toJS, semitones.toJS]));
+
+/// RPN 0 on the Manager Channel and on each Member Channel of a Zone.
+List<RawMessage> zoneSensitivityMessages(
+  int lower,
+  int upper,
+  int zone,
+  int manager,
+  int member,
+) => _messagesOut(
+  tsCall('zoneSensitivityMessages', [
+    _layout(lower, upper),
+    _zone(zone),
+    manager.toJS,
+    member.toJS,
+  ]),
+);
+
+/// The Mode message of a Zone.
+RawMessage modeMessage(int lower, int upper, int zone, bool mono) =>
+    _messageOut(
+      tsCall('modeMessage', [_layout(lower, upper), _zone(zone), mono.toJS]),
+    );
+
+/// The four messages that start a note.
+List<RawMessage> noteMessages(
+  int channel,
+  int note,
+  int velocity,
+  int pitchBend,
+  int brightness,
+  int pressure,
+) => _messagesOut(
+  tsCall('noteMessages', [
+    channel.toJS,
+    note.toJS,
+    velocity.toJS,
+    pitchBend.toJS,
+    brightness.toJS,
+    pressure.toJS,
+  ]),
+);
+
+/// The TypeScript MpeReceiver.
+final class MpeCore {
+  /// A receiver with no Zone.
+  MpeCore() : _o = tsNew('MpeReceiver', []);
+
+  final JSObject _o;
+
+  /// Takes one message and its parameter event; gives (kind, zone, manager, reset).
+  (int, int, bool, int) receive(RawMessage m, RawParameterEvent p) {
+    final event = p.$1 == 0
+        ? null
+        : jsObject({
+            'parameter': _parameter(p.$2, p.$3, p.$4),
+            'change': _changes[p.$1 < _changes.length ? p.$1 : 0].toJS,
+            'value': p.$5.toJS,
+          });
+    final e = call<JSObject>(_o, 'receive', [_messageIn(m), event]);
+    return (
+      _index(_mpeKinds, prop(e, 'kind')),
+      _index(_zones, prop(e, 'zone')),
+      boolOf(prop(e, 'manager')),
+      intOf(prop(e, 'reset')),
+    );
+  }
+
+  /// Sets the layout of the program; gives the reset mask.
+  int setLayout(int lower, int upper) =>
+      intOf(call(_o, 'setLayout', [_layout(lower, upper)]));
+
+  /// The layout, the modes and the sensitivities.
+  MpeInfo info() {
+    final (lower, upper) = _layoutOut(prop(_o, 'layout'));
+    (int, int) sens(String zone, bool manager) {
+      final s = call<JSObject>(_o, 'sensitivity', [zone.toJS, manager.toJS]);
+      return (intOf(prop(s, 'semitones')), intOf(prop(s, 'cents')));
+    }
+
+    return (
+      lower,
+      upper,
+      [
+        for (final z in _zones) intOf(call(_o, 'mode', [z.toJS])),
+      ],
+      [for (final z in _zones) sens(z, true)],
+      [for (final z in _zones) sens(z, false)],
+    );
+  }
+
+  /// The values of one channel: (Pitch Bend, Channel Pressure, Control Change 74, pitch offset).
+  (int, int, int, int?) channel(int channel) => (
+    intOf(call(_o, 'pitchBend', [channel.toJS])),
+    intOf(call(_o, 'pressure', [channel.toJS])),
+    intOf(call(_o, 'brightness', [channel.toJS])),
+    intOrNull(call(_o, 'pitchOffset', [channel.toJS])),
+  );
+
+  /// Frees the WASM memory.
+  void free() => call<JSAny?>(_o, 'free');
+}
+
+/// The TypeScript MpeNoteAllocator.
+final class AllocatorCore {
+  /// An allocator with no active note.
+  AllocatorCore() : _o = tsNew('MpeNoteAllocator', []);
+
+  final JSObject _o;
+
+  /// The Member Channel for a new note, or null for an inactive Zone.
+  int? noteOn(int lower, int upper, int zone, int note) => intOrNull(
+    call(_o, 'noteOn', [_layout(lower, upper), _zone(zone), note.toJS]),
+  );
+
+  /// One note on a channel ended.
+  void noteOff(int channel) => call<JSAny?>(_o, 'noteOff', [channel.toJS]);
+
+  /// The count of active notes on a channel.
+  int activeNotes(int channel) =>
+      intOf(call(_o, 'activeNotes', [channel.toJS]));
+
+  /// The same-note option.
+  bool sameNote() => boolOf(prop(_o, 'sameNote'));
+
+  /// Sets the same-note option.
+  void setSameNote(bool on) =>
+      guard(() => _o.setProperty('sameNote'.toJS, on.toJS));
+
+  /// No active note and no age.
+  void reset() => call<JSAny?>(_o, 'reset');
+
+  /// Frees the WASM memory.
+  void free() => call<JSAny?>(_o, 'free');
+}

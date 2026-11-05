@@ -924,3 +924,484 @@ final class ActiveSensingSender {
     }
   }
 }
+
+/// A Zone of MIDI Polyphonic Expression (M1-100 2.2.1; the order of ZmidiMpeZone).
+enum MpeZone {
+  /// Manager Channel 1, Member Channels from Channel 2 upwards.
+  lower,
+
+  /// Manager Channel 16, Member Channels from Channel 15 downwards.
+  upper,
+}
+
+/// The role of a channel in an MPE layout (the order of ZmidiMpeRole).
+enum MpeRole {
+  /// The channel is in no Zone: a conventional MIDI 1.0 channel.
+  noZone,
+
+  /// The Manager Channel of a Zone.
+  manager,
+
+  /// A Member Channel of a Zone.
+  member,
+}
+
+/// An MPE Zone layout: the Member Channel count of each Zone (0 for an inactive Zone).
+final class MpeLayout {
+  const MpeLayout._(this.lower, this.upper);
+
+  /// A layout with [lower] and [upper] Member Channels (0 to 15 each; two active Zones have at
+  /// most 14 in all).
+  factory MpeLayout([int lower = 0, int upper = 0]) {
+    final (l, u) = be.mpeLayoutNew(
+      checkInt('lower', lower, 255),
+      checkInt('upper', upper, 255),
+    );
+    return MpeLayout._(l, u);
+  }
+
+  /// The Lower Zone with 15 Member Channels (M1-100 2.2.2).
+  static const defaultLayout = MpeLayout._(15, 0);
+
+  /// No Zone: MPE Mode off.
+  static const none = MpeLayout._(0, 0);
+
+  /// The Member Channels of the Lower Zone.
+  final int lower;
+
+  /// The Member Channels of the Upper Zone.
+  final int upper;
+
+  /// MPE Mode is on: at least one Zone is active.
+  bool get isActive => lower > 0 || upper > 0;
+
+  /// The layout after one MPE Configuration Message with [members] for [zone] (the newest MCM
+  /// takes the channels; a value above 15 changes nothing).
+  MpeLayout withMcm(MpeZone zone, int members) {
+    final (l, u) = be.mpeLayoutWithMcm(
+      lower,
+      upper,
+      zone.index,
+      checkInt('members', members, 255),
+    );
+    return MpeLayout._(l, u);
+  }
+
+  /// The role of [channel] (0 to 15) and its Zone (null for no Zone).
+  (MpeRole, MpeZone?) role(int channel) {
+    final (r, z) = be.mpeRole(lower, upper, checkInt('channel', channel, 15));
+    final role = MpeRole.values[r];
+    return (role, role == MpeRole.noZone ? null : MpeZone.values[z]);
+  }
+
+  /// The lowest Member Channel of [zone], which takes the Mode messages, or null.
+  int? lowestMember(MpeZone zone) =>
+      be.mpeLowestMember(lower, upper, zone.index);
+
+  @override
+  bool operator ==(Object other) =>
+      other is MpeLayout && other.lower == lower && other.upper == upper;
+
+  @override
+  int get hashCode => Object.hash(lower, upper);
+
+  @override
+  String toString() => 'MpeLayout(lower: $lower, upper: $upper)';
+}
+
+/// A Pitch Bend Sensitivity in semitones and cents.
+final class MpeSensitivity {
+  /// A sensitivity of [semitones] and [cents].
+  const MpeSensitivity(this.semitones, [this.cents = 0]);
+
+  /// The semitones.
+  final int semitones;
+
+  /// The cents.
+  final int cents;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MpeSensitivity &&
+      other.semitones == semitones &&
+      other.cents == cents;
+
+  @override
+  int get hashCode => Object.hash(semitones, cents);
+
+  @override
+  String toString() => 'MpeSensitivity($semitones, $cents)';
+}
+
+/// The kind of an MPE event (the order of ZmidiMpeEventKind).
+enum MpeEventKind {
+  /// The channel is in no Zone: a conventional MIDI 1.0 message.
+  noZone,
+
+  /// A message on a channel of a Zone.
+  zone,
+
+  /// An MCM changed the layout; [MpeEvent.reset] holds the channels to reset.
+  layout,
+
+  /// RPN 0 changed the Manager or Member sensitivity of a Zone.
+  sensitivity,
+
+  /// A Mode message changed the MIDI Mode of a Zone.
+  mode,
+
+  /// A message that MPE prohibits or that has no function.
+  ignored,
+}
+
+/// The event of one message for an MPE receiver.
+final class MpeEvent {
+  const MpeEvent._(this.kind, this.zone, this.manager, this.reset);
+
+  /// The kind.
+  final MpeEventKind kind;
+
+  /// The Zone of a zone, sensitivity or mode event, or null.
+  final MpeZone? zone;
+
+  /// The Manager Channel (zone) or the Manager sensitivity (sensitivity).
+  final bool manager;
+
+  /// The channels to reset after a layout event: bit n is channel n.
+  final int reset;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MpeEvent &&
+      other.kind == kind &&
+      other.zone == zone &&
+      other.manager == manager &&
+      other.reset == reset;
+
+  @override
+  int get hashCode => Object.hash(kind, zone, manager, reset);
+
+  @override
+  String toString() =>
+      'MpeEvent(${kind.name}, zone: ${zone?.name}, manager: $manager, '
+      'reset: 0x${reset.toRadixString(16)})';
+}
+
+/// Pitch units for one semitone: an MPE pitch offset is in hundredths of a cent.
+const pitchUnitsPerSemitone = 10000;
+
+int _checkI32(String name, int value) {
+  if (value < -0x80000000 || value > 0x7FFFFFFF) {
+    throw InvalidValueException(
+      '$name must be a signed 32-bit integer, not $value',
+    );
+  }
+  return value;
+}
+
+/// The C.3 Pitch Bend value (0 to 16383) of a sender for [offset] in hundredths of a cent at a
+/// sensitivity of [semitones] and [cents].
+int pitchBendValue(int offset, int semitones, [int cents = 0]) =>
+    be.pitchBendValue(
+      _checkI32('offset', offset),
+      checkInt('semitones', semitones, 255),
+      checkInt('cents', cents, 255),
+    );
+
+/// The C.5 pitch offset in hundredths of a cent of a received Pitch Bend [value] (0 to 16383) at a
+/// sensitivity of [semitones] and [cents].
+int pitchOffset(int value, int semitones, [int cents = 0]) => be.pitchOffset(
+  checkInt('value', value, 0xFFFF),
+  checkInt('semitones', semitones, 255),
+  checkInt('cents', cents, 255),
+);
+
+/// A message kind of Appendix E (the order of ZmidiMpeMessage).
+enum MpeMessageKind {
+  /// RPN 00H 06H, the MPE Configuration Message.
+  mcm,
+
+  /// RPN 0, Pitch Bend Sensitivity.
+  pitchBendSensitivity,
+
+  /// Pitch Bend.
+  pitchBend,
+
+  /// Channel Pressure.
+  channelPressure,
+
+  /// Control Change 74.
+  brightness,
+
+  /// Polyphonic Key Pressure.
+  polyPressure,
+
+  /// Control Change 120.
+  allSoundOff,
+
+  /// Control Change 121.
+  resetAllControllers,
+
+  /// Control Change 122.
+  localControl,
+
+  /// Control Change 123.
+  allNotesOff,
+
+  /// Control Change 124.
+  omniOff,
+
+  /// Control Change 125.
+  omniOn,
+
+  /// Control Change 126.
+  monoModeOn,
+
+  /// Control Change 127.
+  polyModeOn,
+
+  /// Each other Control Change.
+  otherControlChange,
+
+  /// Each other RPN.
+  otherRpn,
+
+  /// Each NRPN.
+  nrpn,
+
+  /// Program Change.
+  programChange,
+
+  /// Bank Select.
+  bankSelect,
+
+  /// Note On and Note Off.
+  note,
+
+  /// System messages.
+  system,
+}
+
+/// The class of a message kind in Appendix E (the order of ZmidiMpeClass).
+enum MpeClass {
+  /// M: Mandatory.
+  mandatory,
+
+  /// O: Optional.
+  optional,
+
+  /// P: Prohibited.
+  prohibited,
+}
+
+/// The Appendix E class of [message] on the Manager Channel ([manager]) or a Member Channel, to
+/// send ([transmit]) or to receive, with Mode 4 ([mono]) for Program Change and Bank Select.
+MpeClass mpeClass(
+  MpeMessageKind message,
+  bool manager,
+  bool transmit, [
+  bool mono = false,
+]) => MpeClass.values[be.mpeClass(message.index, manager, transmit, mono)];
+
+/// The three messages of the MPE Configuration Message of [zone] with [members] (0 to 15).
+List<Midi1Message> mcmMessages(MpeZone zone, int members) =>
+    _messages(be.mcmMessages(zone.index, checkInt('members', members, 255)));
+
+/// The three messages of RPN 0 with [semitones] (0 to 96) and no Data Entry LSB on [channel].
+List<Midi1Message> sensitivityMessages(int channel, int semitones) => _messages(
+  be.sensitivityMessages(
+    checkInt('channel', channel, 15),
+    checkInt('semitones', semitones, 255),
+  ),
+);
+
+/// RPN 0 with [manager] semitones on the Manager Channel and [member] semitones on each Member
+/// Channel of [zone].
+List<Midi1Message> zoneSensitivityMessages(
+  MpeLayout layout,
+  MpeZone zone,
+  int manager,
+  int member,
+) => _messages(
+  be.zoneSensitivityMessages(
+    layout.lower,
+    layout.upper,
+    zone.index,
+    checkInt('manager', manager, 255),
+    checkInt('member', member, 255),
+  ),
+);
+
+/// The Mode message of [zone] on its lowest Member Channel: Mono Mode On with M = the Member
+/// Channel count ([mono]), or Poly Mode On.
+Midi1Message modeMessage(MpeLayout layout, MpeZone zone, bool mono) =>
+    Midi1Message._raw(
+      be.modeMessage(layout.lower, layout.upper, zone.index, mono),
+    );
+
+/// The four messages that start a note on [channel]: Pitch Bend, Control Change 74, Channel
+/// Pressure and Note On (velocity 1 to 127).
+List<Midi1Message> noteMessages(
+  int channel,
+  int note,
+  int velocity, [
+  int pitchBend = 8192,
+  int brightness = 64,
+  int pressure = 0,
+]) => _messages(
+  be.noteMessages(
+    checkInt('channel', channel, 15),
+    checkInt('note', note, 255),
+    checkInt('velocity', velocity, 255),
+    checkInt('pitchBend', pitchBend, 0xFFFF),
+    checkInt('brightness', brightness, 255),
+    checkInt('pressure', pressure, 255),
+  ),
+);
+
+/// The MPE receiver of one MIDI 1.0 input (M1-100): the layout, the MIDI Mode and the Pitch Bend
+/// Sensitivities of each Zone, and the last Pitch Bend, Channel Pressure and Control Change 74 of
+/// each channel. Give each message with the event of the [ParameterState] of its channel.
+final class MpeReceiver {
+  /// A receiver with no Zone (MPE Mode off).
+  MpeReceiver() : _b = be.MpeCore();
+
+  final be.MpeCore _b;
+  bool _freed = false;
+
+  /// Takes one Channel Voice message and the event that the [ParameterState] of its channel gave
+  /// for it (null for none); gives the MPE event.
+  MpeEvent receive(Midi1Message message, [ParameterEvent? parameter]) {
+    checkFreed(_freed, this);
+    final p = parameter;
+    final (kind, zone, manager, reset) = _b.receive(
+      message._raw,
+      p == null
+          ? (0, false, 0, 0, 0)
+          : (
+              p.change.index + 1,
+              p.parameter.registered,
+              p.parameter.msb,
+              p.parameter.lsb,
+              p.value ?? 0,
+            ),
+    );
+    final k = MpeEventKind.values[kind];
+    final zoned =
+        k == MpeEventKind.zone ||
+        k == MpeEventKind.sensitivity ||
+        k == MpeEventKind.mode;
+    return MpeEvent._(k, zoned ? MpeZone.values[zone] : null, manager, reset);
+  }
+
+  /// Sets the layout of the program (power-up or front panel); gives the channels to reset (bit n
+  /// is channel n).
+  int setLayout(MpeLayout layout) {
+    checkFreed(_freed, this);
+    return _b.setLayout(layout.lower, layout.upper);
+  }
+
+  be.MpeInfo get _info {
+    checkFreed(_freed, this);
+    return _b.info();
+  }
+
+  /// The layout.
+  MpeLayout get layout => MpeLayout._(_info.$1, _info.$2);
+
+  /// The MIDI Mode of [zone]: 3 or 4.
+  int mode(MpeZone zone) => _info.$3[zone.index];
+
+  /// The Manager Channel ([manager]) or Member Channel Pitch Bend Sensitivity of [zone].
+  MpeSensitivity sensitivity(MpeZone zone, bool manager) {
+    final (s, c) = (manager ? _info.$4 : _info.$5)[zone.index];
+    return MpeSensitivity(s, c);
+  }
+
+  (int, int, int, int?) _channel(int channel) {
+    checkFreed(_freed, this);
+    return _b.channel(checkInt('channel', channel, 15));
+  }
+
+  /// The last Pitch Bend of [channel], 0 to 16383.
+  int pitchBend(int channel) => _channel(channel).$1;
+
+  /// The last Channel Pressure of [channel].
+  int pressure(int channel) => _channel(channel).$2;
+
+  /// The last Control Change 74 of [channel].
+  int brightness(int channel) => _channel(channel).$3;
+
+  /// The pitch offset of [channel] in hundredths of a cent (the Manager plus the Member Pitch
+  /// Bend), or null for a channel in no Zone.
+  int? pitchOffset(int channel) => _channel(channel).$4;
+
+  /// Frees the memory of the receiver now.
+  void free() {
+    if (!_freed) {
+      _freed = true;
+      _b.free();
+    }
+  }
+}
+
+/// The Member Channel allocator of an MPE sender (M1-100 2.2.4.1, A.3): the fewest active notes,
+/// then the oldest last Note Off; with [sameNote], first a free channel that last played the same
+/// Note Number.
+final class MpeNoteAllocator {
+  /// An allocator with no active note.
+  MpeNoteAllocator({bool sameNote = false}) : _b = be.AllocatorCore() {
+    _b.setSameNote(sameNote);
+  }
+
+  final be.AllocatorCore _b;
+  bool _freed = false;
+
+  /// The Member Channel of [zone] for a new [note], or null for an inactive Zone.
+  int? noteOn(MpeLayout layout, MpeZone zone, int note) {
+    checkFreed(_freed, this);
+    return _b.noteOn(
+      layout.lower,
+      layout.upper,
+      zone.index,
+      checkInt('note', note, 255),
+    );
+  }
+
+  /// One note on [channel] ended.
+  void noteOff(int channel) {
+    checkFreed(_freed, this);
+    _b.noteOff(checkInt('channel', channel, 15));
+  }
+
+  /// The count of active notes on [channel].
+  int activeNotes(int channel) {
+    checkFreed(_freed, this);
+    return _b.activeNotes(checkInt('channel', channel, 15));
+  }
+
+  /// The same-note option.
+  bool get sameNote {
+    checkFreed(_freed, this);
+    return _b.sameNote();
+  }
+
+  set sameNote(bool on) {
+    checkFreed(_freed, this);
+    _b.setSameNote(on);
+  }
+
+  /// No active note and no age; the same-note option stays.
+  void reset() {
+    checkFreed(_freed, this);
+    _b.reset();
+  }
+
+  /// Frees the memory of the allocator now.
+  void free() {
+    if (!_freed) {
+      _freed = true;
+      _b.free();
+    }
+  }
+}

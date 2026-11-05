@@ -570,3 +570,273 @@ final class SenderCore implements Finalizable {
     _s.release();
   }
 }
+
+/// A parameter event for the MPE receiver: (change, registered, MSB, LSB, value); change 0 is
+/// none.
+typedef RawParameterEvent = (int, bool, int, int, int);
+
+/// The MPE information: lower, upper, the mode of each Zone, the Manager and the Member
+/// sensitivity (semitones, cents) of each Zone.
+typedef MpeInfo = (int, int, List<int>, List<(int, int)>, List<(int, int)>);
+
+/// A layout after the C check: (lower, upper).
+(int, int) mpeLayoutNew(int lower, int upper) => using((arena) {
+  final out = arena<ZmidiMpeLayout>();
+  check(zmidi_mpe_layout_new(lower, upper, out), 'MpeLayout');
+  return (out.ref.lower, out.ref.upper);
+});
+
+/// The layout after one MCM: (lower, upper).
+(int, int) mpeLayoutWithMcm(int lower, int upper, int zone, int members) =>
+    using((arena) {
+      final out = arena<ZmidiMpeLayout>();
+      check(
+        zmidi_mpe_layout_with_mcm(lower, upper, zone, members, out),
+        'withMcm',
+      );
+      return (out.ref.lower, out.ref.upper);
+    });
+
+/// The role (0 no Zone, 1 Manager, 2 Member) and the Zone of a channel.
+(int, int) mpeRole(int lower, int upper, int channel) => using((arena) {
+  final role = arena<Uint32>();
+  final zone = arena<Uint32>();
+  check(zmidi_mpe_layout_role(lower, upper, channel, role, zone), 'role');
+  return (role.value, zone.value);
+});
+
+/// The lowest Member Channel of a Zone, or null.
+int? mpeLowestMember(int lower, int upper, int zone) => using((arena) {
+  final active = arena<Bool>();
+  final channel = arena<Uint8>();
+  check(
+    zmidi_mpe_layout_lowest_member(lower, upper, zone, active, channel),
+    'lowestMember',
+  );
+  return active.value ? channel.value : null;
+});
+
+/// The C.3 Pitch Bend value.
+int pitchBendValue(int offset, int semitones, int cents) => using((arena) {
+  final out = arena<Uint16>();
+  check(zmidi_mpe_pitch_bend_value(offset, semitones, cents, out), 'value');
+  return out.value;
+});
+
+/// The C.5 pitch offset.
+int pitchOffset(int value, int semitones, int cents) => using((arena) {
+  final out = arena<Int32>();
+  check(zmidi_mpe_pitch_offset(value, semitones, cents, out), 'pitchOffset');
+  return out.value;
+});
+
+/// The Appendix E class (0 Mandatory, 1 Optional, 2 Prohibited).
+int mpeClass(int message, bool manager, bool transmit, bool mono) =>
+    using((arena) {
+      final out = arena<Uint32>();
+      check(zmidi_mpe_class(message, manager, transmit, mono, out), 'mpeClass');
+      return out.value;
+    });
+
+/// The three messages of an MCM.
+List<RawMessage> mcmMessages(int zone, int members) => _written(
+  3,
+  (out, count) => zmidi_mpe_mcm_messages(zone, members, out, 3, count),
+  'mcmMessages',
+);
+
+/// The three messages of RPN 0 on one channel.
+List<RawMessage> sensitivityMessages(int channel, int semitones) => _written(
+  3,
+  (out, count) =>
+      zmidi_mpe_sensitivity_messages(channel, semitones, out, 3, count),
+  'sensitivityMessages',
+);
+
+/// RPN 0 on the Manager Channel and on each Member Channel of a Zone.
+List<RawMessage> zoneSensitivityMessages(
+  int lower,
+  int upper,
+  int zone,
+  int manager,
+  int member,
+) => _written(
+  48,
+  (out, count) => zmidi_mpe_zone_sensitivity_messages(
+    lower,
+    upper,
+    zone,
+    manager,
+    member,
+    out,
+    48,
+    count,
+  ),
+  'zoneSensitivityMessages',
+);
+
+/// The Mode message of a Zone.
+RawMessage modeMessage(int lower, int upper, int zone, bool mono) => using((
+  arena,
+) {
+  final out = arena<ZmidiMidi1Message>();
+  check(zmidi_mpe_mode_message(lower, upper, zone, mono, out), 'modeMessage');
+  return _messageOut(out);
+});
+
+/// The four messages that start a note.
+List<RawMessage> noteMessages(
+  int channel,
+  int note,
+  int velocity,
+  int pitchBend,
+  int brightness,
+  int pressure,
+) => _written(
+  4,
+  (out, count) => zmidi_mpe_note_messages(
+    channel,
+    note,
+    velocity,
+    pitchBend,
+    brightness,
+    pressure,
+    out,
+    4,
+    count,
+  ),
+  'noteMessages',
+);
+
+/// The C state of an MpeReceiver.
+final class MpeCore implements Finalizable {
+  /// A receiver with no Zone.
+  MpeCore() {
+    _p = allocState(this, zmidi_mpe_receiver_size());
+    check(zmidi_mpe_receiver_init(_p), 'MpeReceiver');
+  }
+
+  final _s = Scratch();
+  late Pointer<ZmidiMpeReceiver> _p;
+
+  /// Takes one message and its parameter event; gives (kind, zone, manager, reset).
+  (int, int, bool, int) receive(RawMessage m, RawParameterEvent p) =>
+      _s.run((arena) {
+        final pm = arena<ZmidiMidi1Message>();
+        _messageIn(pm, m);
+        final pp = arena<ZmidiParameterEvent>();
+        pp.ref
+          ..change = p.$1
+          ..value = p.$5;
+        pp.ref.parameter
+          ..registered = p.$2
+          ..msb = p.$3
+          ..lsb = p.$4;
+        final e = arena<ZmidiMpeEvent>();
+        check(zmidi_mpe_receive(_p, pm, pp, e), 'receive');
+        return (e.ref.kind, e.ref.zone, e.ref.manager, e.ref.reset);
+      });
+
+  /// Sets the layout of the program; gives the reset mask.
+  int setLayout(int lower, int upper) => _s.run((arena) {
+    final reset = arena<Uint16>();
+    check(zmidi_mpe_set_layout(_p, lower, upper, reset), 'setLayout');
+    return reset.value;
+  });
+
+  /// The layout, the modes and the sensitivities.
+  MpeInfo info() => _s.run((arena) {
+    final p = arena<ZmidiMpeInfo>();
+    check(zmidi_mpe_info(_p, p), 'info');
+    final i = p.ref;
+    return (
+      i.layout.lower,
+      i.layout.upper,
+      [i.mode[0], i.mode[1]],
+      [
+        for (var k = 0; k < 2; k++)
+          (i.manager[k].semitones, i.manager[k].cents),
+      ],
+      [for (var k = 0; k < 2; k++) (i.member[k].semitones, i.member[k].cents)],
+    );
+  });
+
+  /// The values of one channel: (Pitch Bend, Channel Pressure, Control Change 74, pitch offset).
+  (int, int, int, int?) channel(int channel) => _s.run((arena) {
+    final p = arena<ZmidiMpeChannel>();
+    check(zmidi_mpe_channel(_p, channel, p), 'channel');
+    final c = p.ref;
+    return (
+      c.pitch_bend,
+      c.pressure,
+      c.brightness,
+      c.in_zone ? c.pitch_offset : null,
+    );
+  });
+
+  /// Frees the C state and the scratch block.
+  void free() {
+    if (_p != nullptr) {
+      releaseState(this, _p);
+      _p = nullptr;
+    }
+    _s.release();
+  }
+}
+
+/// The C state of an MpeNoteAllocator.
+final class AllocatorCore implements Finalizable {
+  /// An allocator with no active note.
+  AllocatorCore() {
+    _p = allocState(this, zmidi_mpe_note_allocator_size());
+    check(zmidi_mpe_note_allocator_init(_p), 'MpeNoteAllocator');
+  }
+
+  final _s = Scratch();
+  late Pointer<ZmidiMpeNoteAllocator> _p;
+
+  /// The Member Channel for a new note, or null for an inactive Zone.
+  int? noteOn(int lower, int upper, int zone, int note) => _s.run((arena) {
+    final found = arena<Bool>();
+    final channel = arena<Uint8>();
+    check(
+      zmidi_mpe_note_on(_p, lower, upper, zone, note, found, channel),
+      'noteOn',
+    );
+    return found.value ? channel.value : null;
+  });
+
+  /// One note on a channel ended.
+  void noteOff(int channel) =>
+      check(zmidi_mpe_note_off(_p, channel), 'noteOff');
+
+  /// The count of active notes on a channel.
+  int activeNotes(int channel) => _s.run((arena) {
+    final count = arena<Uint8>();
+    check(zmidi_mpe_active_notes(_p, channel, count), 'activeNotes');
+    return count.value;
+  });
+
+  /// The same-note option.
+  bool sameNote() => _s.run((arena) {
+    final on = arena<Bool>();
+    check(zmidi_mpe_same_note(_p, on), 'sameNote');
+    return on.value;
+  });
+
+  /// Sets the same-note option.
+  void setSameNote(bool on) =>
+      check(zmidi_mpe_set_same_note(_p, on), 'sameNote');
+
+  /// No active note and no age.
+  void reset() => check(zmidi_mpe_note_reset(_p), 'reset');
+
+  /// Frees the C state and the scratch block.
+  void free() {
+    if (_p != nullptr) {
+      releaseState(this, _p);
+      _p = nullptr;
+    }
+    _s.release();
+  }
+}

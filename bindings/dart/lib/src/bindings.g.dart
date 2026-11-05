@@ -2593,6 +2593,731 @@ ZmidiStatus zmidi_mode_system_reset(ffi.Pointer<ZmidiModeState> state) {
   return ZmidiStatus.fromValue(_zmidi_mode_system_reset(state));
 }
 
+/// Writes the count of active notes on `channel` (0 to 15) into `count`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_note_allocator_init`]; `count` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMpeNoteAllocator>,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'zmidi_mpe_active_notes')
+external int _zmidi_mpe_active_notes(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+  int channel,
+  ffi.Pointer<ffi.Uint8> count,
+);
+
+ZmidiStatus zmidi_mpe_active_notes(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+  int channel,
+  ffi.Pointer<ffi.Uint8> count,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mpe_active_notes(state, channel, count));
+}
+
+/// Writes the values of `channel` (0 to 15) into `out`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_receiver_init`]; `out` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMpeReceiver>,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMpeChannel>,
+  )
+>(symbol: 'zmidi_mpe_channel')
+external int _zmidi_mpe_channel(
+  ffi.Pointer<ZmidiMpeReceiver> state,
+  int channel,
+  ffi.Pointer<ZmidiMpeChannel> out,
+);
+
+ZmidiStatus zmidi_mpe_channel(
+  ffi.Pointer<ZmidiMpeReceiver> state,
+  int channel,
+  ffi.Pointer<ZmidiMpeChannel> out,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mpe_channel(state, channel, out));
+}
+
+/// Writes the Appendix E class (a [`ZmidiMpeClass`] value) of `message` (a [`ZmidiMpeMessage`]
+/// value) on the Manager Channel or a Member Channel, to send or to receive, with the MIDI Mode
+/// (`mono` for Mode 4) into `class`.
+///
+/// # Safety
+/// `class` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint32,
+    ffi.Bool,
+    ffi.Bool,
+    ffi.Bool,
+    ffi.Pointer<ffi.Uint32>,
+  )
+>(symbol: 'zmidi_mpe_class')
+external int _zmidi_mpe_class(
+  int message,
+  bool manager,
+  bool transmit,
+  bool mono,
+  ffi.Pointer<ffi.Uint32> class_,
+);
+
+ZmidiStatus zmidi_mpe_class(
+  int message,
+  bool manager,
+  bool transmit,
+  bool mono,
+  ffi.Pointer<ffi.Uint32> class_,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_class(message, manager, transmit, mono, class_),
+  );
+}
+
+/// Writes the layout, the MIDI Mode and the sensitivities of each Zone into `info`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_receiver_init`]; `info` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMpeReceiver>,
+    ffi.Pointer<ZmidiMpeInfo>,
+  )
+>(symbol: 'zmidi_mpe_info')
+external int _zmidi_mpe_info(
+  ffi.Pointer<ZmidiMpeReceiver> state,
+  ffi.Pointer<ZmidiMpeInfo> info,
+);
+
+ZmidiStatus zmidi_mpe_info(
+  ffi.Pointer<ZmidiMpeReceiver> state,
+  ffi.Pointer<ZmidiMpeInfo> info,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mpe_info(state, info));
+}
+
+/// Writes whether `zone` is active into `active` and its lowest Member Channel (0 to 15; 0 for an
+/// inactive Zone) into `channel`.
+///
+/// # Safety
+/// `active` and `channel` are writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Bool>,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'zmidi_mpe_layout_lowest_member')
+external int _zmidi_mpe_layout_lowest_member(
+  int lower,
+  int upper,
+  int zone,
+  ffi.Pointer<ffi.Bool> active,
+  ffi.Pointer<ffi.Uint8> channel,
+);
+
+ZmidiStatus zmidi_mpe_layout_lowest_member(
+  int lower,
+  int upper,
+  int zone,
+  ffi.Pointer<ffi.Bool> active,
+  ffi.Pointer<ffi.Uint8> channel,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_layout_lowest_member(lower, upper, zone, active, channel),
+  );
+}
+
+/// Writes the layout of `lower` and `upper` Member Channels into `layout`. A count above 15, or
+/// two active Zones with more than 14 Member Channels, gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `layout` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Uint8, ffi.Uint8, ffi.Pointer<ZmidiMpeLayout>)
+>(symbol: 'zmidi_mpe_layout_new')
+external int _zmidi_mpe_layout_new(
+  int lower,
+  int upper,
+  ffi.Pointer<ZmidiMpeLayout> layout,
+);
+
+ZmidiStatus zmidi_mpe_layout_new(
+  int lower,
+  int upper,
+  ffi.Pointer<ZmidiMpeLayout> layout,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mpe_layout_new(lower, upper, layout));
+}
+
+/// Writes the role of `channel` (0 to 15) in the layout of `lower` and `upper` Member Channels into `role` (a [`ZmidiMpeRole`] value) and its Zone into
+/// `zone` (0 for no Zone).
+///
+/// # Safety
+/// `role` and `zone` are writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Pointer<ffi.Uint32>,
+  )
+>(symbol: 'zmidi_mpe_layout_role')
+external int _zmidi_mpe_layout_role(
+  int lower,
+  int upper,
+  int channel,
+  ffi.Pointer<ffi.Uint32> role,
+  ffi.Pointer<ffi.Uint32> zone,
+);
+
+ZmidiStatus zmidi_mpe_layout_role(
+  int lower,
+  int upper,
+  int channel,
+  ffi.Pointer<ffi.Uint32> role,
+  ffi.Pointer<ffi.Uint32> zone,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_layout_role(lower, upper, channel, role, zone),
+  );
+}
+
+/// Writes the layout of `lower` and `upper` Member Channels after one MCM with `members` for `zone` (the overlap rule of AMB-M1-100-03;
+/// a value above 15 gives the same layout) into `out`.
+///
+/// # Safety
+/// `out` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint32,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMpeLayout>,
+  )
+>(symbol: 'zmidi_mpe_layout_with_mcm')
+external int _zmidi_mpe_layout_with_mcm(
+  int lower,
+  int upper,
+  int zone,
+  int members,
+  ffi.Pointer<ZmidiMpeLayout> out,
+);
+
+ZmidiStatus zmidi_mpe_layout_with_mcm(
+  int lower,
+  int upper,
+  int zone,
+  int members,
+  ffi.Pointer<ZmidiMpeLayout> out,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_layout_with_mcm(lower, upper, zone, members, out),
+  );
+}
+
+/// Writes the MCM of `zone` with `members` (0 to 15) into `out` (`capacity` entries, at least 3),
+/// and 3 into `count`.
+///
+/// # Safety
+/// `out` points to `capacity` writable entries; `count` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint32,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_mpe_mcm_messages')
+external int _zmidi_mpe_mcm_messages(
+  int zone,
+  int members,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+);
+
+ZmidiStatus zmidi_mpe_mcm_messages(
+  int zone,
+  int members,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_mcm_messages(zone, members, out, capacity, count),
+  );
+}
+
+/// Writes the Mode message of `zone` on its lowest Member Channel into `out`: Mono Mode On with M =
+/// the Member Channel count (`mono`), or Poly Mode On. An inactive Zone gives
+/// [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `out` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint32,
+    ffi.Bool,
+    ffi.Pointer<ZmidiMidi1Message>,
+  )
+>(symbol: 'zmidi_mpe_mode_message')
+external int _zmidi_mpe_mode_message(
+  int lower,
+  int upper,
+  int zone,
+  bool mono,
+  ffi.Pointer<ZmidiMidi1Message> out,
+);
+
+ZmidiStatus zmidi_mpe_mode_message(
+  int lower,
+  int upper,
+  int zone,
+  bool mono,
+  ffi.Pointer<ZmidiMidi1Message> out,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_mode_message(lower, upper, zone, mono, out),
+  );
+}
+
+/// Sets up `state`: no active note, the same-note option off.
+///
+/// # Safety
+/// `state` is null or points to writable storage of a [`ZmidiMpeNoteAllocator`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiMpeNoteAllocator>)>(
+  symbol: 'zmidi_mpe_note_allocator_init',
+)
+external int _zmidi_mpe_note_allocator_init(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+);
+
+ZmidiStatus zmidi_mpe_note_allocator_init(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mpe_note_allocator_init(state));
+}
+
+/// Gives `size_of` the Rust note allocator, for a binding that checks its copy of the layout
+/// (DEC-019 rule 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_mpe_note_allocator_size();
+
+/// Writes the start of a note on `channel` (0 to 15) into `out` (`capacity` entries, at least 4):
+/// Pitch Bend, Control Change 74, Channel Pressure and Note On; 4 into `count`. Velocity 0 or a
+/// value out of range gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `out` points to `capacity` writable entries; `count` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint16,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_mpe_note_messages')
+external int _zmidi_mpe_note_messages(
+  int channel,
+  int note,
+  int velocity,
+  int pitch_bend,
+  int brightness,
+  int pressure,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+);
+
+ZmidiStatus zmidi_mpe_note_messages(
+  int channel,
+  int note,
+  int velocity,
+  int pitch_bend,
+  int brightness,
+  int pressure,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_note_messages(
+      channel,
+      note,
+      velocity,
+      pitch_bend,
+      brightness,
+      pressure,
+      out,
+      capacity,
+      count,
+    ),
+  );
+}
+
+/// One note on `channel` (0 to 15) ended.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mpe_note_allocator_init`].
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiMpeNoteAllocator>, ffi.Uint8)
+>(symbol: 'zmidi_mpe_note_off')
+external int _zmidi_mpe_note_off(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+  int channel,
+);
+
+ZmidiStatus zmidi_mpe_note_off(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+  int channel,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mpe_note_off(state, channel));
+}
+
+/// Gives the Member Channel of `zone` for a new `note`: writes whether the Zone is active into
+/// `found` and the channel (0 to 15) into `channel`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_note_allocator_init`]; `found` and `channel` are writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMpeNoteAllocator>,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint32,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Bool>,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'zmidi_mpe_note_on')
+external int _zmidi_mpe_note_on(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+  int lower,
+  int upper,
+  int zone,
+  int note,
+  ffi.Pointer<ffi.Bool> found,
+  ffi.Pointer<ffi.Uint8> channel,
+);
+
+ZmidiStatus zmidi_mpe_note_on(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+  int lower,
+  int upper,
+  int zone,
+  int note,
+  ffi.Pointer<ffi.Bool> found,
+  ffi.Pointer<ffi.Uint8> channel,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_note_on(state, lower, upper, zone, note, found, channel),
+  );
+}
+
+/// No active note and no age; the same-note option stays.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mpe_note_allocator_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiMpeNoteAllocator>)>(
+  symbol: 'zmidi_mpe_note_reset',
+)
+external int _zmidi_mpe_note_reset(ffi.Pointer<ZmidiMpeNoteAllocator> state);
+
+ZmidiStatus zmidi_mpe_note_reset(ffi.Pointer<ZmidiMpeNoteAllocator> state) {
+  return ZmidiStatus.fromValue(_zmidi_mpe_note_reset(state));
+}
+
+/// Writes the C.3 Pitch Bend value (0 to 16383) of a sender for `offset` (hundredths of a cent)
+/// at a sensitivity of `semitones` and `cents` into `value`.
+///
+/// # Safety
+/// `value` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Int32,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint16>,
+  )
+>(symbol: 'zmidi_mpe_pitch_bend_value')
+external int _zmidi_mpe_pitch_bend_value(
+  int offset,
+  int semitones,
+  int cents,
+  ffi.Pointer<ffi.Uint16> value,
+);
+
+ZmidiStatus zmidi_mpe_pitch_bend_value(
+  int offset,
+  int semitones,
+  int cents,
+  ffi.Pointer<ffi.Uint16> value,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_pitch_bend_value(offset, semitones, cents, value),
+  );
+}
+
+/// Writes the C.5 pitch offset (hundredths of a cent) of a received Pitch Bend `value` (0 to
+/// 16383) at a sensitivity of `semitones` and `cents` into `offset`.
+///
+/// # Safety
+/// `offset` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint16,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Int32>,
+  )
+>(symbol: 'zmidi_mpe_pitch_offset')
+external int _zmidi_mpe_pitch_offset(
+  int value,
+  int semitones,
+  int cents,
+  ffi.Pointer<ffi.Int32> offset,
+);
+
+ZmidiStatus zmidi_mpe_pitch_offset(
+  int value,
+  int semitones,
+  int cents,
+  ffi.Pointer<ffi.Int32> offset,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_pitch_offset(value, semitones, cents, offset),
+  );
+}
+
+/// Takes one Channel Voice `message` and the `parameter` event that [`zmidi_parameters_receive`]
+/// of its channel gave for it (change none for no event), and writes the event into `event`. A
+/// message that is not a valid Channel Voice message, or an invalid parameter event, gives
+/// [`ZmidiStatus::InvalidArgument`] and changes nothing.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_receiver_init`]; `message` and `parameter` are readable;
+/// `event` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMpeReceiver>,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.Pointer<ZmidiParameterEvent>,
+    ffi.Pointer<ZmidiMpeEvent>,
+  )
+>(symbol: 'zmidi_mpe_receive')
+external int _zmidi_mpe_receive(
+  ffi.Pointer<ZmidiMpeReceiver> state,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiParameterEvent> parameter,
+  ffi.Pointer<ZmidiMpeEvent> event,
+);
+
+ZmidiStatus zmidi_mpe_receive(
+  ffi.Pointer<ZmidiMpeReceiver> state,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiParameterEvent> parameter,
+  ffi.Pointer<ZmidiMpeEvent> event,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_receive(state, message, parameter, event),
+  );
+}
+
+/// Sets up `state`: no Zone, Mode 3, the controls of each channel at 8192, 0 and 64.
+///
+/// # Safety
+/// `state` is null or points to writable storage of a [`ZmidiMpeReceiver`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiMpeReceiver>)>(
+  symbol: 'zmidi_mpe_receiver_init',
+)
+external int _zmidi_mpe_receiver_init(ffi.Pointer<ZmidiMpeReceiver> state);
+
+ZmidiStatus zmidi_mpe_receiver_init(ffi.Pointer<ZmidiMpeReceiver> state) {
+  return ZmidiStatus.fromValue(_zmidi_mpe_receiver_init(state));
+}
+
+/// Gives `size_of` the Rust receiver, for a binding that checks its copy of the layout (DEC-019
+/// rule 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_mpe_receiver_size();
+
+/// Writes the same-note option into `on`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_note_allocator_init`]; `on` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMpeNoteAllocator>,
+    ffi.Pointer<ffi.Bool>,
+  )
+>(symbol: 'zmidi_mpe_same_note')
+external int _zmidi_mpe_same_note(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+  ffi.Pointer<ffi.Bool> on,
+);
+
+ZmidiStatus zmidi_mpe_same_note(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+  ffi.Pointer<ffi.Bool> on,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mpe_same_note(state, on));
+}
+
+/// Writes RPN 0 with `semitones` (0 to 96) and no Data Entry LSB on `channel` (0 to 15) into `out`
+/// (`capacity` entries, at least 3), and 3 into `count`.
+///
+/// # Safety
+/// `out` points to `capacity` writable entries; `count` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_mpe_sensitivity_messages')
+external int _zmidi_mpe_sensitivity_messages(
+  int channel,
+  int semitones,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+);
+
+ZmidiStatus zmidi_mpe_sensitivity_messages(
+  int channel,
+  int semitones,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_sensitivity_messages(channel, semitones, out, capacity, count),
+  );
+}
+
+/// Sets the layout of `lower` and `upper` Member Channels of the program (a power-up default or a
+/// front panel setting) and writes the channels to reset into `reset`. An invalid layout gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_receiver_init`]; `reset` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMpeReceiver>,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint16>,
+  )
+>(symbol: 'zmidi_mpe_set_layout')
+external int _zmidi_mpe_set_layout(
+  ffi.Pointer<ZmidiMpeReceiver> state,
+  int lower,
+  int upper,
+  ffi.Pointer<ffi.Uint16> reset,
+);
+
+ZmidiStatus zmidi_mpe_set_layout(
+  ffi.Pointer<ZmidiMpeReceiver> state,
+  int lower,
+  int upper,
+  ffi.Pointer<ffi.Uint16> reset,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_set_layout(state, lower, upper, reset),
+  );
+}
+
+/// Sets the same-note option.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mpe_note_allocator_init`].
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiMpeNoteAllocator>, ffi.Bool)
+>(symbol: 'zmidi_mpe_set_same_note')
+external int _zmidi_mpe_set_same_note(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+  bool on,
+);
+
+ZmidiStatus zmidi_mpe_set_same_note(
+  ffi.Pointer<ZmidiMpeNoteAllocator> state,
+  bool on,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mpe_set_same_note(state, on));
+}
+
+/// Writes RPN 0 with `manager` semitones on the Manager Channel and with `member` semitones on
+/// each Member Channel of `zone` into `out` (`capacity` entries, 3 for each channel), and the
+/// count into `count`. An inactive Zone or a value above 96 gives
+/// [`ZmidiStatus::InvalidArgument`]; a small `capacity` gives [`ZmidiStatus::BufferTooSmall`].
+///
+/// # Safety
+/// `out` points to `capacity` writable entries; `count` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint32,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_mpe_zone_sensitivity_messages')
+external int _zmidi_mpe_zone_sensitivity_messages(
+  int lower,
+  int upper,
+  int zone,
+  int manager,
+  int member,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+);
+
+ZmidiStatus zmidi_mpe_zone_sensitivity_messages(
+  int lower,
+  int upper,
+  int zone,
+  int manager,
+  int member,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mpe_zone_sensitivity_messages(
+      lower,
+      upper,
+      zone,
+      manager,
+      member,
+      out,
+      capacity,
+      count,
+    ),
+  );
+}
+
 /// The Client form of [`zmidi_net_host_bye`].
 ///
 /// # Safety
@@ -5653,7 +6378,7 @@ ZmidiStatus zmidi_usb_link_write_packet(
 
 const int ZMIDI_ABI_MAJOR = 0;
 
-const int ZMIDI_ABI_MINOR = 9;
+const int ZMIDI_ABI_MINOR = 10;
 
 const int ZMIDI_ACTIVE_SENSING_INTERVAL_US = 270000;
 
@@ -5698,6 +6423,10 @@ const int ZMIDI_MIDI1_READER_WORDS = 5;
 const int ZMIDI_MIDI1_WRITER_WORDS = 1;
 
 const int ZMIDI_MODE_STATE_WORDS = 2;
+
+const int ZMIDI_MPE_NOTE_ALLOCATOR_WORDS = 13;
+
+const int ZMIDI_MPE_RECEIVER_WORDS = 10;
 
 const int ZMIDI_NET_AUTH_SHARED_SECRET = 1;
 
@@ -6755,6 +7484,337 @@ final class ZmidiModeState extends ffi.Struct {
   /// Opaque content.
   @ffi.Array.multi([2])
   external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// The values of one channel of an MPE receiver.
+final class ZmidiMpeChannel extends ffi.Struct {
+  /// The last Pitch Bend, 0 to 16383.
+  @ffi.Uint16()
+  external int pitch_bend;
+
+  /// The last Channel Pressure.
+  @ffi.Uint8()
+  external int pressure;
+
+  /// The last Control Change 74.
+  @ffi.Uint8()
+  external int brightness;
+
+  /// The channel is in a Zone; `pitch_offset` is then valid.
+  @ffi.Bool()
+  external bool in_zone;
+
+  /// The pitch offset in hundredths of a cent: the Manager plus the Member Pitch Bend.
+  @ffi.Int32()
+  external int pitch_offset;
+
+  static ffi.Pointer<ZmidiMpeChannel> $allocate(
+    ffi.Allocator $allocator, {
+    required int pitch_bend,
+    required int pressure,
+    required int brightness,
+    required bool in_zone,
+    required int pitch_offset,
+  }) => $allocator<ZmidiMpeChannel>()
+    ..ref.pitch_bend = pitch_bend
+    ..ref.pressure = pressure
+    ..ref.brightness = brightness
+    ..ref.in_zone = in_zone
+    ..ref.pitch_offset = pitch_offset;
+}
+
+/// The class of a message kind in Appendix E.
+enum ZmidiMpeClass {
+  /// M: Mandatory.
+  ZMIDI_MPE_CLASS_MANDATORY(0),
+
+  /// O: Optional.
+  ZMIDI_MPE_CLASS_OPTIONAL(1),
+
+  /// P: Prohibited.
+  ZMIDI_MPE_CLASS_PROHIBITED(2);
+
+  final int value;
+  const ZmidiMpeClass(this.value);
+
+  static ZmidiMpeClass fromValue(int value) => switch (value) {
+    0 => ZMIDI_MPE_CLASS_MANDATORY,
+    1 => ZMIDI_MPE_CLASS_OPTIONAL,
+    2 => ZMIDI_MPE_CLASS_PROHIBITED,
+    _ => throw ArgumentError('Unknown value for ZmidiMpeClass: $value'),
+  };
+}
+
+/// The event of one received message.
+final class ZmidiMpeEvent extends ffi.Struct {
+  /// A [`ZmidiMpeEventKind`] value.
+  @ffi.Uint32()
+  external int kind;
+
+  /// A [`ZmidiMpeZone`] value for the kinds zone, sensitivity and mode; 0 otherwise.
+  @ffi.Uint32()
+  external int zone;
+
+  /// The Manager Channel (kind zone) or the Manager sensitivity (kind sensitivity).
+  @ffi.Bool()
+  external bool manager;
+
+  /// The channels to reset for the kind layout (bit n: the channel with packet value n).
+  @ffi.Uint16()
+  external int reset;
+
+  static ffi.Pointer<ZmidiMpeEvent> $allocate(
+    ffi.Allocator $allocator, {
+    required int kind,
+    required int zone,
+    required bool manager,
+    required int reset,
+  }) => $allocator<ZmidiMpeEvent>()
+    ..ref.kind = kind
+    ..ref.zone = zone
+    ..ref.manager = manager
+    ..ref.reset = reset;
+}
+
+/// The kind of a [`ZmidiMpeEvent`].
+enum ZmidiMpeEventKind {
+  /// The channel is in no Zone: a conventional MIDI 1.0 message.
+  ZMIDI_MPE_EVENT_KIND_NO_ZONE(0),
+
+  /// A message on a channel of `zone`; `manager` is true on the Manager Channel.
+  ZMIDI_MPE_EVENT_KIND_ZONE(1),
+
+  /// An MCM changed the layout; `reset` holds the channels to reset (bit n: channel n).
+  ZMIDI_MPE_EVENT_KIND_LAYOUT(2),
+
+  /// RPN 0 changed the Manager (`manager` true) or Member sensitivity of `zone`.
+  ZMIDI_MPE_EVENT_KIND_SENSITIVITY(3),
+
+  /// A Mode message changed the MIDI Mode of `zone`.
+  ZMIDI_MPE_EVENT_KIND_MODE(4),
+
+  /// A message that MPE prohibits or that has no function.
+  ZMIDI_MPE_EVENT_KIND_IGNORED(5);
+
+  final int value;
+  const ZmidiMpeEventKind(this.value);
+
+  static ZmidiMpeEventKind fromValue(int value) => switch (value) {
+    0 => ZMIDI_MPE_EVENT_KIND_NO_ZONE,
+    1 => ZMIDI_MPE_EVENT_KIND_ZONE,
+    2 => ZMIDI_MPE_EVENT_KIND_LAYOUT,
+    3 => ZMIDI_MPE_EVENT_KIND_SENSITIVITY,
+    4 => ZMIDI_MPE_EVENT_KIND_MODE,
+    5 => ZMIDI_MPE_EVENT_KIND_IGNORED,
+    _ => throw ArgumentError('Unknown value for ZmidiMpeEventKind: $value'),
+  };
+}
+
+/// The state of an MPE receiver.
+final class ZmidiMpeInfo extends ffi.Struct {
+  /// The layout.
+  external ZmidiMpeLayout layout;
+
+  /// The MIDI Mode of each Zone (index: [`ZmidiMpeZone`]): 3 or 4.
+  @ffi.Array.multi([2])
+  external ffi.Array<ffi.Uint8> mode;
+
+  /// The Manager Channel sensitivity of each Zone.
+  @ffi.Array.multi([2])
+  external ffi.Array<ZmidiMpeSensitivity> manager;
+
+  /// The Member Channel sensitivity of each Zone.
+  @ffi.Array.multi([2])
+  external ffi.Array<ZmidiMpeSensitivity> member;
+}
+
+/// A Zone layout: the Member Channel count of each Zone (0 for an inactive Zone, at most 15; two
+/// active Zones have at most 14 in all).
+final class ZmidiMpeLayout extends ffi.Struct {
+  /// Member Channels of the Lower Zone.
+  @ffi.Uint8()
+  external int lower;
+
+  /// Member Channels of the Upper Zone.
+  @ffi.Uint8()
+  external int upper;
+
+  static ffi.Pointer<ZmidiMpeLayout> $allocate(
+    ffi.Allocator $allocator, {
+    required int lower,
+    required int upper,
+  }) => $allocator<ZmidiMpeLayout>()
+    ..ref.lower = lower
+    ..ref.upper = upper;
+}
+
+/// A message kind of Appendix E, the `message` argument of [`zmidi_mpe_class`].
+enum ZmidiMpeMessage {
+  /// RPN 00H 06H, the MPE Configuration Message.
+  ZMIDI_MPE_MESSAGE_MCM(0),
+
+  /// RPN 0, Pitch Bend Sensitivity.
+  ZMIDI_MPE_MESSAGE_PITCH_BEND_SENSITIVITY(1),
+
+  /// Pitch Bend.
+  ZMIDI_MPE_MESSAGE_PITCH_BEND(2),
+
+  /// Channel Pressure.
+  ZMIDI_MPE_MESSAGE_CHANNEL_PRESSURE(3),
+
+  /// Control Change 74.
+  ZMIDI_MPE_MESSAGE_BRIGHTNESS(4),
+
+  /// Polyphonic Key Pressure.
+  ZMIDI_MPE_MESSAGE_POLY_PRESSURE(5),
+
+  /// Control Change 120.
+  ZMIDI_MPE_MESSAGE_ALL_SOUND_OFF(6),
+
+  /// Control Change 121.
+  ZMIDI_MPE_MESSAGE_RESET_ALL_CONTROLLERS(7),
+
+  /// Control Change 122.
+  ZMIDI_MPE_MESSAGE_LOCAL_CONTROL(8),
+
+  /// Control Change 123.
+  ZMIDI_MPE_MESSAGE_ALL_NOTES_OFF(9),
+
+  /// Control Change 124.
+  ZMIDI_MPE_MESSAGE_OMNI_OFF(10),
+
+  /// Control Change 125.
+  ZMIDI_MPE_MESSAGE_OMNI_ON(11),
+
+  /// Control Change 126.
+  ZMIDI_MPE_MESSAGE_MONO_MODE_ON(12),
+
+  /// Control Change 127.
+  ZMIDI_MPE_MESSAGE_POLY_MODE_ON(13),
+
+  /// Each other Control Change.
+  ZMIDI_MPE_MESSAGE_OTHER_CONTROL_CHANGE(14),
+
+  /// Each other RPN.
+  ZMIDI_MPE_MESSAGE_OTHER_RPN(15),
+
+  /// Each NRPN.
+  ZMIDI_MPE_MESSAGE_NRPN(16),
+
+  /// Program Change.
+  ZMIDI_MPE_MESSAGE_PROGRAM_CHANGE(17),
+
+  /// Bank Select.
+  ZMIDI_MPE_MESSAGE_BANK_SELECT(18),
+
+  /// Note On and Note Off.
+  ZMIDI_MPE_MESSAGE_NOTE(19),
+
+  /// System messages.
+  ZMIDI_MPE_MESSAGE_SYSTEM(20);
+
+  final int value;
+  const ZmidiMpeMessage(this.value);
+
+  static ZmidiMpeMessage fromValue(int value) => switch (value) {
+    0 => ZMIDI_MPE_MESSAGE_MCM,
+    1 => ZMIDI_MPE_MESSAGE_PITCH_BEND_SENSITIVITY,
+    2 => ZMIDI_MPE_MESSAGE_PITCH_BEND,
+    3 => ZMIDI_MPE_MESSAGE_CHANNEL_PRESSURE,
+    4 => ZMIDI_MPE_MESSAGE_BRIGHTNESS,
+    5 => ZMIDI_MPE_MESSAGE_POLY_PRESSURE,
+    6 => ZMIDI_MPE_MESSAGE_ALL_SOUND_OFF,
+    7 => ZMIDI_MPE_MESSAGE_RESET_ALL_CONTROLLERS,
+    8 => ZMIDI_MPE_MESSAGE_LOCAL_CONTROL,
+    9 => ZMIDI_MPE_MESSAGE_ALL_NOTES_OFF,
+    10 => ZMIDI_MPE_MESSAGE_OMNI_OFF,
+    11 => ZMIDI_MPE_MESSAGE_OMNI_ON,
+    12 => ZMIDI_MPE_MESSAGE_MONO_MODE_ON,
+    13 => ZMIDI_MPE_MESSAGE_POLY_MODE_ON,
+    14 => ZMIDI_MPE_MESSAGE_OTHER_CONTROL_CHANGE,
+    15 => ZMIDI_MPE_MESSAGE_OTHER_RPN,
+    16 => ZMIDI_MPE_MESSAGE_NRPN,
+    17 => ZMIDI_MPE_MESSAGE_PROGRAM_CHANGE,
+    18 => ZMIDI_MPE_MESSAGE_BANK_SELECT,
+    19 => ZMIDI_MPE_MESSAGE_NOTE,
+    20 => ZMIDI_MPE_MESSAGE_SYSTEM,
+    _ => throw ArgumentError('Unknown value for ZmidiMpeMessage: $value'),
+  };
+}
+
+/// Storage of one MPE note allocator of a sender. The program gives it;
+/// [`zmidi_mpe_note_allocator_init`] sets it up.
+final class ZmidiMpeNoteAllocator extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([13])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// Storage of one MPE receiver (all 16 channels of one input). The program gives it;
+/// [`zmidi_mpe_receiver_init`] sets it up.
+final class ZmidiMpeReceiver extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([10])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// The role of a channel.
+enum ZmidiMpeRole {
+  /// The channel is in no Zone.
+  ZMIDI_MPE_ROLE_NO_ZONE(0),
+
+  /// The Manager Channel of a Zone.
+  ZMIDI_MPE_ROLE_MANAGER(1),
+
+  /// A Member Channel of a Zone.
+  ZMIDI_MPE_ROLE_MEMBER(2);
+
+  final int value;
+  const ZmidiMpeRole(this.value);
+
+  static ZmidiMpeRole fromValue(int value) => switch (value) {
+    0 => ZMIDI_MPE_ROLE_NO_ZONE,
+    1 => ZMIDI_MPE_ROLE_MANAGER,
+    2 => ZMIDI_MPE_ROLE_MEMBER,
+    _ => throw ArgumentError('Unknown value for ZmidiMpeRole: $value'),
+  };
+}
+
+/// A Pitch Bend Sensitivity: semitones and cents, 0 to 127 each.
+final class ZmidiMpeSensitivity extends ffi.Struct {
+  /// Semitones.
+  @ffi.Uint8()
+  external int semitones;
+
+  /// Cents.
+  @ffi.Uint8()
+  external int cents;
+
+  static ffi.Pointer<ZmidiMpeSensitivity> $allocate(
+    ffi.Allocator $allocator, {
+    required int semitones,
+    required int cents,
+  }) => $allocator<ZmidiMpeSensitivity>()
+    ..ref.semitones = semitones
+    ..ref.cents = cents;
+}
+
+/// A Zone: the `zone` argument and field values.
+enum ZmidiMpeZone {
+  /// Manager Channel 1, Member Channels from Channel 2 upwards.
+  ZMIDI_MPE_ZONE_LOWER(0),
+
+  /// Manager Channel 16, Member Channels from Channel 15 downwards.
+  ZMIDI_MPE_ZONE_UPPER(1);
+
+  final int value;
+  const ZmidiMpeZone(this.value);
+
+  static ZmidiMpeZone fromValue(int value) => switch (value) {
+    0 => ZMIDI_MPE_ZONE_LOWER,
+    1 => ZMIDI_MPE_ZONE_UPPER,
+    _ => throw ArgumentError('Unknown value for ZmidiMpeZone: $value'),
+  };
 }
 
 /// An IP address and a UDP port.

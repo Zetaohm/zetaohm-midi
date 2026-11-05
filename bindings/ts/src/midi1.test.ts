@@ -8,7 +8,11 @@ import {
   InvalidValueError,
   Midi1Reader,
   Midi1Writer,
+  MPE_LAYOUT_DEFAULT,
   ModeState,
+  MpeNoteAllocator,
+  MpeReceiver,
+  PITCH_UNITS_PER_SEMITONE,
   ParameterState,
   SyncReceiver,
   applyParameter,
@@ -16,12 +20,25 @@ import {
   changeMessage,
   controller14Messages,
   init,
+  mcmMessages,
   midi1Message,
+  modeMessage,
+  mpeClass,
+  mpeLayout,
+  mpeLayoutWithMcm,
+  mpeLowestMember,
+  mpeRole,
+  noteMessages,
+  pitchBendValue,
+  pitchOffset,
   resetValue,
   selectMessages,
+  sensitivityMessages,
   sysexMessage,
   valueMessages,
+  zoneSensitivityMessages,
 } from "./index.js";
+import type { Midi1Message, MpeEvent } from "./index.js";
 
 beforeAll(async () => {
   await init();
@@ -221,6 +238,103 @@ describe("midi1", () => {
     s.sent(400_000);
     expect([s.poll(669_999), s.poll(670_000)]).toEqual([false, true]);
     m.free();
+    s.free();
+  });
+
+  test("the MPE receiver: M1-100 examples", () => {
+    // Appendix B.5 with the corrected data byte 0x0B (AMB-M1-100-04): Upper 5 to 15, Lower keeps
+    // 2 to 4; the reset mask is the Upper Zone after the MCM.
+    const params = Array.from({ length: 16 }, () => new ParameterState());
+    const r = new MpeReceiver();
+    const feed = (...msgs: number[][]): MpeEvent[] =>
+      msgs.map(([st = 0, d1 = 0, d2 = 0]) => {
+        const m = midi1Message(st, d1, d2);
+        return r.receive(m, params[st & 0x0f]?.receive(m) ?? null);
+      });
+    const mcm = (ch: number, mm: number): MpeEvent | undefined => feed([0xb0 | ch, 0x65, 0], [0xb0 | ch, 0x64, 6], [0xb0 | ch, 0x06, mm])[2];
+    expect(mcm(0, 7)).toEqual({ kind: "layout", zone: null, manager: false, reset: 0x00ff });
+    expect(mcm(15, 0x0b)).toEqual({ kind: "layout", zone: null, manager: false, reset: 0xfff0 });
+    expect(r.layout).toEqual({ lower: 3, upper: 11 });
+    expect(mpeRole(r.layout, 4)).toEqual({ role: "member", zone: "upper" });
+    expect([r.sensitivity("upper", true), r.sensitivity("upper", false), r.mode("upper")]).toEqual([
+      { semitones: 2, cents: 0 },
+      { semitones: 48, cents: 0 },
+      3,
+    ]);
+    // 2.2.5: RPN 0 on one Member Channel sets the Member sensitivity of the Zone.
+    expect(feed([0xb5, 0x65, 0], [0xb5, 0x64, 0], [0xb5, 0x06, 24])[2]).toEqual({ kind: "sensitivity", zone: "upper", manager: false, reset: 0 });
+    // 0x41 << 7 | 0x2B at 24 semitones is a quarter tone (AMB-M1-100-08).
+    expect(feed([0xe6, 0x2b, 0x41])[0]?.kind).toBe("zone");
+    expect([r.pitchBend(6), r.pressure(6), r.brightness(6)]).toEqual([8363, 0, 64]);
+    expect(Math.abs((r.pitchOffset(6) ?? 0) - 5_000)).toBeLessThanOrEqual(50);
+    // Appendix E: Polyphonic Key Pressure on a Member Channel is ignored; All Sound Off on the
+    // Manager Channel is given (AMB-M1-100-12).
+    expect(feed([0xa6, 60, 64])[0]?.kind).toBe("ignored");
+    expect(feed([0xbf, 0x78, 0])[0]).toEqual({ kind: "zone", zone: "upper", manager: true, reset: 0 });
+    expect(mpeClass("allSoundOff", true, false)).toBe("prohibited");
+    expect(mpeClass("programChange", false, true, true)).toBe("optional");
+    // B.6: the Upper Zone with 14 Member Channels leaves the Lower Zone none.
+    mcm(15, 0x0e);
+    expect(r.layout).toEqual({ lower: 0, upper: 14 });
+    expect(mpeRole(r.layout, 0)).toEqual({ role: "noZone", zone: null });
+    expect(r.setLayout(MPE_LAYOUT_DEFAULT)).toBe(0xffff);
+    expect(r.pitchOffset(0)).toBe(0);
+    r.free();
+  });
+
+  test("the MPE sender helpers: Appendix C, Table 4 and the note allocator", () => {
+    const bytes = (ms: Midi1Message[]): number[][] => ms.map((m) => [m.status, m.data1, m.data2]);
+    // C.4 and C.6: +7 semitones at 48 is 9387; 16383 at 2 is 2 semitones.
+    expect(PITCH_UNITS_PER_SEMITONE).toBe(10_000);
+    expect([pitchBendValue(70_000, 48), pitchBendValue(20_000, 2), pitchBendValue(-500_000, 48)]).toEqual([9387, 16383, 0]);
+    expect(pitchOffset(16383, 2)).toBe(20_000);
+    expect(Math.abs(pitchOffset(9387, 48) - 70_000)).toBeLessThanOrEqual(100);
+    // Table 4 with the corrected Pitch Bend (AMB-M1-100-08): a quarter tone up at 48 semitones.
+    expect(bytes(noteMessages(2, 0x3c, 0x38, pitchBendValue(5_000, 48), 0x40, 0))).toEqual([
+      [0xe2, 0x55, 0x40],
+      [0xb2, 0x4a, 0x40],
+      [0xd2, 0x00, 0],
+      [0x92, 0x3c, 0x38],
+    ]);
+    // Appendix B.1, the Mode message with M = 7, RPN 0 of a Zone.
+    expect(bytes(mcmMessages("lower", 15))).toEqual([
+      [0xb0, 0x65, 0],
+      [0xb0, 0x64, 6],
+      [0xb0, 0x06, 0x0f],
+    ]);
+    const two = mpeLayout(7, 7);
+    expect(bytes([modeMessage(two, "upper", true)])).toEqual([[0xb8, 0x7e, 7]]);
+    const zs = zoneSensitivityMessages(two, "upper", 2, 48);
+    expect([zs.length, bytes(zs.slice(2, 3)), bytes(zs.slice(5, 6))]).toEqual([24, [[0xbf, 0x06, 2]], [[0xb8, 0x06, 48]]]);
+    expect(bytes(sensitivityMessages(3, 12).slice(2))).toEqual([[0xb3, 0x06, 12]]);
+    expect(mpeLayoutWithMcm(two, "upper", 14)).toEqual({ lower: 0, upper: 14 });
+    expect([mpeLowestMember(two, "upper"), mpeLowestMember(mpeLayout(7, 0), "upper")]).toEqual([8, null]);
+    // A.3: an unoccupied channel first, then the oldest last Note Off; the same-note option.
+    const small = mpeLayout(3, 0);
+    const a = new MpeNoteAllocator();
+    expect([60, 62, 64].map((n) => a.noteOn(small, "lower", n))).toEqual([1, 2, 3]);
+    a.noteOff(2);
+    a.noteOff(1);
+    expect([a.noteOn(small, "lower", 70), a.activeNotes(2), a.noteOn(small, "upper", 70)]).toEqual([2, 1, null]);
+    const s = new MpeNoteAllocator(true);
+    s.noteOn(small, "lower", 60);
+    s.noteOn(small, "lower", 62);
+    s.noteOff(1);
+    s.noteOff(2);
+    expect(s.noteOn(small, "lower", 60)).toBe(1);
+    s.reset();
+    expect([s.sameNote, s.activeNotes(1)]).toEqual([true, 0]);
+    for (const bad of [
+      () => mpeLayout(7, 8),
+      () => mcmMessages("lower", 16),
+      () => noteMessages(2, 60, 0),
+      () => modeMessage(small, "upper", true),
+      () => pitchOffset(16384, 48),
+      () => pitchBendValue(0.5, 48),
+    ]) {
+      expect(bad).toThrow(InvalidValueError);
+    }
+    a.free();
     s.free();
   });
 });

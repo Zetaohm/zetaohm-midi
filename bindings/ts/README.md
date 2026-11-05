@@ -14,6 +14,10 @@ in the browser.
   whole); the receiver states `ModeState` (Modes 1 to 4), `ControllerState` (14-bit controllers, bank and
   program, Reset All Controllers as RP-015 gives) and `ParameterState` (RPN and NRPN, the RP-018 steps
   with `applyParameter`), and writers such as `bankProgramMessages` and `valueMessages`.
+- MIDI 1.0 timing and MPE: `SyncReceiver` (clock, Song Position Pointer), `ActiveSensingMonitor` and
+  `ActiveSensingSender`; `MpeReceiver` (Zones from the MCM, Pitch Bend Sensitivity, the controls of each
+  channel), `MpeNoteAllocator`, `mpeClass` (Appendix E), `pitchBendValue` and `pitchOffset`, and writers
+  such as `mcmMessages` and `noteMessages`.
 - MIDI-CI: `CiDevice`. Network MIDI 2.0: `NetHost` and `NetClient`, with authentication.
 - USB-MIDI: `UsbLink` (for WebUSB). BLE-MIDI: `BleReader` and `BleWriter` (for Web Bluetooth).
 - USB descriptors: `UsbFunction` takes the full description of a USB MIDI function in one constructor

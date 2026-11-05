@@ -303,6 +303,106 @@ static void test_active_sensing(void) {
   CHECK(zmidi_active_sensing_sender_poll(&s, 669999u, &send) == ZMIDI_STATUS_OK && !send);
 }
 
+/* One MPE input: a parameter receiver for each channel gives the RPN events to the MPE receiver. */
+static ZmidiParameterState mpe_parameters[16];
+
+static ZmidiMpeEvent mpe_feed(ZmidiMpeReceiver *r, uint8_t status, uint8_t d1, uint8_t d2) {
+  ZmidiMidi1Message m = cv(status, d1, d2);
+  ZmidiParameterEvent pe;
+  ZmidiMpeEvent e;
+  e.kind = 99;
+  CHECK(zmidi_parameters_receive(&mpe_parameters[status & 0x0F], &m, &pe) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_mpe_receive(r, &m, &pe, &e) == ZMIDI_STATUS_OK);
+  return e;
+}
+
+static ZmidiMpeEvent mpe_mcm(ZmidiMpeReceiver *r, uint8_t channel, uint8_t members) {
+  (void)mpe_feed(r, 0xB0 | channel, 0x65, 0);
+  (void)mpe_feed(r, 0xB0 | channel, 0x64, 6);
+  return mpe_feed(r, 0xB0 | channel, 0x06, members);
+}
+
+static void test_mpe(void) {
+  /* M1-100 Appendix B.5 with the corrected data byte (AMB-M1-100-04), RPN 0 (2.2.5), Appendix C.4,
+   * Table 4 with the corrected Pitch Bend (AMB-M1-100-08) and the note allocator (A.3). */
+  static const uint8_t table4[11] = {0xE2, 0x55, 0x40, 0xB2, 0x4A, 0x40, 0xD2, 0x00, 0x92, 0x3C, 0x38};
+  ZmidiMpeReceiver r;
+  ZmidiMpeNoteAllocator a;
+  ZmidiMpeEvent e;
+  ZmidiMpeInfo info;
+  ZmidiMpeChannel ch;
+  ZmidiMpeLayout layout;
+  ZmidiMidi1Message out[48];
+  uint8_t bytes[16];
+  size_t n, k, i;
+  uint16_t value;
+  uint8_t c;
+  uint32_t role, zone, cls;
+  bool found;
+  for (c = 0; c < 16; c++) {
+    CHECK(zmidi_parameters_init(&mpe_parameters[c]) == ZMIDI_STATUS_OK);
+  }
+  CHECK(zmidi_mpe_receiver_init(&r) == ZMIDI_STATUS_OK);
+  e = mpe_mcm(&r, 0, 7);
+  CHECK(e.kind == ZMIDI_MPE_EVENT_KIND_LAYOUT && e.reset == 0x00FF);
+  e = mpe_mcm(&r, 15, 11);
+  CHECK(e.kind == ZMIDI_MPE_EVENT_KIND_LAYOUT && e.reset == 0xFFF0);
+  CHECK(zmidi_mpe_info(&r, &info) == ZMIDI_STATUS_OK && info.layout.lower == 3 && info.layout.upper == 11);
+  CHECK(info.mode[ZMIDI_MPE_ZONE_UPPER] == 3 && info.manager[ZMIDI_MPE_ZONE_UPPER].semitones == 2 &&
+        info.member[ZMIDI_MPE_ZONE_UPPER].semitones == 48);
+  CHECK(zmidi_mpe_layout_role(info.layout.lower, info.layout.upper, 4, &role, &zone) == ZMIDI_STATUS_OK && role == ZMIDI_MPE_ROLE_MEMBER &&
+        zone == ZMIDI_MPE_ZONE_UPPER);
+  /* RPN 0 on one Member Channel sets the Member sensitivity of the Zone. */
+  (void)mpe_feed(&r, 0xB5, 0x65, 0);
+  (void)mpe_feed(&r, 0xB5, 0x64, 0);
+  e = mpe_feed(&r, 0xB5, 0x06, 24);
+  CHECK(e.kind == ZMIDI_MPE_EVENT_KIND_SENSITIVITY && e.zone == ZMIDI_MPE_ZONE_UPPER && !e.manager);
+  CHECK(zmidi_mpe_info(&r, &info) == ZMIDI_STATUS_OK && info.member[ZMIDI_MPE_ZONE_UPPER].semitones == 24);
+  /* Pitch Bend on a Member Channel: 0x41 << 7 | 0x2B at 24 semitones is +0.5 semitone. */
+  e = mpe_feed(&r, 0xE6, 0x2B, 0x41);
+  CHECK(e.kind == ZMIDI_MPE_EVENT_KIND_ZONE && e.zone == ZMIDI_MPE_ZONE_UPPER && !e.manager);
+  CHECK(zmidi_mpe_channel(&r, 6, &ch) == ZMIDI_STATUS_OK && ch.in_zone && ch.pitch_bend == 8363 && ch.brightness == 64);
+  CHECK(ch.pitch_offset >= 4950 && ch.pitch_offset <= 5050);
+  e = mpe_feed(&r, 0xA6, 0x3C, 0x40);
+  CHECK(e.kind == ZMIDI_MPE_EVENT_KIND_IGNORED);
+  CHECK(zmidi_mpe_set_layout(&r, 15, 0, &value) == ZMIDI_STATUS_OK && value == 0xFFFF);
+  /* C.4: +7 semitones at 48 gives 9387. */
+  CHECK(zmidi_mpe_pitch_bend_value(70000, 48, 0, &value) == ZMIDI_STATUS_OK && value == 9387);
+  /* Table 4 (corrected): a quarter tone up at 48 semitones. */
+  CHECK(zmidi_mpe_pitch_bend_value(5000, 48, 0, &value) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_mpe_note_messages(2, 0x3C, 0x38, value, 0x40, 0, out, 4, &n) == ZMIDI_STATUS_OK && n == 4);
+  for (i = 0, k = 0; i < n; i++) {
+    bytes[k++] = out[i].status;
+    bytes[k++] = out[i].data1;
+    if ((out[i].status & 0xF0) != 0xD0) {
+      bytes[k++] = out[i].data2;
+    }
+  }
+  CHECK(k == 11 && memcmp(bytes, table4, 11) == 0);
+  CHECK(zmidi_mpe_note_messages(2, 0x3C, 0, value, 0x40, 0, out, 4, &n) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  /* The MCM writer (Example B.1) and the RPN 0 writer of a Zone. */
+  CHECK(zmidi_mpe_mcm_messages(ZMIDI_MPE_ZONE_LOWER, 15, out, 3, &n) == ZMIDI_STATUS_OK && n == 3 &&
+        out[2].status == 0xB0 && out[2].data1 == 0x06 && out[2].data2 == 0x0F);
+  CHECK(zmidi_mpe_layout_new(7, 7, &layout) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_mpe_zone_sensitivity_messages(layout.lower, layout.upper, ZMIDI_MPE_ZONE_UPPER, 2, 48, out, 48, &n) == ZMIDI_STATUS_OK &&
+        n == 24 && out[2].status == 0xBF && out[5].status == 0xB8);
+  CHECK(zmidi_mpe_zone_sensitivity_messages(layout.lower, layout.upper, ZMIDI_MPE_ZONE_UPPER, 2, 48, out, 23, &n) ==
+        ZMIDI_STATUS_BUFFER_TOO_SMALL);
+  CHECK(zmidi_mpe_layout_new(7, 8, &layout) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  /* Appendix E: All Sound Off on the Manager Channel is P (AMB-M1-100-12). */
+  CHECK(zmidi_mpe_class(ZMIDI_MPE_MESSAGE_ALL_SOUND_OFF, true, false, false, &cls) == ZMIDI_STATUS_OK &&
+        cls == ZMIDI_MPE_CLASS_PROHIBITED);
+  /* A.3: an unoccupied channel first, then the oldest last Note Off. */
+  CHECK(zmidi_mpe_note_allocator_init(&a) == ZMIDI_STATUS_OK);
+  for (i = 0; i < 3; i++) {
+    CHECK(zmidi_mpe_note_on(&a, 3, 0, ZMIDI_MPE_ZONE_LOWER, (uint8_t)(60 + i), &found, &c) == ZMIDI_STATUS_OK &&
+          found && c == i + 1);
+  }
+  CHECK(zmidi_mpe_note_off(&a, 2) == ZMIDI_STATUS_OK && zmidi_mpe_note_off(&a, 1) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_mpe_note_on(&a, 3, 0, ZMIDI_MPE_ZONE_LOWER, 70, &found, &c) == ZMIDI_STATUS_OK && found && c == 2);
+  CHECK(zmidi_mpe_note_on(&a, 3, 0, ZMIDI_MPE_ZONE_UPPER, 70, &found, &c) == ZMIDI_STATUS_OK && !found);
+}
+
 static void test_storage(void) {
   CHECK(zmidi_midi1_reader_size() <= sizeof(ZmidiMidi1Reader));
   CHECK(zmidi_midi1_writer_size() <= sizeof(ZmidiMidi1Writer));
@@ -312,7 +412,9 @@ static void test_storage(void) {
   CHECK(zmidi_sync_receiver_size() <= sizeof(ZmidiSyncReceiver));
   CHECK(zmidi_active_sensing_monitor_size() <= sizeof(ZmidiActiveSensingMonitor));
   CHECK(zmidi_active_sensing_sender_size() <= sizeof(ZmidiActiveSensingSender));
-  CHECK(zmidi_abi_version() == (ZMIDI_ABI_MAJOR << 16 | ZMIDI_ABI_MINOR) && ZMIDI_ABI_MINOR >= 9);
+  CHECK(zmidi_mpe_receiver_size() <= sizeof(ZmidiMpeReceiver));
+  CHECK(zmidi_mpe_note_allocator_size() <= sizeof(ZmidiMpeNoteAllocator));
+  CHECK(zmidi_abi_version() == (ZMIDI_ABI_MAJOR << 16 | ZMIDI_ABI_MINOR) && ZMIDI_ABI_MINOR >= 10);
 }
 
 int main(void) {
@@ -322,6 +424,7 @@ int main(void) {
   test_parameters();
   test_sync();
   test_active_sensing();
+  test_mpe();
   test_storage();
   if (failures != 0) {
     printf("midi1: %d failures\n", failures);

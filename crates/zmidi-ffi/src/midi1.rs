@@ -1968,3 +1968,951 @@ pub unsafe extern "C" fn zmidi_active_sensing_sender_poll(
 pub extern "C" fn zmidi_active_sensing_sender_size() -> usize {
     size_of::<ActiveSensingSender>()
 }
+
+// ------------------------------------------------------------------------------------------- mpe
+
+#[cfg(feature = "mpe")]
+use zmidi_io::{
+    MpeClass, MpeEvent, MpeLayout, MpeMessage, MpeNoteAllocator, MpeReceiver, MpeRole,
+    MpeSensitivity, MpeZone,
+};
+
+/// Storage words of a [`ZmidiMpeReceiver`].
+#[cfg(feature = "mpe")]
+pub const ZMIDI_MPE_RECEIVER_WORDS: usize = 10;
+/// Storage words of a [`ZmidiMpeNoteAllocator`].
+#[cfg(feature = "mpe")]
+pub const ZMIDI_MPE_NOTE_ALLOCATOR_WORDS: usize = 13;
+
+/// Storage of one MPE receiver (all 16 channels of one input). The program gives it;
+/// [`zmidi_mpe_receiver_init`] sets it up.
+#[cfg(feature = "mpe")]
+#[repr(C)]
+pub struct ZmidiMpeReceiver {
+    /// Opaque content.
+    pub _opaque: [u64; ZMIDI_MPE_RECEIVER_WORDS],
+}
+
+/// Storage of one MPE note allocator of a sender. The program gives it;
+/// [`zmidi_mpe_note_allocator_init`] sets it up.
+#[cfg(feature = "mpe")]
+#[repr(C)]
+pub struct ZmidiMpeNoteAllocator {
+    /// Opaque content.
+    pub _opaque: [u64; ZMIDI_MPE_NOTE_ALLOCATOR_WORDS],
+}
+
+#[cfg(feature = "mpe")]
+const _: () = assert!(size_of::<MpeReceiver>() <= size_of::<ZmidiMpeReceiver>());
+#[cfg(feature = "mpe")]
+const _: () = assert!(align_of::<MpeReceiver>() <= align_of::<ZmidiMpeReceiver>());
+#[cfg(feature = "mpe")]
+const _: () = assert!(size_of::<MpeNoteAllocator>() <= size_of::<ZmidiMpeNoteAllocator>());
+#[cfg(feature = "mpe")]
+const _: () = assert!(align_of::<MpeNoteAllocator>() <= align_of::<ZmidiMpeNoteAllocator>());
+
+/// A Zone: the `zone` argument and field values.
+#[cfg(feature = "mpe")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZmidiMpeZone {
+    /// Manager Channel 1, Member Channels from Channel 2 upwards.
+    Lower = 0,
+    /// Manager Channel 16, Member Channels from Channel 15 downwards.
+    Upper = 1,
+}
+
+/// The role of a channel.
+#[cfg(feature = "mpe")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZmidiMpeRole {
+    /// The channel is in no Zone.
+    NoZone = 0,
+    /// The Manager Channel of a Zone.
+    Manager = 1,
+    /// A Member Channel of a Zone.
+    Member = 2,
+}
+
+/// The kind of a [`ZmidiMpeEvent`].
+#[cfg(feature = "mpe")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZmidiMpeEventKind {
+    /// The channel is in no Zone: a conventional MIDI 1.0 message.
+    NoZone = 0,
+    /// A message on a channel of `zone`; `manager` is true on the Manager Channel.
+    Zone = 1,
+    /// An MCM changed the layout; `reset` holds the channels to reset (bit n: channel n).
+    Layout = 2,
+    /// RPN 0 changed the Manager (`manager` true) or Member sensitivity of `zone`.
+    Sensitivity = 3,
+    /// A Mode message changed the MIDI Mode of `zone`.
+    Mode = 4,
+    /// A message that MPE prohibits or that has no function.
+    Ignored = 5,
+}
+
+/// The class of a message kind in Appendix E.
+#[cfg(feature = "mpe")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZmidiMpeClass {
+    /// M: Mandatory.
+    Mandatory = 0,
+    /// O: Optional.
+    Optional = 1,
+    /// P: Prohibited.
+    Prohibited = 2,
+}
+
+/// A message kind of Appendix E, the `message` argument of [`zmidi_mpe_class`].
+#[cfg(feature = "mpe")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZmidiMpeMessage {
+    /// RPN 00H 06H, the MPE Configuration Message.
+    Mcm = 0,
+    /// RPN 0, Pitch Bend Sensitivity.
+    PitchBendSensitivity = 1,
+    /// Pitch Bend.
+    PitchBend = 2,
+    /// Channel Pressure.
+    ChannelPressure = 3,
+    /// Control Change 74.
+    Brightness = 4,
+    /// Polyphonic Key Pressure.
+    PolyPressure = 5,
+    /// Control Change 120.
+    AllSoundOff = 6,
+    /// Control Change 121.
+    ResetAllControllers = 7,
+    /// Control Change 122.
+    LocalControl = 8,
+    /// Control Change 123.
+    AllNotesOff = 9,
+    /// Control Change 124.
+    OmniOff = 10,
+    /// Control Change 125.
+    OmniOn = 11,
+    /// Control Change 126.
+    MonoModeOn = 12,
+    /// Control Change 127.
+    PolyModeOn = 13,
+    /// Each other Control Change.
+    OtherControlChange = 14,
+    /// Each other RPN.
+    OtherRpn = 15,
+    /// Each NRPN.
+    Nrpn = 16,
+    /// Program Change.
+    ProgramChange = 17,
+    /// Bank Select.
+    BankSelect = 18,
+    /// Note On and Note Off.
+    Note = 19,
+    /// System messages.
+    System = 20,
+}
+
+/// A Zone layout: the Member Channel count of each Zone (0 for an inactive Zone, at most 15; two
+/// active Zones have at most 14 in all).
+#[cfg(feature = "mpe")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZmidiMpeLayout {
+    /// Member Channels of the Lower Zone.
+    pub lower: u8,
+    /// Member Channels of the Upper Zone.
+    pub upper: u8,
+}
+
+/// A Pitch Bend Sensitivity: semitones and cents, 0 to 127 each.
+#[cfg(feature = "mpe")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZmidiMpeSensitivity {
+    /// Semitones.
+    pub semitones: u8,
+    /// Cents.
+    pub cents: u8,
+}
+
+/// The event of one received message.
+#[cfg(feature = "mpe")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZmidiMpeEvent {
+    /// A [`ZmidiMpeEventKind`] value.
+    pub kind: u32,
+    /// A [`ZmidiMpeZone`] value for the kinds zone, sensitivity and mode; 0 otherwise.
+    pub zone: u32,
+    /// The Manager Channel (kind zone) or the Manager sensitivity (kind sensitivity).
+    pub manager: bool,
+    /// The channels to reset for the kind layout (bit n: the channel with packet value n).
+    pub reset: u16,
+}
+
+/// The state of an MPE receiver.
+#[cfg(feature = "mpe")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZmidiMpeInfo {
+    /// The layout.
+    pub layout: ZmidiMpeLayout,
+    /// The MIDI Mode of each Zone (index: [`ZmidiMpeZone`]): 3 or 4.
+    pub mode: [u8; 2],
+    /// The Manager Channel sensitivity of each Zone.
+    pub manager: [ZmidiMpeSensitivity; 2],
+    /// The Member Channel sensitivity of each Zone.
+    pub member: [ZmidiMpeSensitivity; 2],
+}
+
+/// The values of one channel of an MPE receiver.
+#[cfg(feature = "mpe")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZmidiMpeChannel {
+    /// The last Pitch Bend, 0 to 16383.
+    pub pitch_bend: u16,
+    /// The last Channel Pressure.
+    pub pressure: u8,
+    /// The last Control Change 74.
+    pub brightness: u8,
+    /// The channel is in a Zone; `pitch_offset` is then valid.
+    pub in_zone: bool,
+    /// The pitch offset in hundredths of a cent: the Manager plus the Member Pitch Bend.
+    pub pitch_offset: i32,
+}
+
+#[cfg(feature = "mpe")]
+const fn rust_zone(zone: u32) -> Option<MpeZone> {
+    match zone {
+        0 => Some(MpeZone::Lower),
+        1 => Some(MpeZone::Upper),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "mpe")]
+const fn rust_layout(lower: u8, upper: u8) -> Option<MpeLayout> {
+    match MpeLayout::new(lower, upper) {
+        Ok(l) => Some(l),
+        Err(_) => None,
+    }
+}
+
+#[cfg(feature = "mpe")]
+const fn c_layout(layout: MpeLayout) -> ZmidiMpeLayout {
+    ZmidiMpeLayout {
+        lower: layout.members(MpeZone::Lower),
+        upper: layout.members(MpeZone::Upper),
+    }
+}
+
+#[cfg(feature = "mpe")]
+const fn rust_sensitivity(semitones: u8, cents: u8) -> Option<MpeSensitivity> {
+    if semitones > 0x7F || cents > 0x7F {
+        return None;
+    }
+    Some(MpeSensitivity { semitones, cents })
+}
+
+#[cfg(feature = "mpe")]
+const fn c_sensitivity(s: MpeSensitivity) -> ZmidiMpeSensitivity {
+    ZmidiMpeSensitivity {
+        semitones: s.semitones,
+        cents: s.cents,
+    }
+}
+
+#[cfg(feature = "mpe")]
+const fn mpe_event(event: MpeEvent) -> ZmidiMpeEvent {
+    use ZmidiMpeEventKind as K;
+    let (kind, zone, manager, reset) = match event {
+        MpeEvent::NoZone => (K::NoZone, 0, false, 0),
+        MpeEvent::Zone { zone, manager } => (K::Zone, zone as u32, manager, 0),
+        MpeEvent::Layout { reset } => (K::Layout, 0, false, reset),
+        MpeEvent::Sensitivity { zone, manager } => (K::Sensitivity, zone as u32, manager, 0),
+        MpeEvent::Mode { zone } => (K::Mode, zone as u32, false, 0),
+        MpeEvent::Ignored => (K::Ignored, 0, false, 0),
+    };
+    ZmidiMpeEvent {
+        kind: kind as u32,
+        zone,
+        manager,
+        reset,
+    }
+}
+
+/// Writes the layout of `lower` and `upper` Member Channels into `layout`. A count above 15, or
+/// two active Zones with more than 14 Member Channels, gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `layout` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_layout_new(
+    lower: u8,
+    upper: u8,
+    layout: *mut ZmidiMpeLayout,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(out), Ok(l)) = (unsafe { layout.as_mut() }, MpeLayout::new(lower, upper)) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    *out = c_layout(l);
+    ZmidiStatus::Ok
+}
+
+/// Writes the layout of `lower` and `upper` Member Channels after one MCM with `members` for `zone` (the overlap rule of AMB-M1-100-03;
+/// a value above 15 gives the same layout) into `out`.
+///
+/// # Safety
+/// `out` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_layout_with_mcm(
+    lower: u8,
+    upper: u8,
+    zone: u32,
+    members: u8,
+    out: *mut ZmidiMpeLayout,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(out), Some(l), Some(z)) = (
+        unsafe { out.as_mut() },
+        rust_layout(lower, upper),
+        rust_zone(zone),
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    *out = c_layout(l.with_mcm(z, members));
+    ZmidiStatus::Ok
+}
+
+/// Writes the role of `channel` (0 to 15) in the layout of `lower` and `upper` Member Channels into `role` (a [`ZmidiMpeRole`] value) and its Zone into
+/// `zone` (0 for no Zone).
+///
+/// # Safety
+/// `role` and `zone` are writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_layout_role(
+    lower: u8,
+    upper: u8,
+    channel: u8,
+    role: *mut u32,
+    zone: *mut u32,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(role), Some(zone), Some(l), Ok(c)) = (
+        unsafe { role.as_mut() },
+        unsafe { zone.as_mut() },
+        rust_layout(lower, upper),
+        Channel::new(channel),
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    (*role, *zone) = match l.role(c) {
+        MpeRole::NoZone => (ZmidiMpeRole::NoZone as u32, 0),
+        MpeRole::Manager(z) => (ZmidiMpeRole::Manager as u32, z as u32),
+        MpeRole::Member(z) => (ZmidiMpeRole::Member as u32, z as u32),
+    };
+    ZmidiStatus::Ok
+}
+
+/// Writes whether `zone` is active into `active` and its lowest Member Channel (0 to 15; 0 for an
+/// inactive Zone) into `channel`.
+///
+/// # Safety
+/// `active` and `channel` are writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_layout_lowest_member(
+    lower: u8,
+    upper: u8,
+    zone: u32,
+    active: *mut bool,
+    channel: *mut u8,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(active), Some(channel), Some(l), Some(z)) = (
+        unsafe { active.as_mut() },
+        unsafe { channel.as_mut() },
+        rust_layout(lower, upper),
+        rust_zone(zone),
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    let lowest = l.lowest_member(z);
+    *active = lowest.is_some();
+    *channel = lowest.map_or(0, Channel::index);
+    ZmidiStatus::Ok
+}
+
+/// Writes the C.3 Pitch Bend value (0 to 16383) of a sender for `offset` (hundredths of a cent)
+/// at a sensitivity of `semitones` and `cents` into `value`.
+///
+/// # Safety
+/// `value` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_pitch_bend_value(
+    offset: i32,
+    semitones: u8,
+    cents: u8,
+    value: *mut u16,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(out), Some(s)) = (
+        unsafe { value.as_mut() },
+        rust_sensitivity(semitones, cents),
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    *out = zmidi_io::pitch_bend_value(offset, s);
+    ZmidiStatus::Ok
+}
+
+/// Writes the C.5 pitch offset (hundredths of a cent) of a received Pitch Bend `value` (0 to
+/// 16383) at a sensitivity of `semitones` and `cents` into `offset`.
+///
+/// # Safety
+/// `offset` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_pitch_offset(
+    value: u16,
+    semitones: u8,
+    cents: u8,
+    offset: *mut i32,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(out), Some(s), true) = (
+        unsafe { offset.as_mut() },
+        rust_sensitivity(semitones, cents),
+        value <= 0x3FFF,
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    *out = zmidi_io::pitch_offset(value, s);
+    ZmidiStatus::Ok
+}
+
+/// Writes the Appendix E class (a [`ZmidiMpeClass`] value) of `message` (a [`ZmidiMpeMessage`]
+/// value) on the Manager Channel or a Member Channel, to send or to receive, with the MIDI Mode
+/// (`mono` for Mode 4) into `class`.
+///
+/// # Safety
+/// `class` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_class(
+    message: u32,
+    manager: bool,
+    transmit: bool,
+    mono: bool,
+    class: *mut u32,
+) -> ZmidiStatus {
+    use MpeMessage as K;
+    const KINDS: [MpeMessage; 21] = [
+        K::Mcm,
+        K::PitchBendSensitivity,
+        K::PitchBend,
+        K::ChannelPressure,
+        K::Brightness,
+        K::PolyPressure,
+        K::AllSoundOff,
+        K::ResetAllControllers,
+        K::LocalControl,
+        K::AllNotesOff,
+        K::OmniOff,
+        K::OmniOn,
+        K::MonoModeOn,
+        K::PolyModeOn,
+        K::OtherControlChange,
+        K::OtherRpn,
+        K::Nrpn,
+        K::ProgramChange,
+        K::BankSelect,
+        K::Note,
+        K::System,
+    ];
+    // SAFETY: caller contract above.
+    let (Some(out), Some(&kind)) = (unsafe { class.as_mut() }, KINDS.get(message as usize)) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    *out = match zmidi_io::mpe_class(kind, manager, transmit, mono) {
+        MpeClass::Mandatory => ZmidiMpeClass::Mandatory,
+        MpeClass::Optional => ZmidiMpeClass::Optional,
+        MpeClass::Prohibited => ZmidiMpeClass::Prohibited,
+    } as u32;
+    ZmidiStatus::Ok
+}
+
+/// Sets up `state`: no Zone, Mode 3, the controls of each channel at 8192, 0 and 64.
+///
+/// # Safety
+/// `state` is null or points to writable storage of a [`ZmidiMpeReceiver`].
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_receiver_init(state: *mut ZmidiMpeReceiver) -> ZmidiStatus {
+    if state.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: the storage is large and aligned enough (asserts above) and writable (caller).
+    unsafe { state.cast::<MpeReceiver>().write(MpeReceiver::new()) };
+    ZmidiStatus::Ok
+}
+
+/// Takes one Channel Voice `message` and the `parameter` event that [`zmidi_parameters_receive`]
+/// of its channel gave for it (change none for no event), and writes the event into `event`. A
+/// message that is not a valid Channel Voice message, or an invalid parameter event, gives
+/// [`ZmidiStatus::InvalidArgument`] and changes nothing.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_receiver_init`]; `message` and `parameter` are readable;
+/// `event` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_receive(
+    state: *mut ZmidiMpeReceiver,
+    message: *const ZmidiMidi1Message,
+    parameter: *const ZmidiParameterEvent,
+    event: *mut ZmidiMpeEvent,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(s), Some(p), Some(out), Some(m)) = (
+        unsafe { state.cast::<MpeReceiver>().as_mut() },
+        unsafe { parameter.as_ref() },
+        unsafe { event.as_mut() },
+        unsafe { channel_voice_at(message) },
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    let parameter = if p.change == ZmidiParameterChange::None as u32 {
+        None
+    } else {
+        let (Some(parameter), Some(change)) =
+            (rust_parameter(p.parameter), rust_change(p.change, p.value))
+        else {
+            return ZmidiStatus::InvalidArgument;
+        };
+        Some(ParameterEvent { parameter, change })
+    };
+    *out = mpe_event(s.receive(&m, parameter));
+    ZmidiStatus::Ok
+}
+
+/// Sets the layout of `lower` and `upper` Member Channels of the program (a power-up default or a
+/// front panel setting) and writes the channels to reset into `reset`. An invalid layout gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_receiver_init`]; `reset` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_set_layout(
+    state: *mut ZmidiMpeReceiver,
+    lower: u8,
+    upper: u8,
+    reset: *mut u16,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(s), Some(out), Some(l)) = (
+        unsafe { state.cast::<MpeReceiver>().as_mut() },
+        unsafe { reset.as_mut() },
+        rust_layout(lower, upper),
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    *out = s.set_layout(l);
+    ZmidiStatus::Ok
+}
+
+/// Writes the layout, the MIDI Mode and the sensitivities of each Zone into `info`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_receiver_init`]; `info` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_info(
+    state: *const ZmidiMpeReceiver,
+    info: *mut ZmidiMpeInfo,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(s), Some(out)) = (unsafe { state.cast::<MpeReceiver>().as_ref() }, unsafe {
+        info.as_mut()
+    }) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    let zones = [MpeZone::Lower, MpeZone::Upper];
+    *out = ZmidiMpeInfo {
+        layout: c_layout(s.layout()),
+        mode: zones.map(|z| s.mode(z)),
+        manager: zones.map(|z| c_sensitivity(s.sensitivity(z, true))),
+        member: zones.map(|z| c_sensitivity(s.sensitivity(z, false))),
+    };
+    ZmidiStatus::Ok
+}
+
+/// Writes the values of `channel` (0 to 15) into `out`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_receiver_init`]; `out` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_channel(
+    state: *const ZmidiMpeReceiver,
+    channel: u8,
+    out: *mut ZmidiMpeChannel,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(s), Some(out), Ok(c)) = (
+        unsafe { state.cast::<MpeReceiver>().as_ref() },
+        unsafe { out.as_mut() },
+        Channel::new(channel),
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    let offset = s.pitch_offset(c);
+    *out = ZmidiMpeChannel {
+        pitch_bend: s.pitch_bend(c),
+        pressure: s.pressure(c),
+        brightness: s.brightness(c),
+        in_zone: offset.is_some(),
+        pitch_offset: offset.unwrap_or(0),
+    };
+    ZmidiStatus::Ok
+}
+
+/// Gives `size_of` the Rust receiver, for a binding that checks its copy of the layout (DEC-019
+/// rule 6).
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub extern "C" fn zmidi_mpe_receiver_size() -> usize {
+    size_of::<MpeReceiver>()
+}
+
+/// Writes the MCM of `zone` with `members` (0 to 15) into `out` (`capacity` entries, at least 3),
+/// and 3 into `count`.
+///
+/// # Safety
+/// `out` points to `capacity` writable entries; `count` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_mcm_messages(
+    zone: u32,
+    members: u8,
+    out: *mut ZmidiMidi1Message,
+    capacity: usize,
+    count: *mut usize,
+) -> ZmidiStatus {
+    if out.is_null() || count.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    let Some(Ok(messages)) = rust_zone(zone).map(|z| zmidi_io::mcm_messages(z, members)) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    // SAFETY: caller contract above.
+    unsafe { put_messages(&messages, out, capacity, count) }
+}
+
+/// Writes RPN 0 with `semitones` (0 to 96) and no Data Entry LSB on `channel` (0 to 15) into `out`
+/// (`capacity` entries, at least 3), and 3 into `count`.
+///
+/// # Safety
+/// `out` points to `capacity` writable entries; `count` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_sensitivity_messages(
+    channel: u8,
+    semitones: u8,
+    out: *mut ZmidiMidi1Message,
+    capacity: usize,
+    count: *mut usize,
+) -> ZmidiStatus {
+    if out.is_null() || count.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    let Ok(messages) =
+        Channel::new(channel).and_then(|c| zmidi_io::sensitivity_messages(c, semitones))
+    else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    // SAFETY: caller contract above.
+    unsafe { put_messages(&messages, out, capacity, count) }
+}
+
+/// Writes RPN 0 with `manager` semitones on the Manager Channel and with `member` semitones on
+/// each Member Channel of `zone` into `out` (`capacity` entries, 3 for each channel), and the
+/// count into `count`. An inactive Zone or a value above 96 gives
+/// [`ZmidiStatus::InvalidArgument`]; a small `capacity` gives [`ZmidiStatus::BufferTooSmall`].
+///
+/// # Safety
+/// `out` points to `capacity` writable entries; `count` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_zone_sensitivity_messages(
+    lower: u8,
+    upper: u8,
+    zone: u32,
+    manager: u8,
+    member: u8,
+    out: *mut ZmidiMidi1Message,
+    capacity: usize,
+    count: *mut usize,
+) -> ZmidiStatus {
+    if out.is_null() || count.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    let (Some(l), Some(z)) = (rust_layout(lower, upper), rust_zone(zone)) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    let blank = Midi1ChannelVoiceMessage::ProgramChange(
+        match zmidi_ump::Midi1ProgramChange::try_new(
+            zmidi_ump::Group::from_bits(0),
+            Channel::from_bits(0),
+            0,
+        ) {
+            Ok(m) => m,
+            Err(_) => return ZmidiStatus::InvalidArgument,
+        },
+    );
+    let mut messages = [blank; 48];
+    match zmidi_io::zone_sensitivity_messages(l, z, manager, member, &mut messages) {
+        // SAFETY: caller contract above.
+        Ok(n) => unsafe { put_messages(&messages[..n], out, capacity, count) },
+        Err(_) => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Writes the Mode message of `zone` on its lowest Member Channel into `out`: Mono Mode On with M =
+/// the Member Channel count (`mono`), or Poly Mode On. An inactive Zone gives
+/// [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `out` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_mode_message(
+    lower: u8,
+    upper: u8,
+    zone: u32,
+    mono: bool,
+    out: *mut ZmidiMidi1Message,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(out), Some(l), Some(z)) = (
+        unsafe { out.as_mut() },
+        rust_layout(lower, upper),
+        rust_zone(zone),
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    let Ok(m) = zmidi_io::mode_message(l, z, mono) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    *out = ZmidiMidi1Message::channel_voice(m);
+    ZmidiStatus::Ok
+}
+
+/// Writes the start of a note on `channel` (0 to 15) into `out` (`capacity` entries, at least 4):
+/// Pitch Bend, Control Change 74, Channel Pressure and Note On; 4 into `count`. Velocity 0 or a
+/// value out of range gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `out` points to `capacity` writable entries; `count` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn zmidi_mpe_note_messages(
+    channel: u8,
+    note: u8,
+    velocity: u8,
+    pitch_bend: u16,
+    brightness: u8,
+    pressure: u8,
+    out: *mut ZmidiMidi1Message,
+    capacity: usize,
+    count: *mut usize,
+) -> ZmidiStatus {
+    if out.is_null() || count.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    let Ok(messages) = Channel::new(channel)
+        .and_then(|c| zmidi_io::note_messages(c, note, velocity, pitch_bend, brightness, pressure))
+    else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    // SAFETY: caller contract above.
+    unsafe { put_messages(&messages, out, capacity, count) }
+}
+
+/// Runs `f` on the note allocator at `state`.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mpe_note_allocator_init`].
+#[cfg(feature = "mpe")]
+unsafe fn with_allocator(
+    state: *mut ZmidiMpeNoteAllocator,
+    f: impl FnOnce(&mut MpeNoteAllocator),
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    match unsafe { state.cast::<MpeNoteAllocator>().as_mut() } {
+        Some(s) => {
+            f(s);
+            ZmidiStatus::Ok
+        }
+        None => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Sets up `state`: no active note, the same-note option off.
+///
+/// # Safety
+/// `state` is null or points to writable storage of a [`ZmidiMpeNoteAllocator`].
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_note_allocator_init(
+    state: *mut ZmidiMpeNoteAllocator,
+) -> ZmidiStatus {
+    if state.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: the storage is large and aligned enough (asserts above) and writable (caller).
+    unsafe {
+        state
+            .cast::<MpeNoteAllocator>()
+            .write(MpeNoteAllocator::new())
+    };
+    ZmidiStatus::Ok
+}
+
+/// Gives the Member Channel of `zone` for a new `note`: writes whether the Zone is active into
+/// `found` and the channel (0 to 15) into `channel`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_note_allocator_init`]; `found` and `channel` are writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_note_on(
+    state: *mut ZmidiMpeNoteAllocator,
+    lower: u8,
+    upper: u8,
+    zone: u32,
+    note: u8,
+    found: *mut bool,
+    channel: *mut u8,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(s), Some(found), Some(channel), Some(l), Some(z), true) = (
+        unsafe { state.cast::<MpeNoteAllocator>().as_mut() },
+        unsafe { found.as_mut() },
+        unsafe { channel.as_mut() },
+        rust_layout(lower, upper),
+        rust_zone(zone),
+        note <= 0x7F,
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    let c = s.note_on(l, z, note);
+    *found = c.is_some();
+    *channel = c.map_or(0, Channel::index);
+    ZmidiStatus::Ok
+}
+
+/// One note on `channel` (0 to 15) ended.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mpe_note_allocator_init`].
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_note_off(
+    state: *mut ZmidiMpeNoteAllocator,
+    channel: u8,
+) -> ZmidiStatus {
+    let Ok(c) = Channel::new(channel) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    // SAFETY: caller contract above.
+    unsafe { with_allocator(state, |s| s.note_off(c)) }
+}
+
+/// Writes the count of active notes on `channel` (0 to 15) into `count`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_note_allocator_init`]; `count` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_active_notes(
+    state: *const ZmidiMpeNoteAllocator,
+    channel: u8,
+    count: *mut u8,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(s), Some(count), Ok(c)) = (
+        unsafe { state.cast::<MpeNoteAllocator>().as_ref() },
+        unsafe { count.as_mut() },
+        Channel::new(channel),
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    *count = s.active_notes(c);
+    ZmidiStatus::Ok
+}
+
+/// Writes the same-note option into `on`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mpe_note_allocator_init`]; `on` is writable.
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_same_note(
+    state: *const ZmidiMpeNoteAllocator,
+    on: *mut bool,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let (Some(s), Some(on)) = (
+        unsafe { state.cast::<MpeNoteAllocator>().as_ref() },
+        unsafe { on.as_mut() },
+    ) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    *on = s.same_note();
+    ZmidiStatus::Ok
+}
+
+/// Sets the same-note option.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mpe_note_allocator_init`].
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_set_same_note(
+    state: *mut ZmidiMpeNoteAllocator,
+    on: bool,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    unsafe { with_allocator(state, |s| s.set_same_note(on)) }
+}
+
+/// No active note and no age; the same-note option stays.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mpe_note_allocator_init`].
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_mpe_note_reset(state: *mut ZmidiMpeNoteAllocator) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    unsafe { with_allocator(state, MpeNoteAllocator::reset) }
+}
+
+/// Gives `size_of` the Rust note allocator, for a binding that checks its copy of the layout
+/// (DEC-019 rule 6).
+#[cfg(feature = "mpe")]
+#[no_mangle]
+pub extern "C" fn zmidi_mpe_note_allocator_size() -> usize {
+    size_of::<MpeNoteAllocator>()
+}

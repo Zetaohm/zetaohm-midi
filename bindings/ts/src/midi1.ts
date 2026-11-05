@@ -871,3 +871,444 @@ export class ActiveSensingSender {
     this.#b.release();
   }
 }
+
+// --- MPE (M1-100) ---
+
+/** A Zone: Lower (Manager Channel 1) or Upper (Manager Channel 16). */
+export type MpeZone = "lower" | "upper";
+
+/** The role of a channel in a layout. */
+export type MpeRole = "noZone" | "manager" | "member";
+
+/** An MPE Zone layout: the Member Channel count of each Zone (0 for an inactive Zone). */
+export interface MpeLayout {
+  readonly lower: number;
+  readonly upper: number;
+}
+
+/** A Pitch Bend Sensitivity in semitones and cents. */
+export interface MpeSensitivity {
+  readonly semitones: number;
+  readonly cents: number;
+}
+
+/** The kind of an MPE event. */
+export type MpeEventKind = "noZone" | "zone" | "layout" | "sensitivity" | "mode" | "ignored";
+
+/** The event of one message for an MPE receiver. */
+export interface MpeEvent {
+  readonly kind: MpeEventKind;
+  /** The Zone of a "zone", "sensitivity" or "mode" event, or null. */
+  readonly zone: MpeZone | null;
+  /** The Manager Channel ("zone") or the Manager sensitivity ("sensitivity"). */
+  readonly manager: boolean;
+  /** The channels to reset after a "layout" event: bit n is channel n. */
+  readonly reset: number;
+}
+
+/** A message kind of Appendix E. */
+export type MpeMessageKind =
+  | "mcm"
+  | "pitchBendSensitivity"
+  | "pitchBend"
+  | "channelPressure"
+  | "brightness"
+  | "polyPressure"
+  | "allSoundOff"
+  | "resetAllControllers"
+  | "localControl"
+  | "allNotesOff"
+  | "omniOff"
+  | "omniOn"
+  | "monoModeOn"
+  | "polyModeOn"
+  | "otherControlChange"
+  | "otherRpn"
+  | "nrpn"
+  | "programChange"
+  | "bankSelect"
+  | "note"
+  | "system";
+
+/** The class of a message kind in Appendix E. */
+export type MpeClass = "mandatory" | "optional" | "prohibited";
+
+/** Pitch units for one semitone: an MPE pitch offset is in hundredths of a cent. */
+export const PITCH_UNITS_PER_SEMITONE = 10_000;
+
+/** The Lower Zone with 15 Member Channels (M1-100 2.2.2). */
+export const MPE_LAYOUT_DEFAULT: MpeLayout = Object.freeze({ lower: 15, upper: 0 });
+
+/** No Zone: MPE Mode off. */
+export const MPE_LAYOUT_NONE: MpeLayout = Object.freeze({ lower: 0, upper: 0 });
+
+const MPE_ZONES: readonly MpeZone[] = ["lower", "upper"];
+const MPE_ROLES: readonly MpeRole[] = ["noZone", "manager", "member"];
+const MPE_EVENT_KINDS: readonly MpeEventKind[] = ["noZone", "zone", "layout", "sensitivity", "mode", "ignored"];
+const MPE_CLASSES: readonly MpeClass[] = ["mandatory", "optional", "prohibited"];
+const MPE_MESSAGES: readonly MpeMessageKind[] = [
+  "mcm",
+  "pitchBendSensitivity",
+  "pitchBend",
+  "channelPressure",
+  "brightness",
+  "polyPressure",
+  "allSoundOff",
+  "resetAllControllers",
+  "localControl",
+  "allNotesOff",
+  "omniOff",
+  "omniOn",
+  "monoModeOn",
+  "polyModeOn",
+  "otherControlChange",
+  "otherRpn",
+  "nrpn",
+  "programChange",
+  "bankSelect",
+  "note",
+  "system",
+];
+
+const MPE_LAYOUT = layout([
+  ["lower", "u8"],
+  ["upper", "u8"],
+]);
+
+const MPE_SENSITIVITY = layout([
+  ["semitones", "u8"],
+  ["cents", "u8"],
+]);
+
+const MPE_EVENT = layout([
+  ["kind", "u32"],
+  ["zone", "u32"],
+  ["manager", "bool"],
+  ["reset", "u16"],
+]);
+
+const MPE_INFO = layout([
+  ["layout", MPE_LAYOUT],
+  ["mode", ["u8", 2]],
+  ["manager", [MPE_SENSITIVITY, 2]],
+  ["member", [MPE_SENSITIVITY, 2]],
+]);
+
+const MPE_CHANNEL = layout([
+  ["pitchBend", "u16"],
+  ["pressure", "u8"],
+  ["brightness", "u8"],
+  ["inZone", "bool"],
+  ["pitchOffset", "i32"],
+]);
+
+function zoneNumber(zone: MpeZone): number {
+  const n = MPE_ZONES.indexOf(zone);
+  if (n < 0) {
+    throw new InvalidValueError("zone must be lower or upper");
+  }
+  return n;
+}
+
+function readLayout(p: number): MpeLayout {
+  const v = view();
+  return { lower: v.getUint8(p + MPE_LAYOUT.off.lower), upper: v.getUint8(p + MPE_LAYOUT.off.upper) };
+}
+
+/** The arguments of a layout: two counts of 0 to 255; the C ABI checks the layout. */
+function layoutArgs(l: MpeLayout): [number, number] {
+  return [int("lower", l.lower, 255), int("upper", l.upper, 255)];
+}
+
+/** Checks a signed 32-bit integer. */
+function i32(name: string, value: number): number {
+  if (!Number.isInteger(value) || value < -0x80000000 || value > 0x7fffffff) {
+    throw new InvalidValueError(`${name} must be a signed 32-bit integer, not ${value}`);
+  }
+  return value;
+}
+
+/** A layout with `lower` and `upper` Member Channels (0 to 15 each; two active Zones have at most 14 in all). */
+export function mpeLayout(lower = 0, upper = 0): MpeLayout {
+  return scoped([MPE_LAYOUT.size], (p) => {
+    check(fn("zmidi_mpe_layout_new")(int("lower", lower, 255), int("upper", upper, 255), p), "mpeLayout");
+    return readLayout(p);
+  });
+}
+
+/** The layout after one MPE Configuration Message with `members` for `zone` (the newest MCM takes the channels). */
+export function mpeLayoutWithMcm(l: MpeLayout, zone: MpeZone, members: number): MpeLayout {
+  return scoped([MPE_LAYOUT.size], (p) => {
+    check(fn("zmidi_mpe_layout_with_mcm")(...layoutArgs(l), zoneNumber(zone), int("members", members, 255), p), "mpeLayoutWithMcm");
+    return readLayout(p);
+  });
+}
+
+/** The role of `channel` (0 to 15) in a layout, with its Zone (null for no Zone). */
+export function mpeRole(l: MpeLayout, channel: number): { role: MpeRole; zone: MpeZone | null } {
+  return scoped([4, 4], (role, zone) => {
+    check(fn("zmidi_mpe_layout_role")(...layoutArgs(l), int("channel", channel, 15), role, zone), "mpeRole");
+    const v = view();
+    const r = MPE_ROLES[v.getUint32(role, true)] ?? "noZone";
+    return { role: r, zone: r === "noZone" ? null : (MPE_ZONES[v.getUint32(zone, true)] ?? null) };
+  });
+}
+
+/** The lowest Member Channel of `zone`, which takes the Mode messages, or null for an inactive Zone. */
+export function mpeLowestMember(l: MpeLayout, zone: MpeZone): number | null {
+  return scoped([1, 1], (active, channel) => {
+    check(fn("zmidi_mpe_layout_lowest_member")(...layoutArgs(l), zoneNumber(zone), active, channel), "mpeLowestMember");
+    const v = view();
+    return v.getUint8(active) !== 0 ? v.getUint8(channel) : null;
+  });
+}
+
+/** The C.3 Pitch Bend value (0 to 16383) of a sender for `offset` in hundredths of a cent. */
+export function pitchBendValue(offset: number, semitones: number, cents = 0): number {
+  return scoped([2], (out) => {
+    check(fn("zmidi_mpe_pitch_bend_value")(i32("offset", offset), int("semitones", semitones, 255), int("cents", cents, 255), out), "pitchBendValue");
+    return view().getUint16(out, true);
+  });
+}
+
+/** The C.5 pitch offset in hundredths of a cent of a received Pitch Bend `value` (0 to 16383). */
+export function pitchOffset(value: number, semitones: number, cents = 0): number {
+  return scoped([4], (out) => {
+    check(fn("zmidi_mpe_pitch_offset")(int("value", value, 0xffff), int("semitones", semitones, 255), int("cents", cents, 255), out), "pitchOffset");
+    return view().getInt32(out, true);
+  });
+}
+
+/** The Appendix E class of `message` on the Manager Channel or a Member Channel, to send or to receive, with Mode 4 (`mono`). */
+export function mpeClass(message: MpeMessageKind, manager: boolean, transmit: boolean, mono = false): MpeClass {
+  const n = MPE_MESSAGES.indexOf(message);
+  if (n < 0) {
+    throw new InvalidValueError("unknown MPE message kind");
+  }
+  return scoped([4], (out) => {
+    check(fn("zmidi_mpe_class")(n, manager ? 1 : 0, transmit ? 1 : 0, mono ? 1 : 0, out), "mpeClass");
+    return MPE_CLASSES[view().getUint32(out, true)] ?? "optional";
+  });
+}
+
+/** The three messages of the MPE Configuration Message of `zone` with `members` (0 to 15). */
+export function mcmMessages(zone: MpeZone, members: number): Midi1Message[] {
+  return written(3, (out, count) => fn("zmidi_mpe_mcm_messages")(zoneNumber(zone), int("members", members, 255), out, 3, count), "mcmMessages");
+}
+
+/** The three messages of RPN 0 with `semitones` (0 to 96) and no Data Entry LSB on `channel`. */
+export function sensitivityMessages(channel: number, semitones: number): Midi1Message[] {
+  return written(3, (out, count) => fn("zmidi_mpe_sensitivity_messages")(int("channel", channel, 15), int("semitones", semitones, 255), out, 3, count), "sensitivityMessages");
+}
+
+/** RPN 0 with `manager` semitones on the Manager Channel and `member` semitones on each Member Channel of `zone`. */
+export function zoneSensitivityMessages(l: MpeLayout, zone: MpeZone, manager: number, member: number): Midi1Message[] {
+  return written(
+    48,
+    (out, count) => fn("zmidi_mpe_zone_sensitivity_messages")(...layoutArgs(l), zoneNumber(zone), int("manager", manager, 255), int("member", member, 255), out, 48, count),
+    "zoneSensitivityMessages",
+  );
+}
+
+/** The Mode message of `zone` on its lowest Member Channel: Mono Mode On with M = the Member Channel count (`mono`), or Poly Mode On. */
+export function modeMessage(l: MpeLayout, zone: MpeZone, mono: boolean): Midi1Message {
+  return scoped([MESSAGE.size], (out) => {
+    check(fn("zmidi_mpe_mode_message")(...layoutArgs(l), zoneNumber(zone), mono ? 1 : 0, out), "modeMessage");
+    return readMessage(out);
+  });
+}
+
+/** The four messages that start a note on `channel`: Pitch Bend, Control Change 74, Channel Pressure and Note On (velocity 1 to 127). */
+export function noteMessages(channel: number, note: number, velocity: number, pitchBend = 8192, brightness = 64, pressure = 0): Midi1Message[] {
+  return written(
+    4,
+    (out, count) =>
+      fn("zmidi_mpe_note_messages")(
+        int("channel", channel, 15),
+        int("note", note, 255),
+        int("velocity", velocity, 255),
+        int("pitchBend", pitchBend, 0xffff),
+        int("brightness", brightness, 255),
+        int("pressure", pressure, 255),
+        out,
+        4,
+        count,
+      ),
+    "noteMessages",
+  );
+}
+
+/**
+ * The MPE receiver of one MIDI 1.0 input (M1-100): the layout, the MIDI Mode and the Pitch Bend
+ * Sensitivities of each Zone, and the last Pitch Bend, Channel Pressure and Control Change 74 of each
+ * channel. Give each message with the event of the `ParameterState` of its channel.
+ */
+export class MpeReceiver {
+  readonly #b = new Blocks(this);
+
+  /** A receiver with no Zone (MPE Mode off). */
+  constructor() {
+    const p = this.#b.add(alloc(sizeOf("zmidi_mpe_receiver_size")));
+    check(fn("zmidi_mpe_receiver_init")(p), "MpeReceiver");
+  }
+
+  /** Takes one Channel Voice message and the event that the ParameterState of its channel gave for it (null for none). */
+  receive(message: Midi1Message, parameter: ParameterEvent | null = null): MpeEvent {
+    const [pm, pp, pe] = this.#b.carve([MESSAGE.size, PARAMETER_EVENT.size, MPE_EVENT.size]);
+    writeMessage(pm, message);
+    const v = view();
+    if (parameter === null) {
+      v.setUint32(pp + PARAMETER_EVENT.off.change, 0, true);
+    } else {
+      writeParameter(pp + PARAMETER_EVENT.off.parameter, parameter.parameter);
+      v.setUint32(pp + PARAMETER_EVENT.off.change, changeNumber(parameter.change), true);
+      v.setUint8(pp + PARAMETER_EVENT.off.value, int("value", parameter.value ?? 0, 255));
+    }
+    check(fn("zmidi_mpe_receive")(this.#b.main, pm, pp, pe), "receive");
+    const w = view();
+    const kind = MPE_EVENT_KINDS[w.getUint32(pe + MPE_EVENT.off.kind, true)] ?? "noZone";
+    const zoned = kind === "zone" || kind === "sensitivity" || kind === "mode";
+    return {
+      kind,
+      zone: zoned ? (MPE_ZONES[w.getUint32(pe + MPE_EVENT.off.zone, true)] ?? null) : null,
+      manager: w.getUint8(pe + MPE_EVENT.off.manager) !== 0,
+      reset: w.getUint16(pe + MPE_EVENT.off.reset, true),
+    };
+  }
+
+  /** Sets the layout of the program (power-up or front panel); gives the channels to reset (bit n is channel n). */
+  setLayout(l: MpeLayout): number {
+    const [out] = this.#b.carve([2]);
+    check(fn("zmidi_mpe_set_layout")(this.#b.main, ...layoutArgs(l), out), "setLayout");
+    return view().getUint16(out, true);
+  }
+
+  #info(): { layout: MpeLayout; mode: number[]; manager: MpeSensitivity[]; member: MpeSensitivity[] } {
+    return scoped([MPE_INFO.size], (p) => {
+      check(fn("zmidi_mpe_info")(this.#b.main, p), "info");
+      const v = view();
+      const sens = (at: number): MpeSensitivity[] =>
+        [0, 1].map((k) => ({
+          semitones: v.getUint8(at + k * MPE_SENSITIVITY.size + MPE_SENSITIVITY.off.semitones),
+          cents: v.getUint8(at + k * MPE_SENSITIVITY.size + MPE_SENSITIVITY.off.cents),
+        }));
+      return {
+        layout: readLayout(p + MPE_INFO.off.layout),
+        mode: [0, 1].map((k) => v.getUint8(p + MPE_INFO.off.mode + k)),
+        manager: sens(p + MPE_INFO.off.manager),
+        member: sens(p + MPE_INFO.off.member),
+      };
+    });
+  }
+
+  /** The layout. */
+  get layout(): MpeLayout {
+    return this.#info().layout;
+  }
+
+  /** The MIDI Mode of `zone`: 3 or 4. */
+  mode(zone: MpeZone): number {
+    return this.#info().mode[zoneNumber(zone)] ?? 3;
+  }
+
+  /** The Manager Channel (`manager`) or Member Channel Pitch Bend Sensitivity of `zone`. */
+  sensitivity(zone: MpeZone, manager: boolean): MpeSensitivity {
+    const info = this.#info();
+    const s = (manager ? info.manager : info.member)[zoneNumber(zone)];
+    return s ?? { semitones: 0, cents: 0 };
+  }
+
+  #channel(channel: number): { pitchBend: number; pressure: number; brightness: number; pitchOffset: number | null } {
+    return scoped([MPE_CHANNEL.size], (p) => {
+      check(fn("zmidi_mpe_channel")(this.#b.main, int("channel", channel, 15), p), "channel");
+      const v = view();
+      return {
+        pitchBend: v.getUint16(p + MPE_CHANNEL.off.pitchBend, true),
+        pressure: v.getUint8(p + MPE_CHANNEL.off.pressure),
+        brightness: v.getUint8(p + MPE_CHANNEL.off.brightness),
+        pitchOffset: v.getUint8(p + MPE_CHANNEL.off.inZone) !== 0 ? v.getInt32(p + MPE_CHANNEL.off.pitchOffset, true) : null,
+      };
+    });
+  }
+
+  /** The last Pitch Bend of `channel`, 0 to 16383. */
+  pitchBend(channel: number): number {
+    return this.#channel(channel).pitchBend;
+  }
+
+  /** The last Channel Pressure of `channel`. */
+  pressure(channel: number): number {
+    return this.#channel(channel).pressure;
+  }
+
+  /** The last Control Change 74 of `channel`. */
+  brightness(channel: number): number {
+    return this.#channel(channel).brightness;
+  }
+
+  /** The pitch offset of `channel` in hundredths of a cent (the Manager plus the Member Pitch Bend), or null in no Zone. */
+  pitchOffset(channel: number): number | null {
+    return this.#channel(channel).pitchOffset;
+  }
+
+  /** Frees the WASM memory of the receiver now. */
+  free(): void {
+    this.#b.release();
+  }
+}
+
+/**
+ * The Member Channel allocator of an MPE sender (M1-100 2.2.4.1, A.3): the fewest active notes, then
+ * the oldest last Note Off; with `sameNote`, first a free channel that last played the same Note Number.
+ */
+export class MpeNoteAllocator {
+  readonly #b = new Blocks(this);
+
+  /** An allocator with no active note. */
+  constructor(sameNote = false) {
+    const p = this.#b.add(alloc(sizeOf("zmidi_mpe_note_allocator_size")));
+    check(fn("zmidi_mpe_note_allocator_init")(p), "MpeNoteAllocator");
+    this.sameNote = sameNote;
+  }
+
+  /** The Member Channel of `zone` for a new `note`, or null for an inactive Zone. */
+  noteOn(l: MpeLayout, zone: MpeZone, note: number): number | null {
+    const [found, channel] = this.#b.carve([1, 1]);
+    check(fn("zmidi_mpe_note_on")(this.#b.main, ...layoutArgs(l), zoneNumber(zone), int("note", note, 255), found, channel), "noteOn");
+    const v = view();
+    return v.getUint8(found) !== 0 ? v.getUint8(channel) : null;
+  }
+
+  /** One note on `channel` ended. */
+  noteOff(channel: number): void {
+    check(fn("zmidi_mpe_note_off")(this.#b.main, int("channel", channel, 15)), "noteOff");
+  }
+
+  /** The count of active notes on `channel`. */
+  activeNotes(channel: number): number {
+    const [count] = this.#b.carve([1]);
+    check(fn("zmidi_mpe_active_notes")(this.#b.main, int("channel", channel, 15), count), "activeNotes");
+    return view().getUint8(count);
+  }
+
+  /** The same-note option. */
+  get sameNote(): boolean {
+    const [on] = this.#b.carve([1]);
+    check(fn("zmidi_mpe_same_note")(this.#b.main, on), "sameNote");
+    return view().getUint8(on) !== 0;
+  }
+
+  set sameNote(on: boolean) {
+    check(fn("zmidi_mpe_set_same_note")(this.#b.main, on ? 1 : 0), "sameNote");
+  }
+
+  /** No active note and no age; the same-note option stays. */
+  reset(): void {
+    check(fn("zmidi_mpe_note_reset")(this.#b.main), "reset");
+  }
+
+  /** Frees the WASM memory of the allocator now. */
+  free(): void {
+    this.#b.release();
+  }
+}

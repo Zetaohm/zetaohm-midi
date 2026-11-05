@@ -17,10 +17,10 @@ export const ABI_MAJOR = 0;
  * Request ID at the last Chunk of a reply; 5 gives the USB descriptor writer and the Group Terminal
  * Block requests (zmidi_usb_function_*, zmidi_usb_gtb_*); 7 gives zmidi_bytes_to_ump_feed (many bytes in one
  * call); 8 gives the MIDI 1.0 parts (zmidi_midi1_*, zmidi_mode_*, zmidi_controller*, zmidi_parameter*); 9
- * gives the sync receiver and Active Sensing (zmidi_sync_*, zmidi_active_sensing_*). 6 adds only a C call
- * that the package does not use.
+ * gives the sync receiver and Active Sensing (zmidi_sync_*, zmidi_active_sensing_*); 10 gives MPE
+ * (zmidi_mpe_*). 6 adds only a C call that the package does not use.
  */
-export const ABI_MINOR = 9;
+export const ABI_MINOR = 10;
 
 interface State {
   exports: Record<string, CFn>;

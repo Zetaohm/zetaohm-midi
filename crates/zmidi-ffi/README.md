@@ -166,12 +166,13 @@ with LTO, so the linker removes the functions that the program does not call.
 | `parameters` | `ZMIDI_PARAMETERS` | MIDI 1.0 RPN and NRPN receiver of one channel, Data Increment and Decrement (RP-018). |
 | `sync` | `ZMIDI_SYNC` | MIDI 1.0 sync receiver: Start, Stop, Continue, Timing Clock, Song Position Pointer, Song Select. |
 | `active-sensing` | `ZMIDI_ACTIVE_SENSING` | MIDI 1.0 Active Sensing monitor (330 ms timeout) and sender (270 ms interval). |
+| `mpe` | `ZMIDI_MPE` | MIDI Polyphonic Expression: Zone layout, receiver, Appendix E classes, pitch helper, writers and note allocator. Turns on `parameters`. |
 | `midi1` | `ZMIDI_MIDI1` | All MIDI 1.0 parts above, with no MIDI 2.0 code. |
 | `std` | – | Host builds. |
 | `panic-handler` | – | Bare-metal and WebAssembly builds: a panic handler for the library. |
 
-`ZMIDI_CI` also defines the five `ZMIDI_CI_*` macros. `ZMIDI_MIDI1` defines the nine MIDI 1.0 macros, and
-`ZMIDI_IO`, `ZMIDI_USB` and `ZMIDI_BLE` also define their `*_MIDI1` macro. Define the macros of the features of
+`ZMIDI_CI` also defines the five `ZMIDI_CI_*` macros. `ZMIDI_MIDI1` defines the ten MIDI 1.0 macros, `ZMIDI_MPE` also
+defines `ZMIDI_PARAMETERS`, and `ZMIDI_IO`, `ZMIDI_USB` and `ZMIDI_BLE` also define their `*_MIDI1` macro. Define the macros of the features of
 your library build: with neither `io` nor `ble`, the readers of `io-midi1` and `ble-midi1` have a smaller storage size. `ZMIDI_ABI_MAJOR` and `ZMIDI_ABI_MINOR` give
 the ABI version of the header.
 

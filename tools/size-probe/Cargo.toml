@@ -116,6 +116,8 @@ param_state = ["io", "zmidi-io/parameters"]
 # active-sensing, DEC-022).
 sync_state = ["io", "zmidi-io/sync"]
 active_sensing = ["io", "zmidi-io/active-sensing"]
+mpe_rx = ["io", "zmidi-io/mpe"]
+mpe_tx = ["io", "zmidi-io/mpe"]
 up_lean = ["ump_full"]
 # MIDI 1.0 to 2.0 Protocol, word API (Midi1ToMidi2Group::translate_words), one Group.
 up_words = ["ump_full"]

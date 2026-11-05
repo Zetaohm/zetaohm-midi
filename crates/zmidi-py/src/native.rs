@@ -51,6 +51,15 @@ pub mod _native {
         ParameterEvent, ParameterState, SyncEvent, SyncReceiver,
     };
     #[pymodule_export]
+    use crate::midi1::{
+        mcm_messages, mode_message, mpe_class, note_messages, pitch_bend_value, pitch_offset,
+        sensitivity_messages, zone_sensitivity_messages, MpeEvent, MpeLayout, MpeNoteAllocator,
+        MpeReceiver,
+    };
+    /// Pitch units for one semitone: an MPE pitch offset is in hundredths of a cent.
+    #[pymodule_export]
+    const PITCH_UNITS_PER_SEMITONE: i32 = 10_000;
+    #[pymodule_export]
     use crate::net::{NetClient, NetEvent, NetHost};
     #[pymodule_export]
     use crate::pe::{PeEngine, PeEvent, PeResource, PeSubscription};

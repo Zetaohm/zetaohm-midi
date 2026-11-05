@@ -94,6 +94,12 @@ static ZmidiActiveSensingMonitor f_ZmidiActiveSensingMonitor, s_ZmidiActiveSensi
 #if defined(ZMIDI_ACTIVE_SENSING)
 static ZmidiActiveSensingSender f_ZmidiActiveSensingSender, s_ZmidiActiveSensingSender;
 #endif
+#if defined(ZMIDI_MPE)
+static ZmidiMpeReceiver f_ZmidiMpeReceiver, s_ZmidiMpeReceiver;
+#endif
+#if defined(ZMIDI_MPE)
+static ZmidiMpeNoteAllocator f_ZmidiMpeNoteAllocator, s_ZmidiMpeNoteAllocator;
+#endif
 
 #if defined(ZMIDI_FILE)
 static void clip_reader_fixture(void) {
@@ -194,6 +200,12 @@ static void snapshot(void) {
 #if defined(ZMIDI_ACTIVE_SENSING)
   memcpy(&s_ZmidiActiveSensingSender, &f_ZmidiActiveSensingSender, sizeof f_ZmidiActiveSensingSender);
 #endif
+#if defined(ZMIDI_MPE)
+  memcpy(&s_ZmidiMpeReceiver, &f_ZmidiMpeReceiver, sizeof f_ZmidiMpeReceiver);
+#endif
+#if defined(ZMIDI_MPE)
+  memcpy(&s_ZmidiMpeNoteAllocator, &f_ZmidiMpeNoteAllocator, sizeof f_ZmidiMpeNoteAllocator);
+#endif
 }
 
 /* Asserts the status and that no state changed. */
@@ -259,6 +271,12 @@ static void check(enum ZmidiStatus st, const char *what) {
 #endif
 #if defined(ZMIDI_ACTIVE_SENSING)
   same &= memcmp(&s_ZmidiActiveSensingSender, &f_ZmidiActiveSensingSender, sizeof f_ZmidiActiveSensingSender) == 0;
+#endif
+#if defined(ZMIDI_MPE)
+  same &= memcmp(&s_ZmidiMpeReceiver, &f_ZmidiMpeReceiver, sizeof f_ZmidiMpeReceiver) == 0;
+#endif
+#if defined(ZMIDI_MPE)
+  same &= memcmp(&s_ZmidiMpeNoteAllocator, &f_ZmidiMpeNoteAllocator, sizeof f_ZmidiMpeNoteAllocator) == 0;
 #endif
   if (st != ZMIDI_STATUS_INVALID_ARGUMENT) { fprintf(stderr, "%s: status %d\n", what, (int)st); failures++; }
   if (!same) { fprintf(stderr, "%s: a state changed\n", what); failures++; }
@@ -327,6 +345,12 @@ int main(void) {
 #endif
 #if defined(ZMIDI_ACTIVE_SENSING)
   if (zmidi_active_sensing_sender_init(&f_ZmidiActiveSensingSender, 1) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiActiveSensingSender fixture\n"); failures++; }
+#endif
+#if defined(ZMIDI_MPE)
+  if (zmidi_mpe_receiver_init(&f_ZmidiMpeReceiver) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiMpeReceiver fixture\n"); failures++; }
+#endif
+#if defined(ZMIDI_MPE)
+  if (zmidi_mpe_note_allocator_init(&f_ZmidiMpeNoteAllocator) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiMpeNoteAllocator fixture\n"); failures++; }
 #endif
 #if defined(ZMIDI_CI_PROPERTY_EXCHANGE)
   if (zmidi_pe_wait(&f_ZmidiPe, 1, 0, 0, 100) != ZMIDI_STATUS_REJECTED ||
@@ -970,6 +994,134 @@ int main(void) {
   check(zmidi_active_sensing_sender_poll(NULL, (uint64_t)1, (bool *)(void *)mem[0]), "zmidi_active_sensing_sender_poll: sender");
   snapshot();
   check(zmidi_active_sensing_sender_poll(&f_ZmidiActiveSensingSender, (uint64_t)1, NULL), "zmidi_active_sensing_sender_poll: send");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_layout_new((uint8_t)1, (uint8_t)1, NULL), "zmidi_mpe_layout_new: layout");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_layout_with_mcm((uint8_t)1, (uint8_t)1, (uint32_t)1, (uint8_t)1, NULL), "zmidi_mpe_layout_with_mcm: out");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_layout_role((uint8_t)1, (uint8_t)1, (uint8_t)1, NULL, (uint32_t *)(void *)mem[0]), "zmidi_mpe_layout_role: role");
+  snapshot();
+  check(zmidi_mpe_layout_role((uint8_t)1, (uint8_t)1, (uint8_t)1, (uint32_t *)(void *)mem[0], NULL), "zmidi_mpe_layout_role: zone");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_layout_lowest_member((uint8_t)1, (uint8_t)1, (uint32_t)1, NULL, (uint8_t *)(void *)mem[0]), "zmidi_mpe_layout_lowest_member: active");
+  snapshot();
+  check(zmidi_mpe_layout_lowest_member((uint8_t)1, (uint8_t)1, (uint32_t)1, (bool *)(void *)mem[0], NULL), "zmidi_mpe_layout_lowest_member: channel");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_pitch_bend_value((int32_t)1, (uint8_t)1, (uint8_t)1, NULL), "zmidi_mpe_pitch_bend_value: value");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_pitch_offset((uint16_t)1, (uint8_t)1, (uint8_t)1, NULL), "zmidi_mpe_pitch_offset: offset");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_class((uint32_t)1, (bool)1, (bool)1, (bool)1, NULL), "zmidi_mpe_class: class_");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_receiver_init(NULL), "zmidi_mpe_receiver_init: state");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_receive(NULL, (const struct ZmidiMidi1Message *)(void *)mem[0], (const struct ZmidiParameterEvent *)(void *)mem[1], (struct ZmidiMpeEvent *)(void *)mem[2]), "zmidi_mpe_receive: state");
+  snapshot();
+  check(zmidi_mpe_receive(&f_ZmidiMpeReceiver, NULL, (const struct ZmidiParameterEvent *)(void *)mem[0], (struct ZmidiMpeEvent *)(void *)mem[1]), "zmidi_mpe_receive: message");
+  snapshot();
+  check(zmidi_mpe_receive(&f_ZmidiMpeReceiver, (const struct ZmidiMidi1Message *)(void *)mem[0], NULL, (struct ZmidiMpeEvent *)(void *)mem[1]), "zmidi_mpe_receive: parameter");
+  snapshot();
+  check(zmidi_mpe_receive(&f_ZmidiMpeReceiver, (const struct ZmidiMidi1Message *)(void *)mem[0], (const struct ZmidiParameterEvent *)(void *)mem[1], NULL), "zmidi_mpe_receive: event");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_set_layout(NULL, (uint8_t)1, (uint8_t)1, (uint16_t *)(void *)mem[0]), "zmidi_mpe_set_layout: state");
+  snapshot();
+  check(zmidi_mpe_set_layout(&f_ZmidiMpeReceiver, (uint8_t)1, (uint8_t)1, NULL), "zmidi_mpe_set_layout: reset");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_info(NULL, (struct ZmidiMpeInfo *)(void *)mem[0]), "zmidi_mpe_info: state");
+  snapshot();
+  check(zmidi_mpe_info(&f_ZmidiMpeReceiver, NULL), "zmidi_mpe_info: info");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_channel(NULL, (uint8_t)1, (struct ZmidiMpeChannel *)(void *)mem[0]), "zmidi_mpe_channel: state");
+  snapshot();
+  check(zmidi_mpe_channel(&f_ZmidiMpeReceiver, (uint8_t)1, NULL), "zmidi_mpe_channel: out");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_mcm_messages((uint32_t)1, (uint8_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[0]), "zmidi_mpe_mcm_messages: out");
+  snapshot();
+  check(zmidi_mpe_mcm_messages((uint32_t)1, (uint8_t)1, (struct ZmidiMidi1Message *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_mpe_mcm_messages: count");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_sensitivity_messages((uint8_t)1, (uint8_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[0]), "zmidi_mpe_sensitivity_messages: out");
+  snapshot();
+  check(zmidi_mpe_sensitivity_messages((uint8_t)1, (uint8_t)1, (struct ZmidiMidi1Message *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_mpe_sensitivity_messages: count");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_zone_sensitivity_messages((uint8_t)1, (uint8_t)1, (uint32_t)1, (uint8_t)1, (uint8_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[0]), "zmidi_mpe_zone_sensitivity_messages: out");
+  snapshot();
+  check(zmidi_mpe_zone_sensitivity_messages((uint8_t)1, (uint8_t)1, (uint32_t)1, (uint8_t)1, (uint8_t)1, (struct ZmidiMidi1Message *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_mpe_zone_sensitivity_messages: count");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_mode_message((uint8_t)1, (uint8_t)1, (uint32_t)1, (bool)1, NULL), "zmidi_mpe_mode_message: out");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_note_messages((uint8_t)1, (uint8_t)1, (uint8_t)1, (uint16_t)1, (uint8_t)1, (uint8_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[0]), "zmidi_mpe_note_messages: out");
+  snapshot();
+  check(zmidi_mpe_note_messages((uint8_t)1, (uint8_t)1, (uint8_t)1, (uint16_t)1, (uint8_t)1, (uint8_t)1, (struct ZmidiMidi1Message *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_mpe_note_messages: count");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_note_allocator_init(NULL), "zmidi_mpe_note_allocator_init: state");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_note_on(NULL, (uint8_t)1, (uint8_t)1, (uint32_t)1, (uint8_t)1, (bool *)(void *)mem[0], (uint8_t *)(void *)mem[1]), "zmidi_mpe_note_on: state");
+  snapshot();
+  check(zmidi_mpe_note_on(&f_ZmidiMpeNoteAllocator, (uint8_t)1, (uint8_t)1, (uint32_t)1, (uint8_t)1, NULL, (uint8_t *)(void *)mem[0]), "zmidi_mpe_note_on: found");
+  snapshot();
+  check(zmidi_mpe_note_on(&f_ZmidiMpeNoteAllocator, (uint8_t)1, (uint8_t)1, (uint32_t)1, (uint8_t)1, (bool *)(void *)mem[0], NULL), "zmidi_mpe_note_on: channel");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_note_off(NULL, (uint8_t)1), "zmidi_mpe_note_off: state");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_active_notes(NULL, (uint8_t)1, (uint8_t *)(void *)mem[0]), "zmidi_mpe_active_notes: state");
+  snapshot();
+  check(zmidi_mpe_active_notes(&f_ZmidiMpeNoteAllocator, (uint8_t)1, NULL), "zmidi_mpe_active_notes: count");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_same_note(NULL, (bool *)(void *)mem[0]), "zmidi_mpe_same_note: state");
+  snapshot();
+  check(zmidi_mpe_same_note(&f_ZmidiMpeNoteAllocator, NULL), "zmidi_mpe_same_note: on");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_set_same_note(NULL, (bool)1), "zmidi_mpe_set_same_note: state");
+#endif
+#if defined(ZMIDI_MPE)
+  snapshot();
+  check(zmidi_mpe_note_reset(NULL), "zmidi_mpe_note_reset: state");
 #endif
 #if defined(ZMIDI_NET)
   snapshot();

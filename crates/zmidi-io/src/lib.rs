@@ -19,6 +19,8 @@ pub mod endpoint;
 pub mod jitter_reduction;
 #[cfg(feature = "messages")]
 pub mod messages;
+#[cfg(feature = "mpe")]
+pub mod mpe;
 #[cfg(feature = "parameters")]
 pub mod parameters;
 pub mod router;
@@ -46,6 +48,12 @@ pub use endpoint::{
 pub use jitter_reduction::{Disposition, JrError, JrReceiver, JrSender};
 #[cfg(feature = "messages")]
 pub use messages::{MessageError, Midi1Event, Midi1Message, Midi1Reader, Midi1Writer};
+#[cfg(feature = "mpe")]
+pub use mpe::{
+    mcm_messages, mode_message, mpe_class, note_messages, pitch_bend_value, pitch_offset,
+    sensitivity_messages, zone_sensitivity_messages, MpeClass, MpeEvent, MpeLayout, MpeMessage,
+    MpeNoteAllocator, MpeReceiver, MpeRole, MpeSensitivity, MpeZone, PITCH_UNITS_PER_SEMITONE,
+};
 #[cfg(feature = "parameters")]
 pub use parameters::{
     change_message, select_messages, value_messages, Parameter, ParameterChange, ParameterEvent,
@@ -64,7 +72,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("channel-mode = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\"]"),
+            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\", \"mpe\"]"),
             "{manifest}"
         );
     }
@@ -76,7 +84,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("default = [\"full\"]"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\"]"),
+            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\", \"mpe\"]"),
             "{manifest}"
         );
     }
@@ -87,7 +95,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("controllers = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\"]"),
+            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\", \"mpe\"]"),
             "{manifest}"
         );
     }
@@ -101,7 +109,7 @@ mod tests {
             "{manifest}"
         );
         assert!(
-            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\"]"),
+            manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\", \"mpe\"]"),
             "{manifest}"
         );
     }
@@ -111,7 +119,7 @@ mod tests {
         // REQ-SYNC-006: the sync receiver is on by default (`full` turns on `sync`).
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("sync = []"), "{manifest}");
-        assert!(manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\"]"), "{manifest}");
+        assert!(manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\", \"mpe\"]"), "{manifest}");
     }
 
     #[test]
@@ -120,6 +128,14 @@ mod tests {
         // `active-sensing`).
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("active-sensing = []"), "{manifest}");
-        assert!(manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\"]"), "{manifest}");
+        assert!(manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\", \"mpe\"]"), "{manifest}");
+    }
+
+    #[test]
+    fn mpe_is_in_the_default_features() {
+        // REQ-MPE-011: MPE is on by default (`full` turns on `mpe`, which needs `parameters`).
+        let manifest = include_str!("../Cargo.toml");
+        assert!(manifest.contains("mpe = [\"parameters\"]"), "{manifest}");
+        assert!(manifest.contains("full = [\"midi2-protocol\", \"messages\", \"channel-mode\", \"controllers\", \"parameters\", \"sync\", \"active-sensing\", \"mpe\"]"), "{manifest}");
     }
 }

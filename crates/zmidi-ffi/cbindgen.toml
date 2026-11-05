@@ -64,6 +64,13 @@ after_includes = """
 #ifndef ZMIDI_ACTIVE_SENSING
 #define ZMIDI_ACTIVE_SENSING
 #endif
+#ifndef ZMIDI_MPE
+#define ZMIDI_MPE
+#endif
+#endif
+/* The MPE receiver takes the events of the parameter receiver, as the Cargo feature mpe does. */
+#if defined(ZMIDI_MPE) && !defined(ZMIDI_PARAMETERS)
+#define ZMIDI_PARAMETERS
 #endif
 #if defined(ZMIDI_IO) && !defined(ZMIDI_IO_MIDI1)
 #define ZMIDI_IO_MIDI1
@@ -101,6 +108,7 @@ aligned_n = "ZMIDI_ALIGNED"
 "feature = parameters" = "ZMIDI_PARAMETERS"
 "feature = sync" = "ZMIDI_SYNC"
 "feature = active-sensing" = "ZMIDI_ACTIVE_SENSING"
+"feature = mpe" = "ZMIDI_MPE"
 "feature = midi1" = "ZMIDI_MIDI1"
 "target_pointer_width = 64" = "ZMIDI_PTR64"
 
@@ -118,4 +126,9 @@ include = [
   "ZmidiParameterChange",
   "ZmidiSyncEventKind",
   "ZmidiSyncCommand",
+  "ZmidiMpeZone",
+  "ZmidiMpeRole",
+  "ZmidiMpeEventKind",
+  "ZmidiMpeClass",
+  "ZmidiMpeMessage",
 ]

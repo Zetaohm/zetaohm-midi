@@ -1629,6 +1629,196 @@ mod midi1 {
         assert!(zmidi_sync_receiver_size() <= size_of::<ZmidiSyncReceiver>());
         assert!(zmidi_active_sensing_monitor_size() <= size_of::<ZmidiActiveSensingMonitor>());
         assert!(zmidi_active_sensing_sender_size() <= size_of::<ZmidiActiveSensingSender>());
+        assert!(zmidi_mpe_receiver_size() <= size_of::<ZmidiMpeReceiver>());
+        assert!(zmidi_mpe_note_allocator_size() <= size_of::<ZmidiMpeNoteAllocator>());
+    }
+
+    /// The C event of a Rust MPE event (REQ-FFI-MIDI1-014).
+    fn c_mpe_event(e: zmidi_io::MpeEvent) -> (u32, u32, bool, u16) {
+        use zmidi_io::MpeEvent as E;
+        match e {
+            E::NoZone => (0, 0, false, 0),
+            E::Zone { zone, manager } => (1, zone as u32, manager, 0),
+            E::Layout { reset } => (2, 0, false, reset),
+            E::Sensitivity { zone, manager } => (3, zone as u32, manager, 0),
+            E::Mode { zone } => (4, zone as u32, false, 0),
+            E::Ignored => (5, 0, false, 0),
+        }
+    }
+
+    /// REQ-FFI-MIDI1-014: the C MPE receiver, fed with the events of the C parameter receivers,
+    /// gives the events, information and channel values of the Rust receiver for any Channel Voice
+    /// messages and any application layout.
+    #[test]
+    fn prop_mpe_receiver_equals_rust() {
+        use zmidi_io::{MpeLayout, MpeReceiver, MpeZone};
+        // MCMs and RPN 0 on Channels 1, 2 and 16 often, so that the layout changes.
+        let step = prop_oneof![
+            any_cv(),
+            (
+                prop_oneof![Just(0u8), Just(1), Just(15)],
+                prop_oneof![Just(6u8), Just(38), Just(96), Just(100), Just(101)],
+                0u8..20
+            )
+                .prop_map(|(c, i, v)| Midi1ChannelVoiceMessage::parse(&[0x20B0_0000
+                    | u32::from(c) << 16
+                    | u32::from(i) << 8
+                    | u32::from(v)])
+                .unwrap()),
+        ];
+        proptest!(|(steps in proptest::collection::vec(step, 0..60), at in 0usize..60, lower in 0u8..16, upper in 0u8..16)| {
+            let mut c = ZmidiMpeReceiver { _opaque: [0; ZMIDI_MPE_RECEIVER_WORDS] };
+            let mut cp: [ZmidiParameterState; 16] = core::array::from_fn(|_| ZmidiParameterState { _opaque: [0; ZMIDI_PARAMETER_STATE_WORDS] });
+            prop_assert_eq!(unsafe { zmidi_mpe_receiver_init(&mut c) }, ZmidiStatus::Ok);
+            for p in &mut cp {
+                prop_assert_eq!(unsafe { zmidi_parameters_init(p) }, ZmidiStatus::Ok);
+            }
+            let mut r = MpeReceiver::new();
+            let mut rp = [ParameterState::new(); 16];
+            for (i, m) in steps.into_iter().enumerate() {
+                if i == at {
+                    let mut reset = 0;
+                    let status = unsafe { zmidi_mpe_set_layout(&mut c, lower, upper, &mut reset) };
+                    match MpeLayout::new(lower, upper) {
+                        Ok(l) => prop_assert_eq!((status, reset), (ZmidiStatus::Ok, r.set_layout(l))),
+                        Err(_) => prop_assert_eq!(status, ZmidiStatus::InvalidArgument),
+                    }
+                }
+                let ch = m.channel().index() as usize;
+                let mut pe = ZmidiParameterEvent { change: 9, parameter: ZmidiParameter { registered: false, msb: 0, lsb: 0 }, value: 0 };
+                prop_assert_eq!(unsafe { zmidi_parameters_receive(&mut cp[ch], &cv(m), &mut pe) }, ZmidiStatus::Ok);
+                let mut e = ZmidiMpeEvent { kind: 99, zone: 9, manager: true, reset: 9 };
+                prop_assert_eq!(unsafe { zmidi_mpe_receive(&mut c, &cv(m), &pe, &mut e) }, ZmidiStatus::Ok);
+                let want = c_mpe_event(r.receive(&m, rp[ch].receive(&m)));
+                prop_assert_eq!((e.kind, e.zone, e.manager, e.reset), want);
+                let mut info = ZmidiMpeInfo { layout: ZmidiMpeLayout { lower: 99, upper: 99 }, mode: [0; 2], manager: [ZmidiMpeSensitivity { semitones: 0, cents: 0 }; 2], member: [ZmidiMpeSensitivity { semitones: 0, cents: 0 }; 2] };
+                prop_assert_eq!(unsafe { zmidi_mpe_info(&c, &mut info) }, ZmidiStatus::Ok);
+                let l = r.layout();
+                prop_assert_eq!((info.layout.lower, info.layout.upper), (l.members(MpeZone::Lower), l.members(MpeZone::Upper)));
+                for (k, z) in [MpeZone::Lower, MpeZone::Upper].into_iter().enumerate() {
+                    let (s0, s1) = (r.sensitivity(z, true), r.sensitivity(z, false));
+                    prop_assert_eq!(info.mode[k], r.mode(z));
+                    prop_assert_eq!((info.manager[k].semitones, info.manager[k].cents), (s0.semitones, s0.cents));
+                    prop_assert_eq!((info.member[k].semitones, info.member[k].cents), (s1.semitones, s1.cents));
+                }
+                let mut v = ZmidiMpeChannel { pitch_bend: 0, pressure: 0, brightness: 0, in_zone: false, pitch_offset: 9 };
+                prop_assert_eq!(unsafe { zmidi_mpe_channel(&c, ch as u8, &mut v) }, ZmidiStatus::Ok);
+                let rc = Channel::from_bits(ch as u8);
+                let offset = r.pitch_offset(rc);
+                prop_assert_eq!((v.pitch_bend, v.pressure, v.brightness, v.in_zone, v.pitch_offset), (r.pitch_bend(rc), r.pressure(rc), r.brightness(rc), offset.is_some(), offset.unwrap_or(0)));
+            }
+            let pe = ZmidiParameterEvent { change: 0, parameter: ZmidiParameter { registered: false, msb: 0, lsb: 0 }, value: 0 };
+            let bad_pe = ZmidiParameterEvent { change: 7, ..pe };
+            let m = cv(Midi1ChannelVoiceMessage::parse(&[0x2090_3C40]).unwrap());
+            let mut e = ZmidiMpeEvent { kind: 0, zone: 0, manager: false, reset: 0 };
+            prop_assert_eq!(unsafe { zmidi_mpe_receive(&mut c, &m, &bad_pe, &mut e) }, ZmidiStatus::InvalidArgument);
+            let sys = of_word(ZmidiMidi1Kind::System, 0x10F8_0000);
+            prop_assert_eq!(unsafe { zmidi_mpe_receive(&mut c, &sys, &pe, &mut e) }, ZmidiStatus::InvalidArgument);
+            prop_assert_eq!(unsafe { zmidi_mpe_channel(&c, 16, &mut ZmidiMpeChannel { pitch_bend: 0, pressure: 0, brightness: 0, in_zone: false, pitch_offset: 0 }) }, ZmidiStatus::InvalidArgument);
+        });
+    }
+
+    /// REQ-FFI-MIDI1-015: the C layout, class, pitch helper, writers and note allocator give the
+    /// results of the Rust functions.
+    #[test]
+    fn prop_mpe_sender_equals_rust() {
+        use zmidi_io::{MpeLayout, MpeMessage, MpeNoteAllocator, MpeRole, MpeSensitivity, MpeZone};
+        let zones = [MpeZone::Lower, MpeZone::Upper];
+        proptest!(|(lower in 0u8..16, upper in 0u8..16, zone in 0u32..3, members in 0u8..18, ops in proptest::collection::vec((0u8..3, 0u8..0x80, 0u8..16), 0..40), offset in any::<i32>(), value in 0u16..0x4001, semitones in 0u8..0x81, cents in 0u8..0x81, kind in 0u32..22, flags in 0u8..8)| {
+            let mut out = ZmidiMpeLayout { lower: 99, upper: 99 };
+            let rust = MpeLayout::new(lower, upper);
+            prop_assert_eq!(unsafe { zmidi_mpe_layout_new(lower, upper, &mut out) }, if rust.is_ok() { ZmidiStatus::Ok } else { ZmidiStatus::InvalidArgument });
+            let z = zones.get(zone as usize).copied();
+            if let (Ok(l), Some(z)) = (rust, z) {
+                prop_assert_eq!((out.lower, out.upper), (lower, upper));
+                let mut after = ZmidiMpeLayout { lower: 99, upper: 99 };
+                prop_assert_eq!(unsafe { zmidi_mpe_layout_with_mcm(lower, upper, zone, members, &mut after) }, ZmidiStatus::Ok);
+                let a = l.with_mcm(z, members);
+                prop_assert_eq!((after.lower, after.upper), (a.members(MpeZone::Lower), a.members(MpeZone::Upper)));
+                for ch in 0..16u8 {
+                    let (mut role, mut rz) = (9, 9);
+                    prop_assert_eq!(unsafe { zmidi_mpe_layout_role(lower, upper, ch, &mut role, &mut rz) }, ZmidiStatus::Ok);
+                    let want = match l.role(Channel::from_bits(ch)) { MpeRole::NoZone => (0, 0), MpeRole::Manager(z) => (1, z as u32), MpeRole::Member(z) => (2, z as u32) };
+                    prop_assert_eq!((role, rz), want);
+                }
+                let (mut active, mut lowest) = (false, 99);
+                prop_assert_eq!(unsafe { zmidi_mpe_layout_lowest_member(lower, upper, zone, &mut active, &mut lowest) }, ZmidiStatus::Ok);
+                prop_assert_eq!((active, lowest), (l.lowest_member(z).is_some(), l.lowest_member(z).map_or(0, Channel::index)));
+                // Writers.
+                let mut buf = [of_word(ZmidiMidi1Kind::None, 0); 48];
+                let mut n = 99;
+                let st = unsafe { zmidi_mpe_mcm_messages(zone, members, buf.as_mut_ptr(), 48, &mut n) };
+                match zmidi_io::mcm_messages(z, members) {
+                    Ok(m) => { prop_assert_eq!((st, n), (ZmidiStatus::Ok, 3)); prop_assert_eq!(&buf[..3], &m.map(cv)[..]); }
+                    Err(_) => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+                }
+                let st = unsafe { zmidi_mpe_zone_sensitivity_messages(lower, upper, zone, semitones, members, buf.as_mut_ptr(), 48, &mut n) };
+                let mut rb = [Midi1ChannelVoiceMessage::parse(&[0x20C0_0000]).unwrap(); 48];
+                match zmidi_io::zone_sensitivity_messages(l, z, semitones, members, &mut rb) {
+                    Ok(k) => { prop_assert_eq!((st, n), (ZmidiStatus::Ok, k)); prop_assert!(buf[..k].iter().zip(&rb[..k]).all(|(a, b)| *a == cv(*b))); }
+                    Err(_) => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+                }
+                let mut one = of_word(ZmidiMidi1Kind::None, 0);
+                let st = unsafe { zmidi_mpe_mode_message(lower, upper, zone, flags & 1 != 0, &mut one) };
+                match zmidi_io::mode_message(l, z, flags & 1 != 0) {
+                    Ok(m) => prop_assert_eq!((st, one), (ZmidiStatus::Ok, cv(m))),
+                    Err(_) => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+                }
+                // The note allocator.
+                let mut c = ZmidiMpeNoteAllocator { _opaque: [0; ZMIDI_MPE_NOTE_ALLOCATOR_WORDS] };
+                prop_assert_eq!(unsafe { zmidi_mpe_note_allocator_init(&mut c) }, ZmidiStatus::Ok);
+                prop_assert_eq!(unsafe { zmidi_mpe_set_same_note(&mut c, flags & 2 != 0) }, ZmidiStatus::Ok);
+                let mut r = MpeNoteAllocator::new();
+                r.set_same_note(flags & 2 != 0);
+                for (op, note, ch) in ops {
+                    if op < 2 {
+                        let (mut found, mut got) = (false, 99);
+                        prop_assert_eq!(unsafe { zmidi_mpe_note_on(&mut c, lower, upper, zone, note, &mut found, &mut got) }, ZmidiStatus::Ok);
+                        let want = r.note_on(l, z, note);
+                        prop_assert_eq!((found, got), (want.is_some(), want.map_or(0, Channel::index)));
+                    } else {
+                        prop_assert_eq!(unsafe { zmidi_mpe_note_off(&mut c, ch) }, ZmidiStatus::Ok);
+                        r.note_off(Channel::from_bits(ch));
+                    }
+                    let mut count = 99;
+                    prop_assert_eq!(unsafe { zmidi_mpe_active_notes(&c, ch, &mut count) }, ZmidiStatus::Ok);
+                    prop_assert_eq!(count, r.active_notes(Channel::from_bits(ch)));
+                }
+                let mut on = false;
+                prop_assert_eq!(unsafe { zmidi_mpe_note_reset(&mut c) }, ZmidiStatus::Ok);
+                prop_assert_eq!(unsafe { zmidi_mpe_same_note(&c, &mut on) }, ZmidiStatus::Ok);
+                prop_assert_eq!(on, flags & 2 != 0);
+            }
+            if z.is_none() {
+                let mut after = ZmidiMpeLayout { lower: 0, upper: 0 };
+                prop_assert_eq!(unsafe { zmidi_mpe_layout_with_mcm(0, 0, zone, members, &mut after) }, ZmidiStatus::InvalidArgument);
+            }
+            // The pitch helper and the class function.
+            let rs = MpeSensitivity { semitones, cents };
+            let (mut pb, mut off) = (0u16, 0i32);
+            let ok = semitones <= 0x7F && cents <= 0x7F;
+            prop_assert_eq!(unsafe { zmidi_mpe_pitch_bend_value(offset, semitones, cents, &mut pb) }, if ok { ZmidiStatus::Ok } else { ZmidiStatus::InvalidArgument });
+            prop_assert_eq!(unsafe { zmidi_mpe_pitch_offset(value, semitones, cents, &mut off) }, if ok && value <= 0x3FFF { ZmidiStatus::Ok } else { ZmidiStatus::InvalidArgument });
+            if ok {
+                prop_assert_eq!(pb, zmidi_io::pitch_bend_value(offset, rs));
+                if value <= 0x3FFF { prop_assert_eq!(off, zmidi_io::pitch_offset(value, rs)); }
+            }
+            let kinds = [MpeMessage::Mcm, MpeMessage::PitchBendSensitivity, MpeMessage::PitchBend, MpeMessage::ChannelPressure, MpeMessage::Brightness, MpeMessage::PolyPressure, MpeMessage::AllSoundOff, MpeMessage::ResetAllControllers, MpeMessage::LocalControl, MpeMessage::AllNotesOff, MpeMessage::OmniOff, MpeMessage::OmniOn, MpeMessage::MonoModeOn, MpeMessage::PolyModeOn, MpeMessage::OtherControlChange, MpeMessage::OtherRpn, MpeMessage::Nrpn, MpeMessage::ProgramChange, MpeMessage::BankSelect, MpeMessage::Note, MpeMessage::System];
+            let mut class = 99;
+            let st = unsafe { zmidi_mpe_class(kind, flags & 1 != 0, flags & 2 != 0, flags & 4 != 0, &mut class) };
+            match kinds.get(kind as usize) {
+                Some(&k) => prop_assert_eq!((st, class), (ZmidiStatus::Ok, zmidi_io::mpe_class(k, flags & 1 != 0, flags & 2 != 0, flags & 4 != 0) as u32)),
+                None => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+            }
+            // The note writer.
+            let mut buf = [of_word(ZmidiMidi1Kind::None, 0); 4];
+            let mut n = 0;
+            let st = unsafe { zmidi_mpe_note_messages(members, semitones, cents, value, flags * 20, semitones, buf.as_mut_ptr(), 4, &mut n) };
+            match Channel::new(members).and_then(|ch| zmidi_io::note_messages(ch, semitones, cents, value, flags * 20, semitones)) {
+                Ok(m) => prop_assert_eq!((st, n, buf), (ZmidiStatus::Ok, 4, m.map(cv))),
+                Err(_) => prop_assert_eq!(st, ZmidiStatus::InvalidArgument),
+            }
+        });
     }
 }
 
