@@ -22,6 +22,7 @@ Future<void> main() async {
           'NET',
           'NET_AUTH',
           'USB',
+          'MIDI1',
         ])
           '-DZMIDI_$part',
       ],

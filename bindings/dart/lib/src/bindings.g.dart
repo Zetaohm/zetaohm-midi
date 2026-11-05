@@ -15,6 +15,44 @@ import 'dart:ffi' as ffi;
 @ffi.Native<ffi.Uint32 Function()>()
 external int zmidi_abi_version();
 
+/// Writes a bank (0 to 3FFFH) and program (0 to 127) selection on `channel` (0 to 15) as Bank
+/// Select MSB, Bank Select LSB and Program Change into `out` (`capacity` entries, at least 3), and
+/// 3 into `count`.
+///
+/// # Safety
+/// `out` points to `capacity` writable entries; `count` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint16,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_bank_program_messages')
+external int _zmidi_bank_program_messages(
+  int channel,
+  int bank,
+  int program,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+);
+
+ZmidiStatus zmidi_bank_program_messages(
+  int channel,
+  int bank,
+  int program,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_bank_program_messages(channel, bank, program, out, capacity, count),
+  );
+}
+
 /// Reads one packet (`len` bytes) and writes each UMP of it into `out` (`capacity` records), the
 /// record count into `count` and the count of dropped parts into `dropped`. A `capacity` below
 /// `len` gives [`ZmidiStatus::BufferTooSmall`] before the packet is read.
@@ -1855,6 +1893,491 @@ ZmidiStatus zmidi_clip_writer_start(
   );
 }
 
+/// Writes a 14-bit controller value (`controller` 0 to 31, `value` 0 to 3FFFH) on `channel` (0
+/// to 15) as the MSB and then the LSB Control Change into `out` (`capacity` entries, at least 2),
+/// and 2 into `count`.
+///
+/// # Safety
+/// `out` points to `capacity` writable entries; `count` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint16,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_controller14_messages')
+external int _zmidi_controller14_messages(
+  int channel,
+  int controller,
+  int value,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+);
+
+ZmidiStatus zmidi_controller14_messages(
+  int channel,
+  int controller,
+  int value,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_controller14_messages(
+      channel,
+      controller,
+      value,
+      out,
+      capacity,
+      count,
+    ),
+  );
+}
+
+/// Writes the RP-015 reset value of `controller` into `value`, or [`ZMIDI_CONTROLLER_KEEP`] when
+/// the controller keeps its value (zmidi-io `reset_value`).
+///
+/// # Safety
+/// `value` is null or writable.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Uint8, ffi.Pointer<ffi.Uint8>)>(
+  symbol: 'zmidi_controller_reset_value',
+)
+external int _zmidi_controller_reset_value(
+  int controller,
+  ffi.Pointer<ffi.Uint8> value,
+);
+
+ZmidiStatus zmidi_controller_reset_value(
+  int controller,
+  ffi.Pointer<ffi.Uint8> value,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_controller_reset_value(controller, value),
+  );
+}
+
+/// Gives `size_of` the Rust controller state, for a binding that checks its copy of the layout
+/// (DEC-019 rule 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_controller_state_size();
+
+/// Writes whether `state` holds a bank into `has_bank`, and the held 14-bit bank (or 0) into `bank`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_controllers_init`]; `has_bank` and `bank` are writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiControllerState>,
+    ffi.Pointer<ffi.Bool>,
+    ffi.Pointer<ffi.Uint16>,
+  )
+>(symbol: 'zmidi_controllers_bank')
+external int _zmidi_controllers_bank(
+  ffi.Pointer<ZmidiControllerState> state,
+  ffi.Pointer<ffi.Bool> has_bank,
+  ffi.Pointer<ffi.Uint16> bank,
+);
+
+ZmidiStatus zmidi_controllers_bank(
+  ffi.Pointer<ZmidiControllerState> state,
+  ffi.Pointer<ffi.Bool> has_bank,
+  ffi.Pointer<ffi.Uint16> bank,
+) {
+  return ZmidiStatus.fromValue(_zmidi_controllers_bank(state, has_bank, bank));
+}
+
+/// Sets up `state`: no bank and no Portamento source.
+///
+/// # Safety
+/// `state` is null or points to writable storage of a [`ZmidiControllerState`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiControllerState>)>(
+  symbol: 'zmidi_controllers_init',
+)
+external int _zmidi_controllers_init(ffi.Pointer<ZmidiControllerState> state);
+
+ZmidiStatus zmidi_controllers_init(ffi.Pointer<ZmidiControllerState> state) {
+  return ZmidiStatus.fromValue(_zmidi_controllers_init(state));
+}
+
+/// Takes one Channel Voice `message` of the channel of `state` and writes its event into `event`
+/// (the kind none when the message gives no event). A message that is not a valid Channel Voice
+/// message gives [`ZmidiStatus::InvalidArgument`] and changes nothing.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_controllers_init`]; `message` is readable; `event` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiControllerState>,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.Pointer<ZmidiControllerEvent>,
+  )
+>(symbol: 'zmidi_controllers_receive')
+external int _zmidi_controllers_receive(
+  ffi.Pointer<ZmidiControllerState> state,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiControllerEvent> event,
+);
+
+ZmidiStatus zmidi_controllers_receive(
+  ffi.Pointer<ZmidiControllerState> state,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiControllerEvent> event,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_controllers_receive(state, message, event),
+  );
+}
+
+/// The Reset All Controllers action of the program (a mode state action or General MIDI System On).
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_controllers_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiControllerState>)>(
+  symbol: 'zmidi_controllers_reset',
+)
+external int _zmidi_controllers_reset(ffi.Pointer<ZmidiControllerState> state);
+
+ZmidiStatus zmidi_controllers_reset(ffi.Pointer<ZmidiControllerState> state) {
+  return ZmidiStatus.fromValue(_zmidi_controllers_reset(state));
+}
+
+/// Sets up `reader`: no running status and no System Exclusive message in progress.
+///
+/// # Safety
+/// `reader` is null or points to writable storage of a [`ZmidiMidi1Reader`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiMidi1Reader>)>(
+  symbol: 'zmidi_midi1_reader_init',
+)
+external int _zmidi_midi1_reader_init(ffi.Pointer<ZmidiMidi1Reader> reader);
+
+ZmidiStatus zmidi_midi1_reader_init(ffi.Pointer<ZmidiMidi1Reader> reader) {
+  return ZmidiStatus.fromValue(_zmidi_midi1_reader_init(reader));
+}
+
+/// Reads `byte` and writes each message that it completes into `out` (`capacity` entries), and
+/// their count into `count`. The bytes of a System Exclusive message go into `sysex`
+/// (`sysex_capacity` bytes); its message gives the length. A System Exclusive message that does
+/// not fit gives the kind [`ZmidiMidi1Kind::SysExTooLong`] with its full length. A `capacity`
+/// below [`ZMIDI_MIDI1_READER_MAX_EVENTS`] gives [`ZmidiStatus::BufferTooSmall`] before the byte
+/// is read.
+///
+/// # Safety
+/// `reader` was set up by [`zmidi_midi1_reader_init`]; `sysex` points to `sysex_capacity` writable
+/// bytes; `out` points to `capacity` writable entries; `count` is writable. Null pointers give
+/// [`ZmidiStatus::InvalidArgument`].
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMidi1Reader>,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_midi1_reader_push')
+external int _zmidi_midi1_reader_push(
+  ffi.Pointer<ZmidiMidi1Reader> reader,
+  int byte,
+  ffi.Pointer<ffi.Uint8> sysex,
+  int sysex_capacity,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+);
+
+ZmidiStatus zmidi_midi1_reader_push(
+  ffi.Pointer<ZmidiMidi1Reader> reader,
+  int byte,
+  ffi.Pointer<ffi.Uint8> sysex,
+  int sysex_capacity,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_midi1_reader_push(
+      reader,
+      byte,
+      sysex,
+      sysex_capacity,
+      out,
+      capacity,
+      count,
+    ),
+  );
+}
+
+/// The System Reset action of the program (AMB-M1-13): the reader forgets its running status, its
+/// partial message and its System Exclusive message in progress.
+///
+/// # Safety
+/// `reader` is null or was set up by [`zmidi_midi1_reader_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiMidi1Reader>)>(
+  symbol: 'zmidi_midi1_reader_reset',
+)
+external int _zmidi_midi1_reader_reset(ffi.Pointer<ZmidiMidi1Reader> reader);
+
+ZmidiStatus zmidi_midi1_reader_reset(ffi.Pointer<ZmidiMidi1Reader> reader) {
+  return ZmidiStatus.fromValue(_zmidi_midi1_reader_reset(reader));
+}
+
+/// Gives `size_of` the Rust reader, for a binding that checks its copy of the layout (DEC-019 rule
+/// 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_midi1_reader_size();
+
+/// Sets up `writer`, with running status when `running_status` is true.
+///
+/// # Safety
+/// `writer` is null or points to writable storage of a [`ZmidiMidi1Writer`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiMidi1Writer>, ffi.Bool)>(
+  symbol: 'zmidi_midi1_writer_init',
+)
+external int _zmidi_midi1_writer_init(
+  ffi.Pointer<ZmidiMidi1Writer> writer,
+  bool running_status,
+);
+
+ZmidiStatus zmidi_midi1_writer_init(
+  ffi.Pointer<ZmidiMidi1Writer> writer,
+  bool running_status,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_midi1_writer_init(writer, running_status),
+  );
+}
+
+/// The next Channel Voice message writes its status byte, also with running status.
+///
+/// # Safety
+/// `writer` is null or was set up by [`zmidi_midi1_writer_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiMidi1Writer>)>(
+  symbol: 'zmidi_midi1_writer_refresh_status',
+)
+external int _zmidi_midi1_writer_refresh_status(
+  ffi.Pointer<ZmidiMidi1Writer> writer,
+);
+
+ZmidiStatus zmidi_midi1_writer_refresh_status(
+  ffi.Pointer<ZmidiMidi1Writer> writer,
+) {
+  return ZmidiStatus.fromValue(_zmidi_midi1_writer_refresh_status(writer));
+}
+
+/// Gives `size_of` the Rust writer, for a binding that checks its copy of the layout (DEC-019 rule
+/// 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_midi1_writer_size();
+
+/// Writes the bytes of `message` into `out` (`capacity` bytes) and their count into `count`. A
+/// System Exclusive message takes its `length` bytes from `sysex`, which may be null for the other
+/// kinds. An invalid message (a status byte of another kind, a data byte above 7FH, a System
+/// Exclusive message with no F0H first, no F7H last or a data byte above 7FH) gives
+/// [`ZmidiStatus::InvalidArgument`], and a small `out` gives [`ZmidiStatus::BufferTooSmall`],
+/// both with no state change.
+///
+/// # Safety
+/// `writer` was set up by [`zmidi_midi1_writer_init`]; `message` is readable; `sysex` is null or
+/// points to `message.length` readable bytes; `out` points to `capacity` writable bytes; `count`
+/// is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMidi1Writer>,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_midi1_writer_write')
+external int _zmidi_midi1_writer_write(
+  ffi.Pointer<ZmidiMidi1Writer> writer,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ffi.Uint8> sysex,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+);
+
+ZmidiStatus zmidi_midi1_writer_write(
+  ffi.Pointer<ZmidiMidi1Writer> writer,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ffi.Uint8> sysex,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_midi1_writer_write(writer, message, sysex, out, capacity, count),
+  );
+}
+
+/// Writes the mode information of `state` into `info`.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mode_init`]; `info` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiModeState>,
+    ffi.Pointer<ZmidiModeInfo>,
+  )
+>(symbol: 'zmidi_mode_info')
+external int _zmidi_mode_info(
+  ffi.Pointer<ZmidiModeState> state,
+  ffi.Pointer<ZmidiModeInfo> info,
+);
+
+ZmidiStatus zmidi_mode_info(
+  ffi.Pointer<ZmidiModeState> state,
+  ffi.Pointer<ZmidiModeInfo> info,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mode_info(state, info));
+}
+
+/// Sets up `state` from `config`, in Mode 1 with Local Control on. A Basic Channel above 15 or a
+/// mode mask above 0FH gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `state` is null or points to writable storage of a [`ZmidiModeState`]; `config` is null or
+/// readable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiModeState>,
+    ffi.Pointer<ZmidiModeConfig>,
+  )
+>(symbol: 'zmidi_mode_init')
+external int _zmidi_mode_init(
+  ffi.Pointer<ZmidiModeState> state,
+  ffi.Pointer<ZmidiModeConfig> config,
+);
+
+ZmidiStatus zmidi_mode_init(
+  ffi.Pointer<ZmidiModeState> state,
+  ffi.Pointer<ZmidiModeConfig> config,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mode_init(state, config));
+}
+
+/// Takes one Channel Voice `message` and writes its action into `action`. A message that is not a
+/// valid Channel Voice message gives [`ZmidiStatus::InvalidArgument`] and changes nothing.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_mode_init`]; `message` is readable; `action` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiModeState>,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.Pointer<ZmidiModeAction>,
+  )
+>(symbol: 'zmidi_mode_receive')
+external int _zmidi_mode_receive(
+  ffi.Pointer<ZmidiModeState> state,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiModeAction> action,
+);
+
+ZmidiStatus zmidi_mode_receive(
+  ffi.Pointer<ZmidiModeState> state,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiModeAction> action,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mode_receive(state, message, action));
+}
+
+/// Sets the Basic Channel (0 to 15), for example from a front panel.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mode_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiModeState>, ffi.Uint8)>(
+  symbol: 'zmidi_mode_set_basic_channel',
+)
+external int _zmidi_mode_set_basic_channel(
+  ffi.Pointer<ZmidiModeState> state,
+  int channel,
+);
+
+ZmidiStatus zmidi_mode_set_basic_channel(
+  ffi.Pointer<ZmidiModeState> state,
+  int channel,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mode_set_basic_channel(state, channel));
+}
+
+/// Sets Local Control on or off from the program.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mode_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiModeState>, ffi.Bool)>(
+  symbol: 'zmidi_mode_set_local',
+)
+external int _zmidi_mode_set_local(ffi.Pointer<ZmidiModeState> state, bool on);
+
+ZmidiStatus zmidi_mode_set_local(ffi.Pointer<ZmidiModeState> state, bool on) {
+  return ZmidiStatus.fromValue(_zmidi_mode_set_local(state, on));
+}
+
+/// Selects Mono with M (0 to 127), as Mono On does, from the program.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mode_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiModeState>, ffi.Uint8)>(
+  symbol: 'zmidi_mode_set_mono',
+)
+external int _zmidi_mode_set_mono(ffi.Pointer<ZmidiModeState> state, int m);
+
+ZmidiStatus zmidi_mode_set_mono(ffi.Pointer<ZmidiModeState> state, int m) {
+  return ZmidiStatus.fromValue(_zmidi_mode_set_mono(state, m));
+}
+
+/// Sets the Omni flag, as Omni On or Omni Off does, from the program.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mode_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiModeState>, ffi.Bool)>(
+  symbol: 'zmidi_mode_set_omni',
+)
+external int _zmidi_mode_set_omni(ffi.Pointer<ZmidiModeState> state, bool on);
+
+ZmidiStatus zmidi_mode_set_omni(ffi.Pointer<ZmidiModeState> state, bool on) {
+  return ZmidiStatus.fromValue(_zmidi_mode_set_omni(state, on));
+}
+
+/// Selects Poly, as Poly On does, from the program.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mode_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiModeState>)>(
+  symbol: 'zmidi_mode_set_poly',
+)
+external int _zmidi_mode_set_poly(ffi.Pointer<ZmidiModeState> state);
+
+ZmidiStatus zmidi_mode_set_poly(ffi.Pointer<ZmidiModeState> state) {
+  return ZmidiStatus.fromValue(_zmidi_mode_set_poly(state));
+}
+
+/// Gives `size_of` the Rust mode state, for a binding that checks its copy of the layout (DEC-019
+/// rule 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_mode_state_size();
+
+/// The System Reset action of the program: Omni On, Poly and Local On; the Basic Channel and M stay.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_mode_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiModeState>)>(
+  symbol: 'zmidi_mode_system_reset',
+)
+external int _zmidi_mode_system_reset(ffi.Pointer<ZmidiModeState> state);
+
+ZmidiStatus zmidi_mode_system_reset(ffi.Pointer<ZmidiModeState> state) {
+  return ZmidiStatus.fromValue(_zmidi_mode_system_reset(state));
+}
+
 /// The Client form of [`zmidi_net_host_bye`].
 ///
 /// # Safety
@@ -2530,6 +3053,282 @@ ZmidiStatus zmidi_net_host_write_pending(
 ) {
   return ZmidiStatus.fromValue(
     _zmidi_net_host_write_pending(host, now_ms, buf, capacity, to, len),
+  );
+}
+
+/// Writes the new 14-bit value of the parameter of `event` from its current `value` (0 to 3FFFH)
+/// into `out`, with the RP-018 steps (zmidi-io `ParameterEvent::apply`). An event with no change,
+/// an invalid parameter or a value above 3FFFH gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `event` is null or readable; `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiParameterEvent>,
+    ffi.Uint16,
+    ffi.Pointer<ffi.Uint16>,
+  )
+>(symbol: 'zmidi_parameter_apply')
+external int _zmidi_parameter_apply(
+  ffi.Pointer<ZmidiParameterEvent> event,
+  int value,
+  ffi.Pointer<ffi.Uint16> out,
+);
+
+ZmidiStatus zmidi_parameter_apply(
+  ffi.Pointer<ZmidiParameterEvent> event,
+  int value,
+  ffi.Pointer<ffi.Uint16> out,
+) {
+  return ZmidiStatus.fromValue(_zmidi_parameter_apply(event, value, out));
+}
+
+/// Writes one `change` (a [`ZmidiParameterChange`] value, not none; `value` is the Data Entry byte)
+/// on `channel` (0 to 15) into `out`: Data Entry MSB (6), Data Entry LSB (38), Data Increment (96)
+/// or Data Decrement (97) with value 0.
+///
+/// # Safety
+/// `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint32,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMidi1Message>,
+  )
+>(symbol: 'zmidi_parameter_change_message')
+external int _zmidi_parameter_change_message(
+  int channel,
+  int change,
+  int value,
+  ffi.Pointer<ZmidiMidi1Message> out,
+);
+
+ZmidiStatus zmidi_parameter_change_message(
+  int channel,
+  int change,
+  int value,
+  ffi.Pointer<ZmidiMidi1Message> out,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_parameter_change_message(channel, change, value, out),
+  );
+}
+
+/// Writes the number of `parameter` on `channel` (0 to 15) as its MSB and then its LSB Control
+/// Change into `out` (`capacity` entries, at least 2), and 2 into `count`. A registered 7FH 7FH
+/// is the null number.
+///
+/// # Safety
+/// `parameter` is readable; `out` points to `capacity` writable entries; `count` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Pointer<ZmidiParameter>,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_parameter_select_messages')
+external int _zmidi_parameter_select_messages(
+  int channel,
+  ffi.Pointer<ZmidiParameter> parameter,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+);
+
+ZmidiStatus zmidi_parameter_select_messages(
+  int channel,
+  ffi.Pointer<ZmidiParameter> parameter,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_parameter_select_messages(channel, parameter, out, capacity, count),
+  );
+}
+
+/// Gives `size_of` the Rust parameter receiver, for a binding that checks its copy of the layout
+/// (DEC-019 rule 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_parameter_state_size();
+
+/// Writes a parameter `value` (0 to 3FFFH) of `parameter` on `channel` (0 to 15) as the number
+/// and then Data Entry MSB and LSB into `out` (`capacity` entries, at least 4), and 4 into
+/// `count`.
+///
+/// # Safety
+/// `parameter` is readable; `out` points to `capacity` writable entries; `count` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Pointer<ZmidiParameter>,
+    ffi.Uint16,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_parameter_value_messages')
+external int _zmidi_parameter_value_messages(
+  int channel,
+  ffi.Pointer<ZmidiParameter> parameter,
+  int value,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+);
+
+ZmidiStatus zmidi_parameter_value_messages(
+  int channel,
+  ffi.Pointer<ZmidiParameter> parameter,
+  int value,
+  ffi.Pointer<ZmidiMidi1Message> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> count,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_parameter_value_messages(
+      channel,
+      parameter,
+      value,
+      out,
+      capacity,
+      count,
+    ),
+  );
+}
+
+/// Sets up `state`: no number received, RPN reception on and NRPN reception off.
+///
+/// # Safety
+/// `state` is null or points to writable storage of a [`ZmidiParameterState`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiParameterState>)>(
+  symbol: 'zmidi_parameters_init',
+)
+external int _zmidi_parameters_init(ffi.Pointer<ZmidiParameterState> state);
+
+ZmidiStatus zmidi_parameters_init(ffi.Pointer<ZmidiParameterState> state) {
+  return ZmidiStatus.fromValue(_zmidi_parameters_init(state));
+}
+
+/// Takes one Channel Voice `message` of the channel of `state` and writes its event into `event`
+/// (the change none when the message gives no event). A message that is not a valid Channel Voice
+/// message gives [`ZmidiStatus::InvalidArgument`] and changes nothing.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_parameters_init`]; `message` is readable; `event` is writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiParameterState>,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.Pointer<ZmidiParameterEvent>,
+  )
+>(symbol: 'zmidi_parameters_receive')
+external int _zmidi_parameters_receive(
+  ffi.Pointer<ZmidiParameterState> state,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiParameterEvent> event,
+);
+
+ZmidiStatus zmidi_parameters_receive(
+  ffi.Pointer<ZmidiParameterState> state,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiParameterEvent> event,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_parameters_receive(state, message, event),
+  );
+}
+
+/// Writes whether RPN reception is on into `rpn` and whether NRPN reception is on into `nrpn`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_parameters_init`]; `rpn` and `nrpn` are writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiParameterState>,
+    ffi.Pointer<ffi.Bool>,
+    ffi.Pointer<ffi.Bool>,
+  )
+>(symbol: 'zmidi_parameters_reception')
+external int _zmidi_parameters_reception(
+  ffi.Pointer<ZmidiParameterState> state,
+  ffi.Pointer<ffi.Bool> rpn,
+  ffi.Pointer<ffi.Bool> nrpn,
+);
+
+ZmidiStatus zmidi_parameters_reception(
+  ffi.Pointer<ZmidiParameterState> state,
+  ffi.Pointer<ffi.Bool> rpn,
+  ffi.Pointer<ffi.Bool> nrpn,
+) {
+  return ZmidiStatus.fromValue(_zmidi_parameters_reception(state, rpn, nrpn));
+}
+
+/// The Reset All Controllers action of the program: the RPN and NRPN numbers become 7FH 7FH.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_parameters_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiParameterState>)>(
+  symbol: 'zmidi_parameters_reset',
+)
+external int _zmidi_parameters_reset(ffi.Pointer<ZmidiParameterState> state);
+
+ZmidiStatus zmidi_parameters_reset(ffi.Pointer<ZmidiParameterState> state) {
+  return ZmidiStatus.fromValue(_zmidi_parameters_reset(state));
+}
+
+/// Writes whether a parameter is selected into `selected`, and the parameter (or zeros) into
+/// `parameter`.
+///
+/// # Safety
+/// `state` was set up by [`zmidi_parameters_init`]; `selected` and `parameter` are writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiParameterState>,
+    ffi.Pointer<ffi.Bool>,
+    ffi.Pointer<ZmidiParameter>,
+  )
+>(symbol: 'zmidi_parameters_selection')
+external int _zmidi_parameters_selection(
+  ffi.Pointer<ZmidiParameterState> state,
+  ffi.Pointer<ffi.Bool> selected,
+  ffi.Pointer<ZmidiParameter> parameter,
+);
+
+ZmidiStatus zmidi_parameters_selection(
+  ffi.Pointer<ZmidiParameterState> state,
+  ffi.Pointer<ffi.Bool> selected,
+  ffi.Pointer<ZmidiParameter> parameter,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_parameters_selection(state, selected, parameter),
+  );
+}
+
+/// Turns RPN reception and NRPN reception on or off. A kind that goes on waits again for both bytes
+/// of its number.
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_parameters_init`].
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiParameterState>, ffi.Bool, ffi.Bool)
+>(symbol: 'zmidi_parameters_set_reception')
+external int _zmidi_parameters_set_reception(
+  ffi.Pointer<ZmidiParameterState> state,
+  bool rpn,
+  bool nrpn,
+);
+
+ZmidiStatus zmidi_parameters_set_reception(
+  ffi.Pointer<ZmidiParameterState> state,
+  bool rpn,
+  bool nrpn,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_parameters_set_reception(state, rpn, nrpn),
   );
 }
 
@@ -4540,6 +5339,18 @@ const int ZMIDI_CLIP_READER_WORDS = 7;
 
 const int ZMIDI_CLIP_WRITER_WORDS = 12;
 
+const int ZMIDI_CONTROLLER_KEEP = 255;
+
+const int ZMIDI_CONTROLLER_STATE_WORDS = 5;
+
+const int ZMIDI_MIDI1_READER_MAX_EVENTS = 2;
+
+const int ZMIDI_MIDI1_READER_WORDS = 5;
+
+const int ZMIDI_MIDI1_WRITER_WORDS = 1;
+
+const int ZMIDI_MODE_STATE_WORDS = 2;
+
 const int ZMIDI_NET_AUTH_SHARED_SECRET = 1;
 
 const int ZMIDI_NET_AUTH_USER = 2;
@@ -4553,6 +5364,8 @@ const int ZMIDI_NET_HOST_WORDS = 1336;
 const int ZMIDI_NET_MAX_PAYLOAD = 1400;
 
 const int ZMIDI_NET_RECORD_HEADER = 21;
+
+const int ZMIDI_PARAMETER_STATE_WORDS = 1;
 
 const int ZMIDI_PE_ID_LEN = 37;
 
@@ -5226,6 +6039,358 @@ final class ZmidiClipWriter extends ffi.Struct {
   external ffi.Array<ffi.Uint64> _opaque;
 }
 
+/// The event of one received message.
+final class ZmidiControllerEvent extends ffi.Struct {
+  /// A [`ZmidiControllerEventKind`] value.
+  @ffi.Uint32()
+  external int kind;
+
+  /// The controller number.
+  @ffi.Uint8()
+  external int controller;
+
+  /// The program number.
+  @ffi.Uint8()
+  external int program;
+
+  /// The Portamento source note.
+  @ffi.Uint8()
+  external int source;
+
+  /// The program event has a bank.
+  @ffi.Bool()
+  external bool has_bank;
+
+  /// The 14-bit or 7-bit controller value.
+  @ffi.Uint16()
+  external int value;
+
+  /// The 14-bit bank of a program event.
+  @ffi.Uint16()
+  external int bank;
+
+  static ffi.Pointer<ZmidiControllerEvent> $allocate(
+    ffi.Allocator $allocator, {
+    required int kind,
+    required int controller,
+    required int program,
+    required int source,
+    required bool has_bank,
+    required int value,
+    required int bank,
+  }) => $allocator<ZmidiControllerEvent>()
+    ..ref.kind = kind
+    ..ref.controller = controller
+    ..ref.program = program
+    ..ref.source = source
+    ..ref.has_bank = has_bank
+    ..ref.value = value
+    ..ref.bank = bank;
+}
+
+/// The kind of a [`ZmidiControllerEvent`].
+enum ZmidiControllerEventKind {
+  /// The message gives no event.
+  ZMIDI_CONTROLLER_EVENT_KIND_NONE(0),
+
+  /// A 14-bit controller: `controller` 0 to 31 and the 14-bit `value`.
+  ZMIDI_CONTROLLER_EVENT_KIND_CONTROLLER14(1),
+
+  /// A single-byte controller: `controller` 64 to 119 and `value` 0 to 127.
+  ZMIDI_CONTROLLER_EVENT_KIND_CONTROLLER7(2),
+
+  /// Program Change: `program`, and `bank` when `has_bank`.
+  ZMIDI_CONTROLLER_EVENT_KIND_PROGRAM(3),
+
+  /// A Note On after a Portamento Control: `source` is the source note.
+  ZMIDI_CONTROLLER_EVENT_KIND_PORTAMENTO(4),
+
+  /// Reset All Controllers (RP-015): see `zmidi_controller_reset_value`.
+  ZMIDI_CONTROLLER_EVENT_KIND_RESET_ALL_CONTROLLERS(5);
+
+  final int value;
+  const ZmidiControllerEventKind(this.value);
+
+  static ZmidiControllerEventKind fromValue(int value) => switch (value) {
+    0 => ZMIDI_CONTROLLER_EVENT_KIND_NONE,
+    1 => ZMIDI_CONTROLLER_EVENT_KIND_CONTROLLER14,
+    2 => ZMIDI_CONTROLLER_EVENT_KIND_CONTROLLER7,
+    3 => ZMIDI_CONTROLLER_EVENT_KIND_PROGRAM,
+    4 => ZMIDI_CONTROLLER_EVENT_KIND_PORTAMENTO,
+    5 => ZMIDI_CONTROLLER_EVENT_KIND_RESET_ALL_CONTROLLERS,
+    _ => throw ArgumentError(
+      'Unknown value for ZmidiControllerEventKind: $value',
+    ),
+  };
+}
+
+/// Storage of one controller state (one channel). The program gives it;
+/// [`zmidi_controllers_init`] sets it up.
+final class ZmidiControllerState extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([5])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// The kind of a [`ZmidiMidi1Message`].
+enum ZmidiMidi1Kind {
+  /// No message.
+  ZMIDI_MIDI1_KIND_NONE(0),
+
+  /// A Channel Voice or Channel Mode message (status 80H to EFH).
+  ZMIDI_MIDI1_KIND_CHANNEL_VOICE(1),
+
+  /// A System Common or System Real Time message (status F1H to FFH, not F7H).
+  ZMIDI_MIDI1_KIND_SYSTEM(2),
+
+  /// A complete System Exclusive message, F0H to F7H, in the caller buffer.
+  ZMIDI_MIDI1_KIND_SYS_EX(3),
+
+  /// A System Exclusive message that does not fit in the caller buffer; its bytes are discarded.
+  ZMIDI_MIDI1_KIND_SYS_EX_TOO_LONG(4);
+
+  final int value;
+  const ZmidiMidi1Kind(this.value);
+
+  static ZmidiMidi1Kind fromValue(int value) => switch (value) {
+    0 => ZMIDI_MIDI1_KIND_NONE,
+    1 => ZMIDI_MIDI1_KIND_CHANNEL_VOICE,
+    2 => ZMIDI_MIDI1_KIND_SYSTEM,
+    3 => ZMIDI_MIDI1_KIND_SYS_EX,
+    4 => ZMIDI_MIDI1_KIND_SYS_EX_TOO_LONG,
+    _ => throw ArgumentError('Unknown value for ZmidiMidi1Kind: $value'),
+  };
+}
+
+/// One typed MIDI 1.0 message as flat bytes, with no UMP Group (REQ-FFI-MIDI1-001).
+final class ZmidiMidi1Message extends ffi.Struct {
+  /// A [`ZmidiMidi1Kind`] value.
+  @ffi.Uint32()
+  external int kind;
+
+  /// The status byte, 80H to FFH; F0H for a System Exclusive message.
+  @ffi.Uint8()
+  external int status;
+
+  /// The first data byte, 00H to 7FH; 0 when the message has none.
+  @ffi.Uint8()
+  external int data1;
+
+  /// The second data byte, 00H to 7FH; 0 when the message has none.
+  @ffi.Uint8()
+  external int data2;
+
+  /// The length in bytes of a System Exclusive message from F0H to F7H; 0 for the other kinds.
+  @ffi.Uint32()
+  external int length;
+
+  static ffi.Pointer<ZmidiMidi1Message> $allocate(
+    ffi.Allocator $allocator, {
+    required int kind,
+    required int status,
+    required int data1,
+    required int data2,
+    required int length,
+  }) => $allocator<ZmidiMidi1Message>()
+    ..ref.kind = kind
+    ..ref.status = status
+    ..ref.data1 = data1
+    ..ref.data2 = data2
+    ..ref.length = length;
+}
+
+/// Storage of one typed MIDI 1.0 byte reader. The program gives it; [`zmidi_midi1_reader_init`]
+/// sets it up.
+final class ZmidiMidi1Reader extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([5])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// Storage of one typed MIDI 1.0 byte writer. The program gives it; [`zmidi_midi1_writer_init`]
+/// sets it up.
+final class ZmidiMidi1Writer extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([1])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// The action of one received message.
+final class ZmidiModeAction extends ffi.Struct {
+  /// A [`ZmidiModeActionKind`] value.
+  @ffi.Uint32()
+  external int kind;
+
+  /// The channel of an All Notes Off, All Sound Off or Reset All Controllers action (Mode 4), or
+  /// FFH for all channels of the instrument.
+  @ffi.Uint8()
+  external int channel;
+
+  /// The Mode 4 voice of a voice message, or FFH for none.
+  @ffi.Uint8()
+  external int voice;
+
+  /// Local Control on.
+  @ffi.Bool()
+  external bool on;
+
+  /// The mode message changed the mode.
+  @ffi.Bool()
+  external bool changed;
+
+  /// The mode in use is an alternate mode.
+  @ffi.Bool()
+  external bool alternate;
+
+  static ffi.Pointer<ZmidiModeAction> $allocate(
+    ffi.Allocator $allocator, {
+    required int kind,
+    required int channel,
+    required int voice,
+    required bool on,
+    required bool changed,
+    required bool alternate,
+  }) => $allocator<ZmidiModeAction>()
+    ..ref.kind = kind
+    ..ref.channel = channel
+    ..ref.voice = voice
+    ..ref.on = on
+    ..ref.changed = changed
+    ..ref.alternate = alternate;
+}
+
+/// The kind of a [`ZmidiModeAction`].
+enum ZmidiModeActionKind {
+  /// The message is not for this instrument.
+  ZMIDI_MODE_ACTION_KIND_IGNORE(0),
+
+  /// A voice message for the instrument; `voice` is the Mode 4 voice.
+  ZMIDI_MODE_ACTION_KIND_VOICE(1),
+
+  /// A Global Controller message (Mode 4).
+  ZMIDI_MODE_ACTION_KIND_GLOBAL(2),
+
+  /// All Notes Off for `channel`.
+  ZMIDI_MODE_ACTION_KIND_ALL_NOTES_OFF(3),
+
+  /// All Sound Off for `channel`.
+  ZMIDI_MODE_ACTION_KIND_ALL_SOUND_OFF(4),
+
+  /// Reset All Controllers for `channel`.
+  ZMIDI_MODE_ACTION_KIND_RESET_ALL_CONTROLLERS(5),
+
+  /// Local Control; `on`.
+  ZMIDI_MODE_ACTION_KIND_LOCAL_CONTROL(6),
+
+  /// A mode message: all notes off for all voices; `changed` and `alternate`.
+  ZMIDI_MODE_ACTION_KIND_MODE_CHANGE(7);
+
+  final int value;
+  const ZmidiModeActionKind(this.value);
+
+  static ZmidiModeActionKind fromValue(int value) => switch (value) {
+    0 => ZMIDI_MODE_ACTION_KIND_IGNORE,
+    1 => ZMIDI_MODE_ACTION_KIND_VOICE,
+    2 => ZMIDI_MODE_ACTION_KIND_GLOBAL,
+    3 => ZMIDI_MODE_ACTION_KIND_ALL_NOTES_OFF,
+    4 => ZMIDI_MODE_ACTION_KIND_ALL_SOUND_OFF,
+    5 => ZMIDI_MODE_ACTION_KIND_RESET_ALL_CONTROLLERS,
+    6 => ZMIDI_MODE_ACTION_KIND_LOCAL_CONTROL,
+    7 => ZMIDI_MODE_ACTION_KIND_MODE_CHANGE,
+    _ => throw ArgumentError('Unknown value for ZmidiModeActionKind: $value'),
+  };
+}
+
+/// The configuration of a mode state.
+final class ZmidiModeConfig extends ffi.Struct {
+  /// The Basic Channel, 0 to 15.
+  @ffi.Uint8()
+  external int basic_channel;
+
+  /// The implemented modes: bit 0 Mode 1 (always implemented), bit 1 Mode 2, bit 2 Mode 3, bit 3
+  /// Mode 4.
+  @ffi.Uint8()
+  external int implemented;
+
+  /// True: a mode that is not implemented gives the alternate mode (p. 23); false: the Mode
+  /// message is ignored.
+  @ffi.Bool()
+  external bool alternate;
+
+  /// The voice count for M = 0 (Mode 4).
+  @ffi.Uint8()
+  external int voices;
+
+  /// True: the channel below the Basic Channel carries the Global Controllers in Mode 4.
+  @ffi.Bool()
+  external bool global_controllers;
+
+  static ffi.Pointer<ZmidiModeConfig> $allocate(
+    ffi.Allocator $allocator, {
+    required int basic_channel,
+    required int implemented,
+    required bool alternate,
+    required int voices,
+    required bool global_controllers,
+  }) => $allocator<ZmidiModeConfig>()
+    ..ref.basic_channel = basic_channel
+    ..ref.implemented = implemented
+    ..ref.alternate = alternate
+    ..ref.voices = voices
+    ..ref.global_controllers = global_controllers;
+}
+
+/// The mode information of a mode state.
+final class ZmidiModeInfo extends ffi.Struct {
+  /// The mode in use, 1 to 4.
+  @ffi.Uint8()
+  external int mode;
+
+  /// The mode of the Omni and Mono flags, 1 to 4.
+  @ffi.Uint8()
+  external int requested_mode;
+
+  /// The mode in use is an alternate mode.
+  @ffi.Bool()
+  external bool alternate;
+
+  /// The Basic Channel, 0 to 15.
+  @ffi.Uint8()
+  external int basic_channel;
+
+  /// M of the last Mono On.
+  @ffi.Uint8()
+  external int m;
+
+  /// Local Control on.
+  @ffi.Bool()
+  external bool local;
+
+  static ffi.Pointer<ZmidiModeInfo> $allocate(
+    ffi.Allocator $allocator, {
+    required int mode,
+    required int requested_mode,
+    required bool alternate,
+    required int basic_channel,
+    required int m,
+    required bool local,
+  }) => $allocator<ZmidiModeInfo>()
+    ..ref.mode = mode
+    ..ref.requested_mode = requested_mode
+    ..ref.alternate = alternate
+    ..ref.basic_channel = basic_channel
+    ..ref.m = m
+    ..ref.local = local;
+}
+
+/// Storage of one receiver mode state (one instrument). The program gives it; [`zmidi_mode_init`]
+/// sets it up.
+final class ZmidiModeState extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([2])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
+
 /// An IP address and a UDP port.
 final class ZmidiNetAddr extends ffi.Struct {
   /// 4: IPv4 (the first 4 bytes of `ip`); 6: IPv6.
@@ -5519,6 +6684,84 @@ final class ZmidiNetUser extends ffi.Struct {
     ..ref.username_len = username_len
     ..ref.password = password
     ..ref.password_len = password_len;
+}
+
+/// A parameter number.
+final class ZmidiParameter extends ffi.Struct {
+  /// True: a Registered Parameter Number (controllers 101 and 100); false: a Non-Registered
+  /// Parameter Number (controllers 99 and 98).
+  @ffi.Bool()
+  external bool registered;
+
+  /// The MSB, 0 to 127. 7FH 7FH is the null number.
+  @ffi.Uint8()
+  external int msb;
+
+  /// The LSB, 0 to 127.
+  @ffi.Uint8()
+  external int lsb;
+
+  static ffi.Pointer<ZmidiParameter> $allocate(
+    ffi.Allocator $allocator, {
+    required bool registered,
+    required int msb,
+    required int lsb,
+  }) => $allocator<ZmidiParameter>()
+    ..ref.registered = registered
+    ..ref.msb = msb
+    ..ref.lsb = lsb;
+}
+
+/// The change of a [`ZmidiParameterEvent`].
+enum ZmidiParameterChange {
+  /// The message gives no event.
+  ZMIDI_PARAMETER_CHANGE_NONE(0),
+
+  /// Data Entry MSB (controller 6): `value`.
+  ZMIDI_PARAMETER_CHANGE_DATA_ENTRY_MSB(1),
+
+  /// Data Entry LSB (controller 38): `value`.
+  ZMIDI_PARAMETER_CHANGE_DATA_ENTRY_LSB(2),
+
+  /// Data Increment (controller 96).
+  ZMIDI_PARAMETER_CHANGE_INCREMENT(3),
+
+  /// Data Decrement (controller 97).
+  ZMIDI_PARAMETER_CHANGE_DECREMENT(4);
+
+  final int value;
+  const ZmidiParameterChange(this.value);
+
+  static ZmidiParameterChange fromValue(int value) => switch (value) {
+    0 => ZMIDI_PARAMETER_CHANGE_NONE,
+    1 => ZMIDI_PARAMETER_CHANGE_DATA_ENTRY_MSB,
+    2 => ZMIDI_PARAMETER_CHANGE_DATA_ENTRY_LSB,
+    3 => ZMIDI_PARAMETER_CHANGE_INCREMENT,
+    4 => ZMIDI_PARAMETER_CHANGE_DECREMENT,
+    _ => throw ArgumentError('Unknown value for ZmidiParameterChange: $value'),
+  };
+}
+
+/// The event of one received message.
+final class ZmidiParameterEvent extends ffi.Struct {
+  /// A [`ZmidiParameterChange`] value.
+  @ffi.Uint32()
+  external int change;
+
+  /// The selected parameter.
+  external ZmidiParameter parameter;
+
+  /// The data byte of a Data Entry, 0 to 127.
+  @ffi.Uint8()
+  external int value;
+}
+
+/// Storage of one parameter receiver (one channel). The program gives it;
+/// [`zmidi_parameters_init`] sets it up.
+final class ZmidiParameterState extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([1])
+  external ffi.Array<ffi.Uint64> _opaque;
 }
 
 /// Storage of one Property Exchange engine. The program gives it; [`zmidi_pe_init`] sets it up.

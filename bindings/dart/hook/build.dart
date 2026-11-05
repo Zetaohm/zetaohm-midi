@@ -47,7 +47,7 @@ void main(List<String> args) async {
         triple,
         '--no-default-features',
         '--features',
-        'std,io,ump,ble,file,ci,net,net-auth,usb',
+        'std,io,ump,ble,file,ci,net,net-auth,usb,midi1',
         '--crate-type',
         'cdylib',
       ],

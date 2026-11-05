@@ -10,6 +10,10 @@ in the browser.
 
 - UMP: `parse`, builders such as `midi2NoteOn`, MIDI 2.0 → 1.0 translation, value scaling.
 - MIDI 1.0 byte stream ↔ UMP: `BytesToUmp`, `UmpToBytes`. Use them with Web MIDI.
+- MIDI 1.0 on bytes: `Midi1Reader` and `Midi1Writer` give and take `Midi1Message` (System Exclusive
+  whole); the receiver states `ModeState` (Modes 1 to 4), `ControllerState` (14-bit controllers, bank and
+  program, Reset All Controllers as RP-015 gives) and `ParameterState` (RPN and NRPN, the RP-018 steps
+  with `applyParameter`), and writers such as `bankProgramMessages` and `valueMessages`.
 - MIDI-CI: `CiDevice`. Network MIDI 2.0: `NetHost` and `NetClient`, with authentication.
 - USB-MIDI: `UsbLink` (for WebUSB). BLE-MIDI: `BleReader` and `BleWriter` (for Web Bluetooth).
 - USB descriptors: `UsbFunction` takes the full description of a USB MIDI function in one constructor
