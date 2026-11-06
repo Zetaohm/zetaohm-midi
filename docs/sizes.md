@@ -53,15 +53,15 @@ the goal is 1.0x for the smallest build of each job (OPT-052).
 | `emb_class_lean` | emb_class_fixed with the feature alt0 off: empty Alternate Setting 0, no USB-MIDI 1.0 data path | 6,156 | 3,556 | 1.7x | 252 | 666 | 0.4x | 1,512 | - | tusb_ump class driver (object), with Alt 0 |
 | `ci_device` | MIDI-CI Device, responder only: Discovery and management, no category feature | 6,860 | 4,615 | 1.5x | 680 | 736 | 0.9x | 408 | 1,192 | midi2 C99 CI (with its PE Get and Set) |
 | `ci_device_initiator` | MIDI-CI Device with the Initiator role (feature `initiator`), no category feature | 8,036 | 4,615 | 1.7x | 752 | 736 | 1.0x | 408 | 1,192 | midi2 C99 CI (with its PE Get and Set) |
-| `pe_engine` | Property Exchange engine (`zmidi-ci-pe`), on top of `ci_device` | 25,684 | 1,500 | 17.1x | 2,992 | - | - | 1,360 | - | midi2 C99 PE part (about) |
-| `pe_engine_no_subscriptions` | Property Exchange engine with no Subscription slots (S=0) | 22,212 | 1,500 | 14.8x | 2,520 | - | - | 1,224 | - | midi2 C99 PE part (about) |
+| `pe_engine` | Property Exchange engine (`zmidi-ci-pe`), on top of `ci_device` | 25,708 | 1,500 | 17.1x | 2,992 | - | - | 1,360 | - | midi2 C99 PE part (about) |
+| `pe_engine_no_subscriptions` | Property Exchange engine with no Subscription slots (S=0) | 22,244 | 1,500 | 14.8x | 2,520 | - | - | 1,224 | - | midi2 C99 PE part (about) |
 | `pe_one_chunk` | one-chunk Property Exchange Responder (`one_chunk::respond`) | 4,564 | 1,500 | 3.0x | 736 | - | - | 536 | - | midi2 C99 PE part (about) |
 | `pe_one_chunk_flat` | pe_one_chunk with respond_flat: the flat Header Data reader of M2-103 7.1.1 (DEC-PE-006) | 3,988 | 1,500 | 2.7x | 736 | - | - | 536 | - | midi2 C99 PE part (about) |
 | `ci_one_chunk` | MIDI-CI Device with the one-chunk PE Responder (the job of the C number) | 11,424 | 4,615 | 2.5x | 1,416 | 736 | 1.9x | 536 | 1,192 | midi2 C99 CI (with its PE Get and Set) |
 | `ci_one_chunk_flat` | ci_one_chunk with respond_flat (DEC-PE-006) | 10,848 | 4,615 | 2.4x | 1,416 | 736 | 1.9x | 536 | - | midi2 C99 CI (with its PE Get and Set) |
 | `ci_like_c` | ci_one_chunk with Profile Inquiry, Set Profile On/Off and Process Inquiry: the categories of midi2 C99 CI | 14,648 | 4,615 | 3.2x | 1,472 | 736 | 2.0x | 560 | 1,192 | midi2 C99 CI (with its PE Get and Set) |
 | `ci_like_c_flat` | ci_like_c with respond_flat (DEC-PE-006) | 14,080 | 4,615 | 3.1x | 1,472 | 736 | 2.0x | 560 | - | midi2 C99 CI (with its PE Get and Set) |
-| `full` | all of the UMP, DIN, USB, CI and PE jobs above in one firmware | 62,548 | - | - | 5,284 | - | - | 2,424 | - | no single library does all of it |
+| `full` | all of the UMP, DIN, USB, CI and PE jobs above in one firmware | 62,572 | - | - | 5,284 | - | - | 2,424 | - | no single library does all of it |
 | `ble_rx` | BLE-MIDI packet reader (`PacketReader::read`, typed `Ump`, MIDI 2.0 Protocol output) | 9,244 | - | - | 168 | - | - | 96 | - | not measured yet |
 | `ble_rx_words` | BLE-MIDI packet reader, word form (`PacketReader::read_words`, DEC-BLE-002) | 3,668 | - | - | 168 | - | - | 88 | - | not measured yet |
 | `ble_tx` | BLE-MIDI packet writer (`PacketWriter::write_packet`, ATT MTU 23) | 2,916 | - | - | 60 | - | - | 216 | - | not measured yet |

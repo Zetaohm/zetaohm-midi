@@ -528,6 +528,15 @@ fn status_of(e: HeaderError) -> Status {
     }
 }
 
+/// The Chunk room for data in `encoding`: whole 8-byte groups for "Mcoded7" and
+/// "zlib+Mcoded7" (M2-103 6.1.7), every byte for "ASCII" (REQ-PE-DATA-004).
+const fn group_room(room: usize, encoding: EncodingName) -> usize {
+    match encoding {
+        EncodingName::Ascii => room,
+        EncodingName::Mcoded7 | EncodingName::ZlibMcoded7 => room / 8 * 8,
+    }
+}
+
 /// The window that a zlib CMF byte declares (RFC 1950 2.2), `None` when not valid.
 const fn zlib_window(cmf: u8) -> Option<usize> {
     if cmf & 0x0F != 8 || cmf >> 4 > 7 {
@@ -1699,7 +1708,7 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
         t.hdr_len = header
             .write(kind.header_kind(), &mut t.hdr)
             .map_err(header_error)?;
-        t.total = self.total_chunks(host, peer, t.hdr_len, msg.total_len)?;
+        t.total = self.total_chunks(host, peer, t.hdr_len, msg.total_len, t.encoding)?;
         t.request_id = host.allocate(peer, kind.inquiry())?;
         let res = header.resource.unwrap_or(HeaderStr::Text(""));
         t.resource_list = kind == TxnKind::Get && res.eq_str("ResourceList");
@@ -1815,17 +1824,23 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
         Ok(())
     }
 
+    /// The number of Chunks of a message of `total_len` data bytes when each Chunk except the
+    /// last takes its full [`Self::data_room`] (REQ-PE-DATA-004).
     fn total_chunks<D: PeHost>(
         &self,
         host: &D,
         peer: Muid,
         hdr_len: usize,
         total_len: Option<usize>,
+        encoding: EncodingName,
     ) -> Result<u16, TransactionError> {
         let room = self.room(host, peer);
-        let first = room
-            .checked_sub(hdr_len)
-            .ok_or(TransactionError::HeaderTooLarge)?;
+        let first = group_room(
+            room.checked_sub(hdr_len)
+                .ok_or(TransactionError::HeaderTooLarge)?,
+            encoding,
+        );
+        let room = group_room(room, encoding);
         Ok(match total_len {
             None => 0,
             Some(n) if n <= first => 1,
@@ -1846,7 +1861,12 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
         (host.peer_max_sysex(peer) as usize).saturating_sub(CHUNK_OVERHEAD + framing)
     }
 
-    /// The Property Data bytes that the next Chunk of the transaction takes.
+    /// The Property Data bytes that the next Chunk of the transaction takes. For "Mcoded7" and
+    /// "zlib+Mcoded7" data it is a whole number of 8-byte groups, so that a sender that encodes
+    /// each Chunk in whole groups fills it (REQ-PE-DATA-004). The Chunk count of a known
+    /// `total_len` follows from this room: give each Chunk except the last this number of
+    /// bytes. A shorter Chunk can make the message need more Chunks than counted, and
+    /// [`Self::send`] then refuses the Chunk with the counted number that is not the last.
     pub fn data_room<D: PeHost>(
         &self,
         host: &D,
@@ -1856,7 +1876,10 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
     ) -> Result<usize, TransactionError> {
         let t = self.txn(peer, request_id, role)?;
         let h = if t.next == 1 { t.hdr_len } else { 0 };
-        Ok(self.room(host, peer).saturating_sub(h))
+        Ok(group_room(
+            self.room(host, peer).saturating_sub(h),
+            t.encoding,
+        ))
     }
 
     fn txn(
@@ -1921,7 +1944,7 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
         } else {
             Some(0)
         };
-        let total = self.total_chunks(host, peer, hdr_len, len)?;
+        let total = self.total_chunks(host, peer, hdr_len, len, t.encoding)?;
         let t = self.txns[i]
             .as_mut()
             .ok_or(TransactionError::UnknownTransaction)?;
@@ -1968,7 +1991,8 @@ impl<'r, const T: usize, const H: usize, const S: usize, const P: usize, const Q
     }
 
     /// Writes the next Chunk of the message of this Device into `out`, with `part` as its
-    /// Property Data (at most [`Self::data_room`] bytes); `last` ends the message
+    /// Property Data (at most [`Self::data_room`] bytes; with a known total length, exactly
+    /// that number in each Chunk except the last); `last` ends the message
     /// (REQ-PE-END-009, REQ-PE-FLOW-002, -006). After the last Chunk of a reply, the
     /// transaction closes (REQ-PE-FLOW-004).
     #[allow(clippy::too_many_arguments)]

@@ -2339,12 +2339,15 @@ fn corrupt_mcoded7_chunk_is_decoded_again() {
         .eng
         .data_room(&a.dev, b.muid(), rid, Direction::Initiator)
         .unwrap();
-    let mut parts = vec![enc[..room1].to_vec()];
-    for p in enc[room1..].chunks(512 - 22) {
+    // REQ-PE-DATA-004: the room of Mcoded7 data is whole groups. Another sender can end a
+    // Chunk inside a group: Chunk 1 here is 3 bytes shorter than its room.
+    assert_eq!(room1 % 8, 0);
+    let cut = room1 - 3;
+    let mut parts = vec![enc[..cut].to_vec()];
+    for p in enc[cut..].chunks((512 - 22) / 8 * 8) {
         parts.push(p.to_vec());
     }
     assert_eq!(parts.len(), 3);
-    assert_ne!(room1 % 8, 0, "Chunk 1 ends inside an Mcoded7 group");
     let mut got = Vec::new();
     let m = a.send(b.muid(), rid, Direction::Initiator, &parts[0], false);
     let (e, out) = b.rx(&m);
@@ -4538,4 +4541,125 @@ fn corrupt_needs_flow_control() {
         b.eng.corrupt(a.muid(), rid, Direction::Responder),
         Err(TransactionError::State)
     );
+}
+
+#[test]
+fn mcoded7_chunk_room_is_whole_groups() {
+    // REQ-PE-DATA-004: the room of Mcoded7 data is whole 8-byte groups, and the Chunk count
+    // uses the same room. A sender that encodes each Chunk in whole groups (room / 8 * 8) ends
+    // at the counted Chunk for each length, in both framings.
+    let (mut a, b) = pair(512);
+    fn run<D: PeHost>(eng: &mut Eng, host: &mut D, peer: Muid, len: usize) {
+        let msg = Outgoing {
+            encoding: EncodingName::Mcoded7,
+            ..Outgoing::json(get("X-M7"), len)
+        };
+        let rid = eng
+            .request(host, peer, TxnKind::Set, &msg, None, 1_000)
+            .unwrap()
+            .request_id;
+        let data = vec![0x55u8; len];
+        let (mut sent, mut count, mut total) = (0, 0u16, 0u16);
+        let mut buf = [0u8; 600];
+        while sent < len || count == 0 {
+            let room = eng
+                .data_room(host, peer, rid, Direction::Initiator)
+                .unwrap();
+            assert_eq!(room % 8, 0, "length {len}");
+            let end = (sent + room / 8 * 8).min(len);
+            let n = eng
+                .send(
+                    host,
+                    peer,
+                    rid,
+                    Direction::Initiator,
+                    &data[sent..end],
+                    end == len,
+                    1_000,
+                    &mut buf,
+                )
+                .unwrap_or_else(|e| panic!("length {len}, Chunk {}: {e:?}", count + 1));
+            if count == 0 {
+                let (h, body) = zmidi_ci::Header::parse(&buf[..n]).unwrap();
+                total = PeChunk::read(&h, body).unwrap().total;
+            }
+            sent = end;
+            count += 1;
+        }
+        assert_eq!(count, total, "length {len}");
+        eng.abort(host, peer, rid, Direction::Initiator).ok();
+        let mut out = [0u8; 600];
+        while eng.write_pending(host, 1_000, &mut out).is_some() {}
+    }
+    let peer = b.muid();
+    for len in 0..=2_500 {
+        run(&mut a.eng, &mut a.dev, peer, len);
+        run(&mut a.eng, &mut SysExHost(&mut a.dev), peer, len);
+    }
+}
+
+#[test]
+fn mcoded7_get_reply_in_whole_groups() {
+    // REQ-PE-DATA-004 with the numbers of a device report: a Get reply of 5,489 bytes in
+    // Mcoded7 (6,274 bytes), an 80-byte reply header and a peer size of 512. The responder
+    // encodes each Chunk in whole groups: 408 bytes, then 488. It needs 14 Chunks; a count
+    // with the full room (410, then 490) gave 13, and the engine refused Chunk 13.
+    let (mut a, mut b) = pair(512);
+    let msg = Outgoing {
+        encoding: EncodingName::Mcoded7,
+        ..Outgoing::json(get("X-M7"), 0)
+    };
+    let rid = a
+        .eng
+        .request(&mut a.dev, b.muid(), TxnKind::Get, &msg, None, a.now)
+        .unwrap()
+        .request_id;
+    let m = a.send(b.muid(), rid, Direction::Initiator, &[], true);
+    b.rx(&m);
+    let data: Vec<u8> = (0..5_489u32).map(|i| (i * 7 % 251) as u8).collect();
+    let mut e = Mcoded7Encoder::new();
+    let mut enc = vec![0u8; 6_400];
+    let mut n = e.encode(&data, &mut enc).unwrap();
+    n += e.finish(&mut enc[n..]).unwrap();
+    enc.truncate(n);
+    assert_eq!(enc.len(), 6_274);
+    let r = Header {
+        status: Some(Status::OK),
+        message: Some(HeaderStr::Text("abcdefghijklmnopqrstuvwxyz")),
+        ..Default::default()
+    };
+    let reply = Outgoing {
+        encoding: EncodingName::Mcoded7,
+        ..Outgoing::json(r, enc.len())
+    };
+    b.eng
+        .reply(&mut b.dev, a.muid(), rid, &reply, b.now)
+        .unwrap();
+    let (mut sent, mut got, mut totals) = (0, Vec::new(), Vec::new());
+    while sent < enc.len() {
+        let room = b
+            .eng
+            .data_room(&b.dev, a.muid(), rid, Direction::Responder)
+            .unwrap();
+        let end = (sent + room / 8 * 8).min(enc.len());
+        let m = b.send(
+            a.muid(),
+            rid,
+            Direction::Responder,
+            &enc[sent..end],
+            end == enc.len(),
+        );
+        if sent == 0 {
+            assert_eq!((header_text(&m).len(), end), (80, 408));
+        }
+        totals.push(chunk(&m).total);
+        sent = end;
+        let (ev, _) = a.rx(&m);
+        let Some(Ev::Msg { data: d, .. }) = ev else {
+            panic!("{ev:?}")
+        };
+        got.extend(d);
+    }
+    assert_eq!(totals, vec![14; 14]);
+    assert_eq!(got, data);
 }
