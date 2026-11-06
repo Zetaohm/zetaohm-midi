@@ -67,8 +67,8 @@ JOBS = {
     "mpe_receiver_midi1": ("mpe_rx", "base", 2368, 176, None, None, "none (no other library has an MPE receiver)"),
     "mpe_sender_midi1": ("mpe_tx", "base", 576, 128, None, None, "none (no other library has an MPE note allocator)"),
     "gm_receiver_midi1": ("gm_rx", "base", 1312, 568, None, None, "none (no other library has a General MIDI receiver)"),
-    "sysex_inquiry_midi1": ("sx_inquiry", "base", 688, 16, None, None, "not measured yet (no C library of these Universal messages in the comparison set)"),
-    "sysex_gm_dc_midi1": ("sx_gm_dc", "base", 400, 16, None, None, "not measured yet"),
+    "sysex_inquiry_midi1": ("sx_inquiry", "base", 704, 16, None, None, "not measured yet (no C library of these Universal messages in the comparison set)"),
+    "sysex_gm_dc_midi1": ("sx_gm_dc", "base", 416, 16, None, None, "not measured yet"),
     "sysex_tuning_midi1": ("sx_tuning", "base", 2336, 16, None, None, "not measured yet"),
     "usb_class": ("usb2", "usb_core", 17488, 672, 3556, 666, "tusb_ump class driver (object)"),
     # ci_device: Discovery and management, no category feature (DEC-017), with a 64 B reply buffer
