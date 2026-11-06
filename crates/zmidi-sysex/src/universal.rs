@@ -522,6 +522,12 @@ impl<'b> Out<'b> {
         self.buf.get(1..end).unwrap_or(&[])
     }
 
+    /// The length written so far, also past the end of the buffer.
+    #[cfg(feature = "mmc-transport")]
+    pub(crate) fn len(&self) -> usize {
+        self.len
+    }
+
     /// Writes F7H and gives the length, or the needed length.
     pub(crate) fn finish(mut self) -> Result<usize, SysexError> {
         self.byte(EOX);

@@ -19,6 +19,10 @@ use crate::device_control::DeviceControl;
 use crate::gm::GeneralMidi;
 #[cfg(feature = "inquiry")]
 use crate::inquiry::InquiryMessage;
+#[cfg(feature = "mmc-transport")]
+use crate::mmc::MmcMessage;
+#[cfg(feature = "mtc")]
+use crate::mtc::{FullMessage, UserBits};
 #[cfg(feature = "tuning")]
 use crate::tuning::TuningMessage;
 use crate::universal::{Sysex, SysexError, SysexId, Universal};
@@ -38,6 +42,15 @@ pub enum Message<'a> {
     /// A MIDI Tuning message (feature `tuning`).
     #[cfg(feature = "tuning")]
     Tuning(TuningMessage<'a>),
+    /// The MTC Full Message (feature `mtc`).
+    #[cfg(feature = "mtc")]
+    MtcFull(FullMessage),
+    /// The MTC User Bits message (feature `mtc`).
+    #[cfg(feature = "mtc")]
+    MtcUserBits(UserBits),
+    /// An MMC command or response message (feature `mmc-transport`).
+    #[cfg(feature = "mmc-transport")]
+    Mmc(MmcMessage<'a>),
     /// Any other Universal message: the raw header and bytes.
     Universal(Universal<'a>),
     /// A manufacturer message: its ID and the bytes after it.
@@ -81,6 +94,18 @@ impl<'a> Message<'a> {
         if let Some(m) = TuningMessage::from_universal(&u)? {
             return Ok(Self::Tuning(m));
         }
+        #[cfg(feature = "mtc")]
+        if let Some(m) = FullMessage::from_universal(&u)? {
+            return Ok(Self::MtcFull(m));
+        }
+        #[cfg(feature = "mtc")]
+        if let Some(m) = UserBits::from_universal(&u)? {
+            return Ok(Self::MtcUserBits(m));
+        }
+        #[cfg(feature = "mmc-transport")]
+        if let Some(m) = MmcMessage::from_universal(&u)? {
+            return Ok(Self::Mmc(m));
+        }
         Ok(Self::Universal(u))
     }
 }
@@ -106,9 +131,17 @@ mod tests {
         assert_eq!((u.sub_id1, u.sub_id2), (0x09, Some(0x04)));
         let u = raw(&[0x7F, 0x7F, 0x04, 0x05, 0, 0]);
         assert_eq!((u.real_time, u.sub_id2), (true, Some(0x05)));
-        // Sample Dump Request (03H), MMC (Real Time 06H), File Reference (Non-Real Time 0BH).
+        // Sample Dump Request (03H), File Reference (Non-Real Time 0BH), MTC Cueing (Real Time
+        // 05H), and MMC (Real Time 06H) without its part.
         assert_eq!(raw(&[0x7E, 0x00, 0x03, 0x05, 0x00]).data, &[0x05, 0x00]);
+        assert_eq!(raw(&[0x7F, 0x7F, 0x05, 0x01, 0x00]).sub_id2, Some(0x01));
+        #[cfg(not(feature = "mmc-transport"))]
         assert_eq!(raw(&[0x7F, 0x7F, 0x06, 0x02]).data, &[0x02]);
+        #[cfg(not(feature = "mtc"))]
+        assert_eq!(
+            raw(&[0x7F, 0x7F, 0x01, 0x01, 0x61, 0, 0, 0]).sub_id2,
+            Some(0x01)
+        );
         assert_eq!(raw(&[0x7E, 0x7F, 0x0B, 0x01, 0x00]).sub_id2, None);
         // Manufacturer and Non-Commercial messages.
         assert_eq!(
@@ -147,6 +180,24 @@ mod tests {
         assert!(matches!(
             Message::parse(&[0x7E, 0x7F, 0x08, 0x00, 0x05]),
             Ok(Message::Tuning(_))
+        ));
+        #[cfg(feature = "mtc")]
+        assert!(matches!(
+            Message::parse(&[0x7F, 0x7F, 0x01, 0x01, 0x61, 0, 0, 0]),
+            Ok(Message::MtcFull(_))
+        ));
+        #[cfg(feature = "mtc")]
+        assert!(matches!(
+            Message::parse(&[0x7F, 0x7F, 0x01, 0x02, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            Ok(Message::MtcUserBits(_))
+        ));
+        #[cfg(feature = "mmc-transport")]
+        assert!(matches!(
+            Message::parse(&[0xF0, 0x7F, 0x7F, 0x06, 0x02, 0xF7]),
+            Ok(Message::Mmc(MmcMessage::Commands {
+                device_id: 0x7F,
+                ..
+            }))
         ));
         // A part reader error goes to the caller.
         #[cfg(feature = "inquiry")]

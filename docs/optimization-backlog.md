@@ -1364,3 +1364,18 @@ Other sizes measured at the same time, no action proposed: `SendOrder` 96, `JrRe
 - Options: give the offsets as a view of the message bytes (an iterator or an accessor, as `FrequencyWords`) so that
   the message is a few words; keep the owned `ScaleOffsets` for the writers. Measure again with the GM receiver
   precedent (an in-place reset removed 932 B there). No MIDI 2.0 job changes (DEC-022, R0).
+
+### OPT-059 — MIDI Time Code and the MMC transport tier are above the size estimate
+
+- Area: `crates/zmidi-sysex` (`mtc.rs`: `MtcTime::add_frames`, `MtcReader::receive`; `mmc.rs`: the command reader).
+- Measurement (2026-11-06, `tools/size-probe`): `mtc_reader_midi1` 1,768 B flash, 28 B RAM; `mtc_generator_midi1`
+  1,076 B, 12 B; `mmc_device_midi1` 2,316 B (with the SysEx and Universal readers and one response writer);
+  `mmc_controller_midi1` 1,080 B. The plan estimate was below 1 KB for each part. `MtcTime::add_frames` is 484 to
+  532 B in each MTC job. A first build with 64-bit arithmetic in `add_frames` linked `u64_div_rem` and
+  `__divmoddi4` (about 1 KB); the code now uses 32-bit arithmetic only (a day has fewer than 2^22 frames).
+- Cause: `add_frames` converts the time to a frame count and back (the drop-frame rule of SMPTE 12M in both
+  directions), with 6 divisions, for each sequence of 8 Quarter Frames. The reader and the generator only step by
+  +2, -2 or -1 frames.
+- Options: a step function for a small delta that carries frames into seconds, minutes and hours and skips the
+  drop-frame numbers directly, and the frame count only for `to_frame_count` and `from_frame_count`. Measure the
+  MMC device job without the SysEx reader to separate the MMC cost. No MIDI 2.0 job changes (DEC-022, R0).

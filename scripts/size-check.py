@@ -70,6 +70,10 @@ JOBS = {
     "sysex_inquiry_midi1": ("sx_inquiry", "base", 704, 16, None, None, "not measured yet (no C library of these Universal messages in the comparison set)"),
     "sysex_gm_dc_midi1": ("sx_gm_dc", "base", 416, 16, None, None, "not measured yet"),
     "sysex_tuning_midi1": ("sx_tuning", "base", 2336, 16, None, None, "not measured yet"),
+    "mtc_reader_midi1": ("mtc_rx", "base", 1824, 32, None, None, "none (no other library in the comparison set has MIDI Time Code)"),
+    "mtc_generator_midi1": ("mtc_tx", "base", 1120, 16, None, None, "none (no other library in the comparison set has MIDI Time Code)"),
+    "mmc_device_midi1": ("mmc_device", "base", 2400, 16, None, None, "none (no other library in the comparison set has MIDI Machine Control)"),
+    "mmc_controller_midi1": ("mmc_controller", "base", 1120, 16, None, None, "none (no other library in the comparison set has MIDI Machine Control)"),
     "usb_class": ("usb2", "usb_core", 17488, 672, 3556, 666, "tusb_ump class driver (object)"),
     # ci_device: Discovery and management, no category feature (DEC-017), with a 64 B reply buffer
     # (tests/reply_len.rs of zmidi-ci); pe_engine includes the PE message framing of zmidi-ci (feature
@@ -151,6 +155,10 @@ WHAT = {
     "sysex_inquiry_midi1": "Universal SysEx reader with the Identity Request responder (`Sysex::parse`, `Universal::parse`, `respond`; M1, DEC-022)",
     "sysex_gm_dc_midi1": "Universal SysEx reader of General MIDI System and Device Control messages (`GeneralMidi`, `DeviceControl`; M1, RP-024, CA-025, DEC-022)",
     "sysex_tuning_midi1": "Universal SysEx reader of the MIDI Tuning messages and the Scale/Octave Tuning writer (`TuningMessage`, `write_scale_octave`; M1, CA-020, CA-021, DEC-022)",
+    "mtc_reader_midi1": "MIDI Time Code reader of Quarter Frames and the Full Message (`MtcReader`, `FullMessage::from_universal`; RP-004, DEC-022)",
+    "mtc_generator_midi1": "MIDI Time Code generator of Quarter Frames and the Full Message writer (`MtcGenerator`, `FullMessage::write`; RP-004, DEC-022)",
+    "mmc_device_midi1": "MMC transport tier of a Controlled Device: the command reader and the SELECTED TIME CODE response (`MmcMessage`, `write_responses`; RP-013, DEC-022)",
+    "mmc_controller_midi1": "MMC transport tier of a controller: PLAY, STOP and LOCATE [TARGET] (`write_commands`; RP-013, DEC-022)",
     "din_out": "UMP to DIN bytes, value form (`UmpToBytes::write`)",
     "usb_class": "USB MIDI 2.0 class on usb-device, run-time `FunctionConfig`",
     "usb_class_fixed": "USB MIDI 2.0 class on usb-device, fixed function from the build script",
@@ -234,7 +242,8 @@ MIDI1_ONLY = {
     "ble_rx_midi1", "ble_rx_words_midi1", "ble_tx_midi1", "din_in_typed_midi1", "din_out_typed_midi1",
     "mode_state_midi1", "ctl_state_midi1", "param_state_midi1", "sync_state_midi1",
     "active_sensing_midi1", "mpe_receiver_midi1", "mpe_sender_midi1", "gm_receiver_midi1",
-    "sysex_inquiry_midi1", "sysex_gm_dc_midi1", "sysex_tuning_midi1",
+    "sysex_inquiry_midi1", "sysex_gm_dc_midi1", "sysex_tuning_midi1", "mtc_reader_midi1", "mtc_generator_midi1",
+    "mmc_device_midi1", "mmc_controller_midi1",
 }
 # `ms2::check_max_packet` is the USB 2.0 wMaxPacketSize rule that Alternate Setting 0 uses too, so it is not
 # MIDI 2.0 code.

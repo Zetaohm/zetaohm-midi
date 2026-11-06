@@ -1,6 +1,7 @@
 //! MIDI 1.0 Universal System Exclusive messages (DEC-022): the header, the Manufacturer ID and
 //! Device ID rules, and the parts Device Inquiry (`inquiry`), General MIDI (`gm`), Device Control
-//! (`device-control`) and MIDI Tuning (`tuning`).
+//! (`device-control`), MIDI Tuning (`tuning`), MIDI Time Code (`mtc`) and the MIDI Machine Control
+//! transport (`mmc-transport`).
 //!
 //! The input is one complete System Exclusive message as bytes, with or without F0H and F7H, so
 //! the crate works for DIN bytes, USB-MIDI 1.0, BLE-MIDI and UMP System Exclusive (7-bit) data.
@@ -42,6 +43,23 @@ pub use tuning::{
     write_scale_octave, FrequencyWord, FrequencyWords, NoteChanges, ScaleOffsets, TuningMessage,
 };
 
+#[cfg(feature = "mtc")]
+pub mod mtc;
+#[cfg(feature = "mtc")]
+pub use mtc::{
+    Direction, FullMessage, MtcEvent, MtcGenerator, MtcReader, MtcSequence, MtcTime, QuarterFrame,
+    TimeCodeType, UserBits,
+};
+
+#[cfg(feature = "mmc-transport")]
+pub mod mmc;
+#[cfg(feature = "mmc-transport")]
+pub use mmc::{
+    full_name, short_name, write_commands, write_info_fields, write_responses, Commands, FinalByte,
+    InfoField, InfoFields, MmcCommand, MmcMessage, ShortTimeCode, StandardTimeCode, TimeCodeStatus,
+    MAX_STRING,
+};
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -50,7 +68,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("inquiry = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\"]"),
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
             "{manifest}"
         );
         assert!(manifest.contains("default = [\"full\"]"), "{manifest}");
@@ -62,7 +80,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("gm = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\"]"),
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
             "{manifest}"
         );
     }
@@ -73,7 +91,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("device-control = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\"]"),
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
             "{manifest}"
         );
     }
@@ -84,7 +102,29 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("tuning = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\"]"),
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
+            "{manifest}"
+        );
+    }
+
+    #[test]
+    fn mtc_is_in_the_default_features() {
+        // REQ-MTC-009: MIDI Time Code is on by default.
+        let manifest = include_str!("../Cargo.toml");
+        assert!(manifest.contains("mtc = []"), "{manifest}");
+        assert!(
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
+            "{manifest}"
+        );
+    }
+
+    #[test]
+    fn mmc_transport_is_in_the_default_features() {
+        // REQ-MMC-007: the MMC transport tier is on by default and needs MIDI Time Code.
+        let manifest = include_str!("../Cargo.toml");
+        assert!(manifest.contains("mmc-transport = [\"mtc\"]"), "{manifest}");
+        assert!(
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
             "{manifest}"
         );
     }

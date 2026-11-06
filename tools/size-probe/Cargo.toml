@@ -126,6 +126,12 @@ gm_rx = ["io", "zmidi-io/gm"]
 sx_inquiry = ["dep:zmidi-sysex", "zmidi-sysex/inquiry"]
 sx_gm_dc = ["dep:zmidi-sysex", "zmidi-sysex/gm", "zmidi-sysex/device-control"]
 sx_tuning = ["dep:zmidi-sysex", "zmidi-sysex/tuning"]
+# The MIDI Time Code reader (Quarter Frames and the Full Message) and the generator (zmidi-sysex mtc).
+mtc_rx = ["dep:zmidi-sysex", "zmidi-sysex/mtc"]
+mtc_tx = ["dep:zmidi-sysex", "zmidi-sysex/mtc"]
+# The MMC transport tier: a Controlled Device (commands in, a response out) and a controller.
+mmc_device = ["dep:zmidi-sysex", "zmidi-sysex/mmc-transport"]
+mmc_controller = ["dep:zmidi-sysex", "zmidi-sysex/mmc-transport"]
 up_lean = ["ump_full"]
 # MIDI 1.0 to 2.0 Protocol, word API (Midi1ToMidi2Group::translate_words), one Group.
 up_words = ["ump_full"]

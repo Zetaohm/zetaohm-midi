@@ -75,7 +75,7 @@ fn main() -> ! {
         remote::run(&w);
         #[cfg(feature = "inject")]
         inject::run(&w);
-        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx", feature = "gm_rx", feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning"))]
+        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx", feature = "gm_rx", feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning", feature = "mtc_rx", feature = "mtc_tx", feature = "mmc_device", feature = "mmc_controller"))]
         lean::run(&w);
         #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1", feature = "ble_tx_midi1", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
         transport::run(&w);
@@ -786,7 +786,7 @@ mod inject {
 }
 
 // ---------------------------------------------------------------- lean variants
-#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx", feature = "gm_rx", feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning"))]
+#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx", feature = "gm_rx", feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning", feature = "mtc_rx", feature = "mtc_tx", feature = "mmc_device", feature = "mmc_controller"))]
 mod lean {
     use super::*;
     #[allow(unused_imports)]
@@ -1091,6 +1091,96 @@ mod lean {
                 black_box(zmidi_sysex::write_scale_octave(true, 0x7F, w[1] as u16, &o, &mut out).ok());
                 black_box(&out);
             }
+        }
+        #[cfg(feature = "mtc_rx")]
+        {
+            // The MTC reader of a slave: Quarter Frame data bytes and a Full Message.
+            static mut RX: zmidi_sysex::MtcReader = zmidi_sysex::MtcReader::new();
+            let rx = unsafe { &mut *(&raw mut RX) };
+            for &b in input_bytes() {
+                black_box(rx.receive(b));
+            }
+            let bytes: [u8; 10] = core::array::from_fn(|i| w[i] as u8);
+            if let Ok(s) = zmidi_sysex::Sysex::parse(&bytes) {
+                if let Ok(Some(u)) = zmidi_sysex::Universal::parse(&s) {
+                    if let Ok(Some(m)) = zmidi_sysex::FullMessage::from_universal(&u) {
+                        rx.full_message(&m);
+                    }
+                }
+            }
+            black_box(rx.time());
+        }
+        #[cfg(feature = "mtc_tx")]
+        {
+            // The MTC generator of a master: Quarter Frame data bytes, a Full Message at a locate.
+            const START: zmidi_sysex::MtcTime = zmidi_sysex::MtcTime {
+                hours: 0,
+                minutes: 0,
+                seconds: 0,
+                frames: 0,
+                rate: zmidi_sysex::TimeCodeType::Fps30Drop,
+            };
+            static mut TX: zmidi_sysex::MtcGenerator =
+                zmidi_sysex::MtcGenerator::new(START, zmidi_sysex::Direction::Forward);
+            let tx = unsafe { &mut *(&raw mut TX) };
+            for _ in 0..(w[0] & 7) {
+                black_box(tx.next_byte());
+            }
+            if w[1] & 1 != 0 {
+                let time = tx.time().add_frames(w[2] as i32);
+                let mut out = [0u8; 10];
+                black_box(zmidi_sysex::FullMessage { device_id: 0x7F, time }.write(&mut out).ok());
+                black_box(&out);
+                tx.locate(time);
+            }
+        }
+        #[cfg(feature = "mmc_device")]
+        {
+            // A Controlled Device: the transport commands in, SELECTED TIME CODE out.
+            use zmidi_sysex::{InfoField, MmcCommand, MmcMessage, StandardTimeCode};
+            let bytes: [u8; 24] = core::array::from_fn(|i| w[i] as u8);
+            let n = (w[24] as usize).min(bytes.len());
+            if let Ok(s) = zmidi_sysex::Sysex::parse(&bytes[..n]) {
+                if let Ok(Some(u)) = zmidi_sysex::Universal::parse(&s) {
+                    if let Ok(Some(MmcMessage::Commands { device_id, commands })) = MmcMessage::from_universal(&u) {
+                        if zmidi_sysex::addressed(device_id, 0x10) {
+                            for c in commands {
+                                match c {
+                                    Ok(MmcCommand::LocateTarget(t)) => {
+                                        black_box(t.time.to_frame_count());
+                                    }
+                                    Ok(MmcCommand::Write(fields)) => {
+                                        for f in fields {
+                                            black_box(f.ok());
+                                        }
+                                    }
+                                    c => {
+                                        black_box(c.ok());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            let code = StandardTimeCode::from_bytes([w[25] as u8, w[26] as u8, 0, 0, 0]).to_status_form(false);
+            let mut out = [0u8; 16];
+            let f = [InfoField::TimeCode { field: zmidi_sysex::mmc::field::SELECTED_TIME_CODE, code }];
+            black_box(zmidi_sysex::write_responses(&mut out, 0x10, &f).ok());
+            black_box(&out);
+        }
+        #[cfg(feature = "mmc_controller")]
+        {
+            // A controller: PLAY, STOP or LOCATE [TARGET] out.
+            use zmidi_sysex::{MmcCommand, StandardTimeCode};
+            let c = match w[0] & 3 {
+                0 => MmcCommand::Play,
+                1 => MmcCommand::Stop,
+                _ => MmcCommand::LocateTarget(StandardTimeCode::from_bytes([w[1] as u8, w[2] as u8, w[3] as u8, w[4] as u8, 0])),
+            };
+            let mut out = [0u8; 16];
+            black_box(zmidi_sysex::write_commands(&mut out, 0x7F, &[c]).ok());
+            black_box(&out);
         }
         #[cfg(feature = "bytes_out")]
         {
