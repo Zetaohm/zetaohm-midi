@@ -66,6 +66,10 @@ JOBS = {
     "active_sensing_midi1": ("active_sensing", "base", 192, 32, None, None, "none (no other library has an Active Sensing monitor)"),
     "mpe_receiver_midi1": ("mpe_rx", "base", 2368, 176, None, None, "none (no other library has an MPE receiver)"),
     "mpe_sender_midi1": ("mpe_tx", "base", 576, 128, None, None, "none (no other library has an MPE note allocator)"),
+    "gm_receiver_midi1": ("gm_rx", "base", 1312, 568, None, None, "none (no other library has a General MIDI receiver)"),
+    "sysex_inquiry_midi1": ("sx_inquiry", "base", 688, 16, None, None, "not measured yet (no C library of these Universal messages in the comparison set)"),
+    "sysex_gm_dc_midi1": ("sx_gm_dc", "base", 400, 16, None, None, "not measured yet"),
+    "sysex_tuning_midi1": ("sx_tuning", "base", 2336, 16, None, None, "not measured yet"),
     "usb_class": ("usb2", "usb_core", 17488, 672, 3556, 666, "tusb_ump class driver (object)"),
     # ci_device: Discovery and management, no category feature (DEC-017), with a 64 B reply buffer
     # (tests/reply_len.rs of zmidi-ci); pe_engine includes the PE message framing of zmidi-ci (feature
@@ -143,6 +147,10 @@ WHAT = {
     "active_sensing_midi1": "MIDI 1.0 Active Sensing monitor on one input and sender on one output (`receive_byte`, `poll`; DEC-022)",
     "mpe_receiver_midi1": "MPE receiver of one input with a parameter receiver for each channel (`MpeReceiver::receive`, `pitch_offset`; M1-100, DEC-022)",
     "mpe_sender_midi1": "MPE note allocator and note writer of the Lower Zone (`MpeNoteAllocator`, `note_messages`, `pitch_bend_value`; M1-100, DEC-022)",
+    "gm_receiver_midi1": "General MIDI receiver of one input with a controller state for each channel (`GmReceiver`, `gm_reset_controller_state`; RP-024, DEC-022)",
+    "sysex_inquiry_midi1": "Universal SysEx reader with the Identity Request responder (`Sysex::parse`, `Universal::parse`, `respond`; M1, DEC-022)",
+    "sysex_gm_dc_midi1": "Universal SysEx reader of General MIDI System and Device Control messages (`GeneralMidi`, `DeviceControl`; M1, RP-024, CA-025, DEC-022)",
+    "sysex_tuning_midi1": "Universal SysEx reader of the MIDI Tuning messages and the Scale/Octave Tuning writer (`TuningMessage`, `write_scale_octave`; M1, CA-020, CA-021, DEC-022)",
     "din_out": "UMP to DIN bytes, value form (`UmpToBytes::write`)",
     "usb_class": "USB MIDI 2.0 class on usb-device, run-time `FunctionConfig`",
     "usb_class_fixed": "USB MIDI 2.0 class on usb-device, fixed function from the build script",
@@ -225,7 +233,8 @@ MIDI1_ONLY = {
     "din_out_midi1", "din_out_each_midi1", "usb_class_midi1", "usb_class_rt_midi1",
     "ble_rx_midi1", "ble_rx_words_midi1", "ble_tx_midi1", "din_in_typed_midi1", "din_out_typed_midi1",
     "mode_state_midi1", "ctl_state_midi1", "param_state_midi1", "sync_state_midi1",
-    "active_sensing_midi1", "mpe_receiver_midi1", "mpe_sender_midi1",
+    "active_sensing_midi1", "mpe_receiver_midi1", "mpe_sender_midi1", "gm_receiver_midi1",
+    "sysex_inquiry_midi1", "sysex_gm_dc_midi1", "sysex_tuning_midi1",
 }
 # `ms2::check_max_packet` is the USB 2.0 wMaxPacketSize rule that Alternate Setting 0 uses too, so it is not
 # MIDI 2.0 code.

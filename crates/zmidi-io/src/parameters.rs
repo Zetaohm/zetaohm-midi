@@ -606,7 +606,7 @@ mod tests {
         assert_eq!(st(fine, Up, (0x40, 0x7F)), (0x41, 0));
         assert_eq!(st(fine, Dn, (0x41, 0)), (0x40, 0x7F));
         assert_eq!(st(fine, Up, (0x7F, 0x7F)), (0x7F, 0x7F));
-        let mdr = Parameter::Registered(Rpn::Other { msb: 0, lsb: 5 });
+        let mdr = Parameter::Registered(Rpn::ModulationDepthRange);
         assert_eq!(st(mdr, Up, (0, 0x7F)), (1, 0));
         // RPN 2, 3, 4: the MSB; the LSB stays.
         for rpn in [

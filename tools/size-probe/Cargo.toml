@@ -17,6 +17,7 @@ usb-device = "0.3"
 usbd-midi = { version = "0.5", default-features = false, optional = true }
 zmidi-ump = { path = "../../crates/zmidi-ump", default-features = false }
 zmidi-io = { path = "../../crates/zmidi-io", default-features = false, optional = true }
+zmidi-sysex = { path = "../../crates/zmidi-sysex", default-features = false, optional = true }
 zmidi-ci = { path = "../../crates/zmidi-ci", default-features = false, optional = true }
 zmidi-ci-pe = { path = "../../crates/zmidi-ci-pe", default-features = false, optional = true }
 zmidi-usb = { path = "../../crates/zmidi-usb", default-features = false, optional = true }
@@ -118,6 +119,13 @@ sync_state = ["io", "zmidi-io/sync"]
 active_sensing = ["io", "zmidi-io/active-sensing"]
 mpe_rx = ["io", "zmidi-io/mpe"]
 mpe_tx = ["io", "zmidi-io/mpe"]
+# The General MIDI receiver of 16 channels with a controller state each (zmidi-io gm, DEC-022).
+gm_rx = ["io", "zmidi-io/gm"]
+# zmidi-sysex (DEC-022): the Identity Request responder; the General MIDI and Device Control readers;
+# the MIDI Tuning reader and the Scale/Octave Tuning writer.
+sx_inquiry = ["dep:zmidi-sysex", "zmidi-sysex/inquiry"]
+sx_gm_dc = ["dep:zmidi-sysex", "zmidi-sysex/gm", "zmidi-sysex/device-control"]
+sx_tuning = ["dep:zmidi-sysex", "zmidi-sysex/tuning"]
 up_lean = ["ump_full"]
 # MIDI 1.0 to 2.0 Protocol, word API (Midi1ToMidi2Group::translate_words), one Group.
 up_words = ["ump_full"]

@@ -1,0 +1,38 @@
+[package]
+name = "zmidi-sysex"
+version = "0.1.0-alpha.1"
+edition = "2021"
+description = "MIDI 1.0 Universal System Exclusive messages: header, Device Inquiry, General MIDI, Device Control and MIDI Tuning, no_std and no alloc"
+license = "MIT"
+rust-version.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/zmidi-sysex"
+readme = "README.md"
+keywords = ["midi", "sysex", "midi1", "tuning", "no-std"]
+categories = ["multimedia::audio", "embedded", "no-std", "no-std::no-alloc"]
+
+[lib]
+name = "zmidi_sysex"
+path = "src/lib.rs"
+
+[dependencies]
+# ManufacturerId (data128 module, always built) only; no message family (DEC-017, rule R0 of DEC-022).
+zmidi-ump = { path = "../zmidi-ump", version = "0.1.0-alpha.1", default-features = false }
+thiserror = { version = "2", default-features = false }
+
+[features]
+# DEC-017: one feature for each part; the base (header, IDs, Device ID, dispatch) is always built (DEC-022).
+default = ["full"]
+full = ["inquiry", "gm", "device-control", "tuning"]
+# Identity Request and Identity Reply (M1 General Information).
+inquiry = []
+# General MIDI System On and Off, GM2 System On (M1, RP-003, RP-024).
+gm = []
+# Master Volume, Master Balance, Master Fine and Coarse Tuning (M1 Device Control, CA-025).
+device-control = []
+# The MIDI Tuning messages (M1, CA-020, CA-021).
+tuning = []
+
+[dev-dependencies]
+proptest = "1"

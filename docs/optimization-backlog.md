@@ -1351,3 +1351,16 @@ Other sizes measured at the same time, no action proposed: `SendOrder` 96, `JrRe
   and back out.
 - Options: a `zmidi-ump` constructor of the family enums from status and data bytes with one check; a SysEx path
   from the core with no SysEx7 step. Neither may change `BytesToUmpCore` or any MIDI 2.0 job (DEC-022, R0).
+
+### OPT-058 — The MIDI Tuning reader returns a large message by value
+
+- Area: `crates/zmidi-sysex` (`tuning.rs`, `TuningMessage::from_universal`, `ScaleOffsets`).
+- Measurement (2026-11-06, `tools/size-probe`, job `sysex_tuning_midi1`): 2,288 B flash, 0 B RAM. The job links
+  `compiler_builtins::mem::memcpy` (686 B) and `__aeabi_memclr` (208 B); `#[inline]` on the reader does not remove
+  them. The step 6 plan estimate for the whole part was below 1 KB.
+- Cause: `TuningMessage` is about 40 bytes (the 12 offsets of `ScaleOffsets::TwoByte` are 24 bytes) and the reader
+  gives it in `Result<Option<_>>`, so the moves are calls to `memcpy`; the offset arrays are cleared before they are
+  filled. A firmware that links `memcpy` for other code pays only the rest (about 1.4 KB).
+- Options: give the offsets as a view of the message bytes (an iterator or an accessor, as `FrequencyWords`) so that
+  the message is a few words; keep the owned `ScaleOffsets` for the writers. Measure again with the GM receiver
+  precedent (an in-place reset removed 932 B there). No MIDI 2.0 job changes (DEC-022, R0).

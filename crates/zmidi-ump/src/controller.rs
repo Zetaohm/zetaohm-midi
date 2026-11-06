@@ -8,9 +8,11 @@
 //!   (120 to 127) (REQ-CTL-002).
 //! - A switch value is off from 0 to 63 and on from 64 to 127 (p. 12, REQ-CTL-003); a value with a
 //!   center reads as its offset from 64 (REQ-CTL-004).
-//! - [`Rpn`] names the Registered Parameter Numbers of Table IIIa and the null value 7FH 7FH (RP-015,
-//!   RP-018, M2-104 D.3.3; REQ-RPN-001); the functions give their values in units (REQ-RPN-002 to
-//!   REQ-RPN-004).
+//! - [`Rpn`] names the Registered Parameter Numbers of Table IIIa, RPN 00H 05H of GM2 (RP-024 3.4.4)
+//!   and the null value 7FH 7FH (RP-015, RP-018, M2-104 D.3.3; REQ-RPN-001); the functions give
+//!   their values in units (REQ-RPN-002 to REQ-RPN-005).
+//! - GM2 (RP-024 3.3.15 to 3.3.20) gives default names to Sound Controllers 6 to 9 and to Effects 1
+//!   and 3 Depth; the variants keep the M1 names (REQ-CTL-005).
 //!
 //! The module is behind the feature `channel-voice1` (DEC-022): the meanings stay with their message
 //! family. These meanings hold for MIDI 1.0 bytes and for Message Type 0x2 UMPs.
@@ -59,12 +61,15 @@ pub enum Controller {
     /// 69: Hold 2.
     Hold2,
     /// Sound Controller 1 to 10 (numbers 70 to 79). Defaults of 1 to 5: Sound Variation,
-    /// Timbre/Harmonic Intensity, Release Time, Attack Time, Brightness; 6 to 10 have none.
+    /// Timbre/Harmonic Intensity, Release Time, Attack Time, Brightness. M1 gives 6 to 10 no
+    /// default; GM2 (RP-024 3.3.15 to 3.3.18) names 6 to 9 Decay Time (75), Vibrato Rate (76),
+    /// Vibrato Depth (77) and Vibrato Delay (78).
     SoundController(u8),
     /// 84: Portamento Control; its value is a source note number.
     PortamentoControl,
     /// Effects 1 to 5 Depth (numbers 91 to 95; formerly External Effects, Tremolo, Chorus,
-    /// Celeste (Detune) and Phaser Depth).
+    /// Celeste (Detune) and Phaser Depth). GM2 (RP-024 3.3.19, 3.3.20) names Effects 1 Depth (91)
+    /// Reverb Send Level and Effects 3 Depth (93) Chorus Send Level.
     EffectsDepth(u8),
     /// 96: Data increment.
     DataIncrement,
@@ -237,14 +242,17 @@ pub const fn centered(value: u8) -> i8 {
 pub enum Rpn {
     /// 00H 00H: Pitch Bend Sensitivity ([`pitch_bend_sensitivity`]).
     PitchBendSensitivity,
-    /// 00H 01H: Fine Tuning ([`fine_tuning`]).
+    /// 00H 01H: Fine Tuning, named Channel Fine Tuning by RP-022 ([`fine_tuning`]).
     FineTuning,
-    /// 00H 02H: Coarse Tuning ([`coarse_tuning`]).
+    /// 00H 02H: Coarse Tuning, named Channel Coarse Tuning by RP-022 ([`coarse_tuning`]).
     CoarseTuning,
     /// 00H 03H: Tuning Program Select.
     TuningProgramSelect,
     /// 00H 04H: Tuning Bank Select.
     TuningBankSelect,
+    /// 00H 05H: Modulation Depth Range of GM2, also Vibrato Depth Range (RP-024 3.4.4;
+    /// [`modulation_depth_range`]).
+    ModulationDepthRange,
     /// 7FH 7FH: the null value; no parameter is selected (RP-015, RP-018, M2-104 D.3.3).
     Null,
     /// Another number pair, 7 bits each.
@@ -265,6 +273,7 @@ impl Rpn {
             (0, 2) => Self::CoarseTuning,
             (0, 3) => Self::TuningProgramSelect,
             (0, 4) => Self::TuningBankSelect,
+            (0, 5) => Self::ModulationDepthRange,
             (0x7F, 0x7F) => Self::Null,
             (msb, lsb) => Self::Other { msb, lsb },
         }
@@ -278,6 +287,7 @@ impl Rpn {
             Self::CoarseTuning => (0, 2),
             Self::TuningProgramSelect => (0, 3),
             Self::TuningBankSelect => (0, 4),
+            Self::ModulationDepthRange => (0, 5),
             Self::Null => (0x7F, 0x7F),
             Self::Other { msb, lsb } => (msb & 0x7F, lsb & 0x7F),
         }
@@ -300,6 +310,14 @@ pub const fn fine_tuning(value: u16) -> i16 {
 /// Data Entry LSB is ignored.
 pub const fn coarse_tuning(msb: u8) -> i8 {
     (msb & 0x7F) as i8 - 64
+}
+
+/// Modulation Depth Range (RPN 00H 05H, RP-024 3.4.4) in hundredths of a cent, from the 14-bit
+/// Data Entry value: one MSB step is 100 cents and one LSB step is 100/128 cent, rounded to the
+/// nearest hundredth (REQ-RPN-005). 01H 00H gives 10000, 00H 08H gives 625, the GM2 default
+/// 00H 40H gives 5000.
+pub const fn modulation_depth_range(value: u16) -> u32 {
+    ((value & 0x3FFF) as u32 * 625 + 4) / 8
 }
 
 #[cfg(test)]
@@ -428,15 +446,16 @@ mod tests {
 
     #[test]
     fn registered_parameter_numbers_follow_table_iiia() {
-        // REQ-RPN-001: Table IIIa (p. T-4) and the null value 7FH 7FH.
+        // REQ-RPN-001: Table IIIa (p. T-4), RPN 00H 05H of RP-024 3.4.4 and the null value 7FH 7FH.
         let named = [
             ((0, 0), Rpn::PitchBendSensitivity),
             ((0, 1), Rpn::FineTuning),
             ((0, 2), Rpn::CoarseTuning),
             ((0, 3), Rpn::TuningProgramSelect),
             ((0, 4), Rpn::TuningBankSelect),
+            ((0, 5), Rpn::ModulationDepthRange),
             ((0x7F, 0x7F), Rpn::Null),
-            ((0, 5), Rpn::Other { msb: 0, lsb: 5 }),
+            ((0, 6), Rpn::Other { msb: 0, lsb: 6 }),
         ];
         for ((msb, lsb), r) in named {
             assert_eq!(Rpn::from_parts(msb, lsb), r);
@@ -473,5 +492,48 @@ mod tests {
         assert_eq!(coarse_tuning(0x00), -64);
         assert_eq!(coarse_tuning(0x40), 0);
         assert_eq!(coarse_tuning(0x7F), 63);
+    }
+
+    #[test]
+    fn modulation_depth_range_follows_gm2() {
+        // REQ-RPN-005: RP-024 3.4.4 (p. 13): 01H 00H is one semitone, 00H 08H is 6.25 cents, the
+        // default 00H 40H is 50 cents; one LSB step is 100/128 cent (78.125, rounded to 78).
+        let v = |msb: u16, lsb: u16| (msb << 7) | lsb;
+        assert_eq!(modulation_depth_range(v(1, 0)), 10_000);
+        assert_eq!(modulation_depth_range(v(0, 8)), 625);
+        assert_eq!(modulation_depth_range(v(0, 0x40)), 5_000);
+        assert_eq!(modulation_depth_range(v(0, 1)), 78);
+        assert_eq!(modulation_depth_range(0), 0);
+        assert_eq!(modulation_depth_range(0x3FFF), 1_279_922);
+        // Bits above the 14-bit value are ignored.
+        assert_eq!(modulation_depth_range(0xC000 | v(1, 0)), 10_000);
+    }
+
+    #[test]
+    fn prop_modulation_depth_range_rounds_to_nearest() {
+        // REQ-RPN-005: the exact value is value × 10000 / 128 hundredths of a cent.
+        proptest!(|(value in 0u16..0x4000)| {
+            let exact = value as f64 * 10_000.0 / 128.0;
+            let got = modulation_depth_range(value) as f64;
+            prop_assert!((got - exact).abs() <= 0.5, "{value}: {got} for {exact}");
+        });
+    }
+
+    #[test]
+    fn gm2_default_names_map_to_table_iii() {
+        // REQ-CTL-005: RP-024 3.3.15 to 3.3.20 name controllers that Table III numbers as Sound
+        // Controllers 6 to 9 and Effects 1 and 3 Depth; the variants stay.
+        let gm2 = [
+            (75, Controller::SoundController(6)), // Decay Time
+            (76, Controller::SoundController(7)), // Vibrato Rate
+            (77, Controller::SoundController(8)), // Vibrato Depth
+            (78, Controller::SoundController(9)), // Vibrato Delay
+            (91, Controller::EffectsDepth(1)),    // Reverb Send Level
+            (93, Controller::EffectsDepth(3)),    // Chorus Send Level
+        ];
+        for (n, c) in gm2 {
+            assert_eq!(Controller::from_number(n), Some(c));
+            assert_eq!(c.number(), n);
+        }
     }
 }

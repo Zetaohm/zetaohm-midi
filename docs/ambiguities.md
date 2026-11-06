@@ -973,3 +973,75 @@ Source: the catalogue of this document. Each item was checked on the PDF page (2
 | <a id="amb-rp-028-03"></a>AMB-RP-028-03 | Some controller names on the chart pages (p. 6, 7) differ from the names in the MIDI 1.0 and MIDI 2.0 specifications. The library uses the specification names. | INFO: a name table in the crate uses the M1 names (with the M2-104 names where M1 has none); a chart tool may print the chart names. |
 | <a id="amb-rp-028-04"></a>AMB-RP-028-04 | The chart (p. 2, 5) lists a "Multi Mode" next to the four MIDI 1.0 modes. It is not a MIDI 1.0 channel mode, so the library has no flag for it. | INFO: "Multi Mode" is a device property (multitimbral reception), not a Channel Mode message. |
 | <a id="amb-rp-028-05"></a>AMB-RP-028-05 | Editorial errors in the instructions (p. 1) and different spellings of the version in the chart headers (p. 5 to 7). No effect. | INFO: no effect. |
+
+## CA-025 (Master Fine/Coarse Tuning)
+
+Source: the catalogue of this document. Each item was checked on the PDF page (2026-11-05).
+
+| Id | Item | Status / notes |
+|---|---|---|
+| <a id="amb-ca-025-01"></a>AMB-CA-025-01 | Master Coarse Tuning (p. 2) has an LSB that is always 0, but no receiver rule for another LSB. The library writes 0 and ignores the LSB on receive. | RESOLVED (proposed): the writer writes 0; the reader ignores the LSB, as for the LSB of Channel Coarse Tuning. |
+| <a id="amb-ca-025-02"></a>AMB-CA-025-02 | The fine tuning range (p. 2) is -100 cents to just under +100 cents. The library gives the signed 14-bit offset. | INFO: the same scale as Channel Fine Tuning; the library gives the signed 14-bit offset. |
+| <a id="amb-ca-025-03"></a>AMB-CA-025-03 | The name of RPN 00H 02H has a missing space on p. 1. The library uses the RP-022 name. | INFO: a typo; no effect. |
+
+## RP-022 (Redefinition of RPN 01/02)
+
+Source: the catalogue of this document. Each item was checked on the PDF page (2026-11-05).
+
+| Id | Item | Status / notes |
+|---|---|---|
+| <a id="amb-rp-022-01"></a>AMB-RP-022-01 | The document names the two parameters by their LSB only (p. 1). They are MSB 00H with LSB 01H and 02H. | INFO: the names apply to MSB 00H. |
+
+## MIDI Tuning Messages, updated (CA-020, CA-021, RP-020)
+
+Source: the catalogue of this document. Each item was checked on the PDF page (2026-11-05).
+
+| Id | Item | Status / notes |
+|---|---|---|
+| <a id="amb-mts-01"></a>AMB-MTS-01 | The format line of the bank dump request (p. 4) has no Device ID, but its field list has one. The library uses the field list. | RESOLVED (proposed): the field list wins; the message has a Device ID, as the other messages of the document. |
+| <a id="amb-mts-02"></a>AMB-MTS-02 | The checksum of the original dump (p. 2, 6) is unclear, and the document lets a receiver ignore it. The library writes the checksum of the other dumps and does not reject the original dump for its checksum. | RESOLVED (proposed): the writer uses the checksum of the other dumps; the reader does not reject the original dump for its checksum and gives the result to the application (as AMB-M1-46). |
+| <a id="amb-mts-03"></a>AMB-MTS-03 | Some frequency examples (p. 1, 2) do not follow the formula of the frequency word. Tests use the formula. | INFO: the A-440 examples are correct in this document; tests use the formula and the examples that agree with it (as AMB-M1-45). |
+| <a id="amb-mts-04"></a>AMB-MTS-04 | The program number is 0 to 127 in the messages and 1 to 128 in the display text (p. 2, 3). The library uses 0 to 127. | INFO: the data value is 0 to 127; 1 to 128 is the display number (as AMB-M1-47). |
+| <a id="amb-mts-05"></a>AMB-MTS-05 | The bank is 0 to 127 in the messages (p. 4 to 6). | INFO: the same rule for the bank. |
+| <a id="amb-mts-06"></a>AMB-MTS-06 | Three messages (p. 5 to 8) have the same sub-ID in their real-time and non-real-time forms. The library gives the header type to the caller. | INFO: the header selects the form; the library gives the header type. |
+| <a id="amb-mts-07"></a>AMB-MTS-07 | The reserved bits of the channel field (p. 6) have a sender rule but no receiver rule. The library writes 0 and ignores them on receive. | RESOLVED (proposed): the writer writes 0; the reader ignores the reserved bits. |
+| <a id="amb-mts-08"></a>AMB-MTS-08 | The 2-byte offsets (p. 6, 8) reach just under +100 cents. The library gives the signed 14-bit offset. | INFO: the library gives the signed 14-bit offset (8192 steps for 100 cents). |
+| <a id="amb-mts-09"></a>AMB-MTS-09 | The effect of a non-real-time tuning message on sounding notes depends on other documents (p. 4, 8). This is a device matter. | INFO: a device matter; the library gives the header type. |
+| <a id="amb-mts-10"></a>AMB-MTS-10 | The document has some typos and old section references (p. 1, 2, 6, 8). | INFO: no effect on the rules. |
+
+## RP-003 (General MIDI System Level 1)
+
+Source: the catalogue of this document. Each item was checked on the PDF page (2026-11-05).
+
+| Id | Item | Status / notes |
+|---|---|---|
+| <a id="amb-rp-003-01"></a>AMB-RP-003-01 | The default controller values (p. 3) are not given; the library uses the Reset All Controllers values of RP-015. | RESOLVED (REQ-GMR-003): the library uses the GM2 default values, which agree with the Reset All Controllers values of RP-015. |
+| <a id="amb-rp-003-02"></a>AMB-RP-003-02 | The document gives no receiver action for GM System On (p. 4). The library gives the message to the application. | RESOLVED (REQ-GM-001, REQ-GMR-002): the library reads the message and resets the channel state of its General MIDI receiver part; the device resets its sound engine. |
+| <a id="amb-rp-003-03"></a>AMB-RP-003-03 | The notice refers to a separate guidelines document that the project does not have. | INFO: out of scope until the project has the document. |
+| <a id="amb-rp-003-04"></a>AMB-RP-003-04 | Applications should show the General MIDI sound names (p. 8). A name table is a possible later addition to the library. | INFO: a name table is a possible later element; the sound set is a device matter. |
+
+## RP-024 v1.2a (General MIDI 2)
+
+Source: the catalogue of this document. Each item was checked on the PDF page (2026-11-05).
+
+| Id | Item | Status / notes |
+|---|---|---|
+| <a id="amb-rp-024-01"></a>AMB-RP-024-01 | Section 1 (p. 1) defines four tags. The definition of the recommended tag uses a permission word, but many recommended and optional blocks use the word for a requirement. The prohibition tag uses a permission word in the negative, and no section uses it. We read recommended as should, optional as may and the negative permission as a prohibition. A sub-section with no tag takes the tag of its section. | RESOLVED: recommended reads as should, optional as may, the negative permission as a prohibition; a sub-section takes the tag of its section. |
+| <a id="amb-rp-024-02"></a>AMB-RP-024-02 | The preface (PDF page 2) and the reference notes of sections 3.3.15 to 4.8 point to the 1999 edition of the MIDI 1.0 specification for the message details. Our copy is the 1996 edition. For the parts in scope, the GM2 text, the Master Fine/Coarse Tuning document and the MIDI Tuning document give the formats and values that we need. | RESOLVED: the GM2 text and the two tuning documents give the formats and values that the library needs. |
+| <a id="amb-rp-024-03"></a>AMB-RP-024-03 | The preface (PDF page 2) gives one Recommended Practice for the Pan formula change, and section 3.3.5 (p. 7) gives another one. The Pan curve is a sound engine rule, so this has no effect on the library. | INFO: the Pan curve is a sound engine rule; no library work. |
+| <a id="amb-rp-024-04"></a>AMB-RP-024-04 | Section 2.5 (p. 2) starts every channel in Mode 3. Sections 3.5.4 and 3.5.5 (p. 14) make Omni Off and Omni On turn notes off with no mode change. The MIDI 1.0 power-up recommendation and our MIDI 1.0 mode state use Mode 1 and always accept Omni On. A separate General MIDI receiver part applies the GM2 rules; the MIDI 1.0 mode state does not change. | RESOLVED (REQ-GMR-002, REQ-GMR-007): the General MIDI receiver part starts and resets in Mode 3 and applies the GM2 Omni rules; the MIDI 1.0 mode state does not change. |
+| <a id="amb-rp-024-05"></a>AMB-RP-024-05 | Sections 2.5 (p. 2) and 3.5.6 (p. 14) accept Mono On only with M = 1, and let a Rhythm Channel change its mode or not. They do not say if other values of M turn notes off on a Rhythm Channel. We ignore other values of M on all channels. A Rhythm Channel keeps its mode unless the configuration says otherwise. | RESOLVED (REQ-GMR-008): other values of M are ignored on all channels; a Rhythm Channel changes its mode only when the configuration permits it. |
+| <a id="amb-rp-024-06"></a>AMB-RP-024-06 | Sections 2.4 (p. 2), 2.6 (p. 3) and 3.3.1 (p. 5) define the channel kind by the bank values 78H and 79H only. They give no rule for other bank values, or for the rhythm bank on a channel that cannot be a Rhythm Channel. We change the kind only for these two values, on the channels that permit it, and keep the kind for all other values. | RESOLVED (REQ-GMR-006): the kind changes only for the two bank values, on the channels that permit it. |
+| <a id="amb-rp-024-07"></a>AMB-RP-024-07 | Section 3.5.2 (p. 14) keeps Portamento Time at Reset All Controllers. The general Reset All Controllers recommendation sets each controller that it does not name to 0, so it sets Portamento Time to 0. We keep Portamento Time for all receivers, as a documented choice that the recommendation permits. | RESOLVED (REQ-CTRL-007, user decision of 2026-11-06): Reset All Controllers keeps Portamento Time for every receiver. |
+| <a id="amb-rp-024-08"></a>AMB-RP-024-08 | Section 3.5.2 (p. 14) describes the reset for the value 0 only, and lists fewer items than the general Reset All Controllers recommendation. We accept any value, as that recommendation permits, and use its list for the items that GM2 does not name. | RESOLVED (REQ-CTRL-006, REQ-CTRL-007): any value is accepted; the general list applies to the items that GM2 does not name. |
+| <a id="amb-rp-024-09"></a>AMB-RP-024-09 | Sections 4.9.1 and 4.9.2 (p. 22) reset a device to its initial GM2 or GM1 status but do not list that status. We use the default values of sections 2 to 4, for the channels and for the device. For GM1 we use the same channel values and report the level, so that the device can leave out GM2 features. | RESOLVED (REQ-GMR-002, REQ-GMR-003, REQ-GMR-004): the reset uses the default values of sections 2 to 4 and reports the level. |
+| <a id="amb-rp-024-10"></a>AMB-RP-024-10 | Sections 3.6, 4.1, 4.2 and 4.3 (pp. 15, 16) write two-byte default values with the most significant byte first, but these messages send the least significant byte first. Our default table gives 14-bit values, so the byte order cannot be read wrongly. Section 4.1 confirms that full Master Volume is the maximum 14-bit value. | RESOLVED (REQ-GMR-003, REQ-GMR-004): the default table gives 14-bit values. |
+| <a id="amb-rp-024-11"></a>AMB-RP-024-11 | Sections 3.3.15 to 3.3.20 (pp. 10, 11) use names for controllers 75 to 78, 91 and 93 that a later MIDI 1.0 edition defines. Our 1996 edition gives no default name to 75 to 78 and uses general effect names for 91 and 93. We keep the general names and add the GM2 names as the default meanings. | RESOLVED (REQ-CTL-005): the general names stay; the documentation gives the GM2 names. |
+| <a id="amb-rp-024-12"></a>AMB-RP-024-12 | Section 3.4.4 (p. 13) uses registered parameter 00H 05H, which our 1996 edition does not list, and gives its value format. We add the name and the conversion from the GM2 text. Increment and decrement step the 14-bit value. | RESOLVED (REQ-RPN-001, REQ-RPN-005): the library names the parameter and converts its value from the GM2 text. |
+| <a id="amb-rp-024-13"></a>AMB-RP-024-13 | Section 4.7 (p. 21) names the message with a name that the MIDI Tuning document does not use, and that document has two one-byte Non-Real Time scale messages. We read it as the scale/octave tuning one-byte form with the channel field, and the default as 0 cents for each of the 12 notes. Rhythm Channels in the channel field do not respond. | RESOLVED (REQ-TUN-007, REQ-GMR-004, REQ-GMR-009): the one-byte form with the channel field; the default is 0 cents for each note. |
+| <a id="amb-rp-024-14"></a>AMB-RP-024-14 | Sections 4.2 and 4.3 (p. 16) recommend that master tuning does not change the sounds of Rhythm Channels. The Master Fine/Coarse Tuning document only forbids note shifts for drum kits and leaves the rest to a recommended practice. GM2 is such a practice, so there is no conflict. It is a sound engine rule. | INFO: no conflict; a sound engine rule. |
+| <a id="amb-rp-024-15"></a>AMB-RP-024-15 | Section 4.9.1 (p. 22) gives a receiver 100 ms for the reset, but gives no wait time to the sender and no rule for messages that arrive during the reset. The library part of the reset is short; the device and the sender handle the timing. | INFO: device and sender timing. |
+| <a id="amb-rp-024-16"></a>AMB-RP-024-16 | GM2 names only the messages that a GM2 device must or should support. For the other messages the MIDI 1.0 rules apply, and the device decides how it responds. | INFO: the MIDI 1.0 rules and the library states apply. |
+| <a id="amb-rp-024-17"></a>AMB-RP-024-17 | The document has small editorial errors: a wrong page reference and spelling errors in the preface, other titles in the contents, a missing quotation mark, the term default value for the value byte of two mode messages, a missing parenthesis in the pan formulas and a missing plural. They do not change the rules. | INFO: no effect on the rules. |
+| <a id="amb-rp-024-18"></a>AMB-RP-024-18 | In the out-of-scope parts (reverb, chorus, controller destination and key-based instrument controllers, pp. 16 to 21), the reverb time range exceeds the 7-bit value, some reverb types are not defined, one reset rule is not clear, and one message has no format. These parts are out of scope; the library gives these messages to the caller as raw data. | INFO: out of scope; the reader gives these messages as raw data. |
+| <a id="amb-rp-024-19"></a>AMB-RP-024-19 | Some sound rules are not exact: a required key range that the appendix calls recommended, a pitch range that can be read in two ways, and a volume curve for the 14-bit master volume that the document gives for 7-bit values only. These are sound engine rules and do not affect the library. | INFO: sound engine rules; no library work. |

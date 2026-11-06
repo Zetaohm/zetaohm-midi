@@ -376,6 +376,7 @@ dependencies = [
  "zmidi-file",
  "zmidi-io",
  "zmidi-net",
+ "zmidi-sysex",
  "zmidi-ump",
  "zmidi-usb",
  "zmidi-usb-device",
@@ -519,6 +520,14 @@ dependencies = [
 
 [[package]]
 name = "zmidi-net"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "thiserror",
+ "zmidi-ump",
+]
+
+[[package]]
+name = "zmidi-sysex"
 version = "0.1.0-alpha.1"
 dependencies = [
  "thiserror",

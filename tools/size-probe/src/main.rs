@@ -75,7 +75,7 @@ fn main() -> ! {
         remote::run(&w);
         #[cfg(feature = "inject")]
         inject::run(&w);
-        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx"))]
+        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx", feature = "gm_rx", feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning"))]
         lean::run(&w);
         #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1", feature = "ble_tx_midi1", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
         transport::run(&w);
@@ -786,7 +786,7 @@ mod inject {
 }
 
 // ---------------------------------------------------------------- lean variants
-#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx"))]
+#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx", feature = "gm_rx", feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning"))]
 mod lean {
     use super::*;
     #[allow(unused_imports)]
@@ -1020,6 +1020,76 @@ mod lean {
                 }
             } else {
                 alloc.note_off(zmidi_ump::Channel::from_bits(w[3] as u8));
+            }
+        }
+        #[cfg(feature = "gm_rx")]
+        {
+            // A GM2 sound module input: a controller state for each channel and the GM receiver;
+            // the application gives it the GM2 System On of the SysEx reader.
+            static mut CTL: [zmidi_io::ControllerState; 16] = [zmidi_io::ControllerState::new(); 16];
+            static mut GM: zmidi_io::GmReceiver = zmidi_io::GmReceiver::new(zmidi_io::GmConfig::DEFAULT);
+            let (ctl, gm) = unsafe { (&mut *(&raw mut CTL), &mut *(&raw mut GM)) };
+            if w[0] & 1 != 0 {
+                black_box(gm.reset(zmidi_io::GmLevel::Gm2));
+                for (n, s) in ctl.iter_mut().enumerate() {
+                    zmidi_io::gm_reset_controller_state(s, zmidi_ump::Channel::from_bits(n as u8));
+                }
+            } else if let Some(m) = zmidi_ump::Midi1ChannelVoiceMessage::parse(&w[16..]) {
+                let c = m.channel();
+                if let Some(state) = ctl.get_mut(c.index() as usize) {
+                    if let Some(zmidi_io::ControllerEvent::Program { bank, .. }) = state.receive(&m) {
+                        gm.program(c, bank);
+                    }
+                    black_box(gm.receive(&m));
+                    black_box(zmidi_io::rhythm_ignores_message(&m) && gm.kind(c) == zmidi_io::ChannelKind::Rhythm);
+                }
+            }
+        }
+        #[cfg(any(feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning"))]
+        {
+            // One whole System Exclusive message from the byte reader.
+            let bytes: [u8; 60] = core::array::from_fn(|i| w[i] as u8);
+            let n = (w[60] as usize).min(bytes.len());
+            if let Ok(s) = zmidi_sysex::Sysex::parse(&bytes[..n]) {
+                if let Ok(Some(u)) = zmidi_sysex::Universal::parse(&s) {
+                    #[cfg(feature = "sx_inquiry")]
+                    if let Ok(Some(req)) = zmidi_sysex::InquiryMessage::from_universal(&u) {
+                        // A device that answers the Identity Request.
+                        let id = zmidi_sysex::Identity {
+                            manufacturer: zmidi_ump::ManufacturerId::NON_COMMERCIAL,
+                            family: 1,
+                            member: 2,
+                            revision: [0, 0, 0, 1],
+                        };
+                        let mut out = [0u8; 20];
+                        black_box(zmidi_sysex::respond(&req, 0x10, &id, &mut out).ok());
+                        black_box(&out);
+                    }
+                    #[cfg(feature = "sx_gm_dc")]
+                    {
+                        black_box(zmidi_sysex::GeneralMidi::from_universal(&u).ok());
+                        black_box(zmidi_sysex::DeviceControl::from_universal(&u).ok());
+                    }
+                    #[cfg(feature = "sx_tuning")]
+                    match zmidi_sysex::TuningMessage::from_universal(&u) {
+                        Ok(Some(zmidi_sysex::TuningMessage::KeyDump { words, .. })) => {
+                            black_box(words.fold(0u32, |a, x| a ^ x.fraction as u32));
+                        }
+                        Ok(Some(zmidi_sysex::TuningMessage::NoteChange { changes, .. })) => {
+                            black_box(changes.fold(0u32, |a, (k, x)| a ^ k as u32 ^ x.fraction as u32));
+                        }
+                        m => {
+                            black_box(m.ok());
+                        }
+                    }
+                }
+            }
+            #[cfg(feature = "sx_tuning")]
+            {
+                let mut out = [0u8; 40];
+                let o = zmidi_sysex::ScaleOffsets::OneByte(core::array::from_fn(|i| w[i] as i8 & 0x1F));
+                black_box(zmidi_sysex::write_scale_octave(true, 0x7F, w[1] as u16, &o, &mut out).ok());
+                black_box(&out);
             }
         }
         #[cfg(feature = "bytes_out")]

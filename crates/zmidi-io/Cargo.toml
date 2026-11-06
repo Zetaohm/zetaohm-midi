@@ -25,7 +25,7 @@ thiserror = { version = "2", default-features = false }
 [features]
 # DEC-002: the core API needs no alloc. DEC-017: all features on by default.
 default = ["full"]
-full = ["midi2-protocol", "messages", "channel-mode", "controllers", "parameters", "sync", "active-sensing", "mpe"]
+full = ["midi2-protocol", "messages", "channel-mode", "controllers", "parameters", "sync", "active-sensing", "mpe", "gm"]
 # BytesToUmp::new with StreamProtocol::Midi2: MIDI 2.0 Protocol output through the translator
 # (M2-104 D.3). Off: BytesToUmp holds no translator (BytesToUmp::midi1 only).
 # Also the MIDI 2.0 Channel Voice family of zmidi-ump: `UmpToBytes` translates a MIDI 2.0 Channel Voice
@@ -49,6 +49,9 @@ active-sensing = []
 # MIDI Polyphonic Expression (M1-100): Zone layout, receiver, class function, pitch helper, writers
 # and note allocator (module mpe, DEC-022). The receiver takes the RPN events of `parameters`.
 mpe = ["parameters"]
+# The General MIDI receiver of RP-024 and RP-003: channel kinds, GM reset, GM2 Channel Mode rules and
+# default values (REQ-GMR-010, DEC-022).
+gm = ["channel-mode", "controllers", "parameters"]
 
 [dev-dependencies]
 proptest = "1"

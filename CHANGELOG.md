@@ -31,6 +31,10 @@ change the API. All crates and packages have the same version.
 
 ### Fixed
 
+- `zmidi-ci-pe`: for "Mcoded7" and "zlib+Mcoded7" data, `PeEngine::data_room` gives whole 8-byte groups
+  and the Chunk count of `reply` and `request` uses the same room. A sender that encoded each Chunk in
+  whole groups needed one Chunk more than counted, and `send` refused the counted last Chunk (GitHub
+  issue 2, REQ-PE-DATA-004).
 - `zmidi-ci-pe`: `Link::write` refuses an empty "selectedProperty" (M2-103 Table 72), as the reader
   does.
 - `zmidi-ci-pe`: the ResourceList reader marks a Column "title" as truncated only when it was cut, not

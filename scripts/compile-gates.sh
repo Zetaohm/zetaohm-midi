@@ -40,5 +40,7 @@ echo 'compile-gates: member zmidi-ble' >&2
 (cd 'crates/zmidi-ble' && sh scripts/compile-gates.sh) || exit $?
 echo 'compile-gates: member zmidi-ffi' >&2
 (cd 'crates/zmidi-ffi' && sh scripts/compile-gates.sh) || exit $?
+echo 'compile-gates: member zmidi-sysex' >&2
+(cd 'crates/zmidi-sysex' && sh scripts/compile-gates.sh) || exit $?
 echo 'compile-gates: member zmidi-py' >&2
 (cd 'crates/zmidi-py' && sh scripts/compile-gates.sh) || exit $?

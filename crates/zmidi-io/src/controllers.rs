@@ -77,15 +77,16 @@ const KEEP_MSB: u32 = {
 ///   0").
 /// - 127: Expression (11).
 /// - Keep: Bank Select (0, 32), Volume (7, 39), Pan (10, 42), Balance (8, 40; RP-015 does not
-///   list it, and 0 is full left: a documented choice, AMB-RP-015-04), Sound Controllers (70 to 79),
-///   Effects Depth (91 to 95), Data Entry (6, 38) and the parameter controllers (96 to 101; the
-///   parameter receiver sets the RPN and NRPN numbers to null), Portamento Control (84; the
-///   state clears its source note), the Channel Mode messages (120 to 127), and every number
-///   above 127.
+///   list it, and 0 is full left: a documented choice, AMB-RP-015-04), Portamento Time (5, 37;
+///   RP-015 does not list it, and GM2 3.5.2 keeps it: a documented choice, AMB-RP-024-07), Sound
+///   Controllers (70 to 79), Effects Depth (91 to 95), Data Entry (6, 38) and the parameter
+///   controllers (96 to 101; the parameter receiver sets the RPN and NRPN numbers to null),
+///   Portamento Control (84; the state clears its source note), the Channel Mode messages (120 to
+///   127), and every number above 127.
 pub const fn reset_value(controller: u8) -> Option<u8> {
     match controller {
         11 => Some(127),
-        0 | 6..=8 | 10 | 32 | 38..=40 | 42 | 70..=79 | PORTAMENTO_CONTROL | 91..=101 => None,
+        0 | 5..=8 | 10 | 32 | 37..=40 | 42 | 70..=79 | PORTAMENTO_CONTROL | 91..=101 => None,
         0..=119 => Some(0),
         _ => None,
     }
@@ -184,6 +185,19 @@ impl ControllerState {
                 *held = 0;
             }
         }
+        self.portamento = 0;
+    }
+
+    /// Sets the state in place: the held MSB `msb[n]` of each controller n that has one (`None`
+    /// gives the start value), the 14-bit `bank` and no Portamento Control source. The GM reset of
+    /// the module `gm` (REQ-GMR-005); in place, so that no 34-byte copy is made.
+    #[cfg(feature = "gm")]
+    pub(crate) fn hold(&mut self, msb: &[Option<u8>; 32], bank: u16) {
+        for (n, (held, v)) in self.msb.iter_mut().zip(msb).enumerate() {
+            *held = v.map_or(0, |v| (v & 0x7F) ^ INITIAL_MSB[n]);
+        }
+        self.msb[BANK_MSB as usize] = ((bank >> 7) as u8 & 0x7F) ^ INITIAL_MSB[BANK_MSB as usize];
+        self.bank_lsb = HELD | (bank as u8 & 0x7F);
         self.portamento = 0;
     }
 
@@ -554,7 +568,8 @@ mod tests {
         for c in [1u8, 33, 43, 64, 65, 66, 67] {
             assert_eq!(reset_value(c), Some(0), "controller {c}");
         }
-        let keep: Vec<u8> = [0u8, 32, 7, 39, 10, 42, 8, 40, 6, 38, 84]
+        // Portamento Time (5, 37): GM2 3.5.2 (AMB-RP-024-07).
+        let keep: Vec<u8> = [0u8, 32, 7, 39, 10, 42, 8, 40, 5, 37, 6, 38, 84]
             .into_iter()
             .chain(70..=79)
             .chain(91..=101)

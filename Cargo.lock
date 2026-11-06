@@ -1216,6 +1216,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "zmidi-sysex"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "proptest",
+ "thiserror",
+ "zmidi-ump",
+]
+
+[[package]]
 name = "zmidi-ump"
 version = "0.1.0-alpha.1"
 dependencies = [

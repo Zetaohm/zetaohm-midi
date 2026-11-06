@@ -50,8 +50,16 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
 
 | Feature | Default | Description |
 |---|---|---|
-| `full` | yes | Same as `midi2-protocol`. |
+| `full` | yes | All the features below. |
 | `midi2-protocol` | via `full` | MIDI 2.0 Protocol output in `BytesToUmp` (MIDI 1.0 → 2.0 translation), and the zmidi-ump family `channel-voice2`, so that `UmpToBytes` translates a MIDI 2.0 Channel Voice UMP to bytes. Without it and without that family, a MIDI 1.0-only build: `UmpToBytes` skips a MIDI 2.0 UMP (the DIN writer is 576 B of flash instead of 1,276 B on Thumb-2). |
+| `messages` | via `full` | `Midi1Reader` and `Midi1Writer`: typed MIDI 1.0 messages on bytes (DEC-022). |
+| `channel-mode` | via `full` | `ModeState`: the MIDI 1.0 receive modes, Omni, Mono and Poly, and their actions (M1 pp. 20 to 25). |
+| `controllers` | via `full` | `ControllerState`: 14-bit controllers, bank and program, Portamento Control, the Reset All Controllers list of RP-015. |
+| `parameters` | via `full` | `ParameterState`: the RPN and NRPN receiver with Data Entry, Increment and Decrement (RP-018). |
+| `sync` | via `full` | `SyncReceiver`: Timing Clock, Start, Stop, Continue and Song Position Pointer. |
+| `active-sensing` | via `full` | The Active Sensing monitor and sender (M1 p. 30). |
+| `mpe` | via `full` | MIDI Polyphonic Expression (M1-100): Zone layout, receiver, note allocator and writers. Needs `parameters`. |
+| `gm` | via `full` | `GmReceiver`: the General MIDI receiver of RP-024 and RP-003 (channel kinds, GM reset, GM2 Channel Mode rules, default values, Rhythm Channel table). Needs `channel-mode`, `controllers` and `parameters`. |
 
 ## License
 
