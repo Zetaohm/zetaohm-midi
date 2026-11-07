@@ -2916,3 +2916,368 @@ pub unsafe extern "C" fn zmidi_mpe_note_reset(state: *mut ZmidiMpeNoteAllocator)
 pub extern "C" fn zmidi_mpe_note_allocator_size() -> usize {
     size_of::<MpeNoteAllocator>()
 }
+
+#[cfg(feature = "gm")]
+use zmidi_io::{GmConfig, GmLevel, GmReceiver};
+
+/// Storage words of a [`ZmidiGmReceiver`].
+#[cfg(feature = "gm")]
+pub const ZMIDI_GM_RECEIVER_WORDS: usize = 2;
+/// The Rhythm-capable channels of the default configuration: channels 10 and 11 (bits 9 and 10;
+/// RP-024 2.4).
+#[cfg(feature = "gm")]
+pub const ZMIDI_GM_RHYTHM_CAPABLE_DEFAULT: u16 = 0x0600;
+
+/// Storage of the General MIDI state of the 16 channels of one input. The program gives it;
+/// [`zmidi_gm_receiver_init`] sets it up (REQ-FFI-MIDI1-016).
+#[cfg(feature = "gm")]
+#[repr(C)]
+pub struct ZmidiGmReceiver {
+    /// Opaque content.
+    pub _opaque: [u64; ZMIDI_GM_RECEIVER_WORDS],
+}
+
+#[cfg(feature = "gm")]
+const _: () = assert!(size_of::<GmReceiver>() <= size_of::<ZmidiGmReceiver>());
+#[cfg(feature = "gm")]
+const _: () = assert!(align_of::<GmReceiver>() <= align_of::<ZmidiGmReceiver>());
+
+/// The configuration of a [`ZmidiGmReceiver`] (REQ-FFI-MIDI1-016).
+#[cfg(feature = "gm")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZmidiGmConfig {
+    /// Bit n is set when the channel with packet value n can be a Rhythm Channel
+    /// ([`ZMIDI_GM_RHYTHM_CAPABLE_DEFAULT`]: channels 10 and 11).
+    pub rhythm_capable: u16,
+    /// True when a Mono On with M = 1 sets Mode 4 on a Rhythm Channel too.
+    pub rhythm_mono: bool,
+}
+
+/// The General MIDI level (REQ-FFI-MIDI1-016).
+#[cfg(feature = "gm")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ZmidiGmLevel {
+    /// After a GM System Off: the device is in its own mode.
+    Off = 0,
+    /// After a GM1 System On.
+    Gm1 = 1,
+    /// At the start and after a GM2 System On.
+    Gm2 = 2,
+}
+
+/// The state of a [`ZmidiGmReceiver`] (REQ-FFI-MIDI1-016).
+#[cfg(feature = "gm")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZmidiGmInfo {
+    /// A [`ZmidiGmLevel`] value.
+    pub level: u32,
+    /// The Rhythm Channels: bit n is the channel with packet value n.
+    pub rhythm_channels: u16,
+    /// The channels in Mode 4 (Omni Off, Mono); the others are in Mode 3.
+    pub mono_channels: u16,
+    /// The configuration.
+    pub config: ZmidiGmConfig,
+}
+
+#[cfg(feature = "gm")]
+const fn gm_level(level: GmLevel) -> ZmidiGmLevel {
+    match level {
+        GmLevel::Off => ZmidiGmLevel::Off,
+        GmLevel::Gm1 => ZmidiGmLevel::Gm1,
+        GmLevel::Gm2 => ZmidiGmLevel::Gm2,
+    }
+}
+
+/// Sets up `receiver` from `config`: channel 10 a Rhythm Channel, each channel in Mode 3, level
+/// GM2 (RP-024 2.4, 2.5; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `receiver` is null or points to writable storage of a [`ZmidiGmReceiver`]; `config` is null
+/// or readable.
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_gm_receiver_init(
+    receiver: *mut ZmidiGmReceiver,
+    config: *const ZmidiGmConfig,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let Some(c) = (unsafe { config.as_ref() }) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    if receiver.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    let r = GmReceiver::new(GmConfig::new(c.rhythm_capable, c.rhythm_mono));
+    // SAFETY: the storage is large and aligned enough (asserts above) and writable (caller).
+    unsafe { receiver.cast::<GmReceiver>().write(r) };
+    ZmidiStatus::Ok
+}
+
+/// The GM receiver of the program.
+///
+/// # Safety
+/// `receiver` is null or was set up by [`zmidi_gm_receiver_init`].
+#[cfg(feature = "gm")]
+unsafe fn gm_receiver<'a>(receiver: *mut ZmidiGmReceiver) -> Option<&'a mut GmReceiver> {
+    // SAFETY: caller contract above.
+    unsafe { receiver.cast::<GmReceiver>().as_mut() }
+}
+
+/// The GM reset of a GM1 or GM2 System On, or GM System Off for [`ZmidiGmLevel::Off`]
+/// (RP-024 4.9; REQ-FFI-MIDI1-016). The program then mutes the notes, calls
+/// [`zmidi_gm_reset_controller_state`] for each channel and resets each parameter receiver.
+///
+/// # Safety
+/// `receiver` is null or was set up by [`zmidi_gm_receiver_init`].
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_gm_receiver_reset(
+    receiver: *mut ZmidiGmReceiver,
+    level: u32,
+) -> ZmidiStatus {
+    let level = match level {
+        0 => GmLevel::Off,
+        1 => GmLevel::Gm1,
+        2 => GmLevel::Gm2,
+        _ => return ZmidiStatus::InvalidArgument,
+    };
+    // SAFETY: caller contract above.
+    match unsafe { gm_receiver(receiver) } {
+        Some(r) => {
+            r.reset(level);
+            ZmidiStatus::Ok
+        }
+        None => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Takes the program selection of `channel` (0 to 15) with the bank that its controller state
+/// holds: bank MSB 78H makes it a Rhythm Channel when the configuration permits it, 79H a Melody
+/// Channel (RP-024 2.4, 3.3.1; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `receiver` is null or was set up by [`zmidi_gm_receiver_init`].
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_gm_receiver_program(
+    receiver: *mut ZmidiGmReceiver,
+    channel: u8,
+    has_bank: bool,
+    bank: u16,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    match (unsafe { gm_receiver(receiver) }, Channel::new(channel)) {
+        (Some(r), Ok(c)) if bank <= 0x3FFF => {
+            r.program(c, has_bank.then_some(bank));
+            ZmidiStatus::Ok
+        }
+        _ => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Takes one Channel Voice `message` and writes its action by the GM2 Channel Mode rules into
+/// `action` (RP-024 2.5, 3.5; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `receiver` is null or was set up by [`zmidi_gm_receiver_init`]; `message` is null or
+/// readable; `action` is null or writable.
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_gm_receiver_receive(
+    receiver: *mut ZmidiGmReceiver,
+    message: *const ZmidiMidi1Message,
+    action: *mut ZmidiModeAction,
+) -> ZmidiStatus {
+    if action.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: caller contract above.
+    let (Some(r), Some(m)) = (unsafe { gm_receiver(receiver) }, unsafe {
+        channel_voice_at(message)
+    }) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    // SAFETY: caller contract above.
+    unsafe { *action = mode_action(r.receive(&m)) };
+    ZmidiStatus::Ok
+}
+
+/// Gives the level, the Rhythm Channels, the channels in Mode 4 and the configuration
+/// (REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `receiver` is null or was set up by [`zmidi_gm_receiver_init`]; `info` is null or writable.
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_gm_receiver_info(
+    receiver: *mut ZmidiGmReceiver,
+    info: *mut ZmidiGmInfo,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    match (unsafe { gm_receiver(receiver) }, info.is_null()) {
+        (Some(r), false) => {
+            let mono = (0..16u8).fold(0u16, |m, n| {
+                m | (r.is_mono(Channel::from_bits(n)) as u16) << n
+            });
+            let c = r.config();
+            let i = ZmidiGmInfo {
+                level: gm_level(r.level()) as u32,
+                rhythm_channels: r.rhythm_channels(),
+                mono_channels: mono,
+                config: ZmidiGmConfig {
+                    rhythm_capable: c.rhythm_capable,
+                    rhythm_mono: c.rhythm_mono,
+                },
+            };
+            // SAFETY: caller contract above.
+            unsafe { *info = i };
+            ZmidiStatus::Ok
+        }
+        _ => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Gives `size_of` the Rust GM receiver, for a binding that checks its copy of the layout
+/// (DEC-019 rule 6).
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub extern "C" fn zmidi_gm_receiver_size() -> usize {
+    size_of::<GmReceiver>()
+}
+
+/// Sets `state`, the controller state of `channel` (0 to 15), for a GM reset: the GM2 defaults,
+/// the Rhythm bank on channel 10 and the Melody bank on the others (RP-024 3.3, 4.9.1;
+/// REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_controllers_init`].
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_gm_reset_controller_state(
+    state: *mut ZmidiControllerState,
+    channel: u8,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    match (
+        unsafe { state.cast::<ControllerState>().as_mut() },
+        Channel::new(channel),
+    ) {
+        (Some(s), Ok(c)) => {
+            zmidi_io::gm_reset_controller_state(s, c);
+            ZmidiStatus::Ok
+        }
+        _ => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Gives the GM2 default of controller 0 to 127: `*has_default` is false for a controller with
+/// no GM2 default (RP-024 3.3; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `has_default` and `value` are null or writable.
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_gm2_controller_default(
+    controller: u8,
+    has_default: *mut bool,
+    value: *mut u8,
+) -> ZmidiStatus {
+    if has_default.is_null() || value.is_null() || controller > 0x7F {
+        return ZmidiStatus::InvalidArgument;
+    }
+    let d = zmidi_io::gm2_controller_default(controller);
+    // SAFETY: caller contract above.
+    unsafe {
+        *has_default = d.is_some();
+        *value = d.unwrap_or(0);
+    }
+    ZmidiStatus::Ok
+}
+
+/// Gives whether GM2 recommends that a Rhythm Channel does not respond to `controller`
+/// (RP-024 3.3; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `result` is null or writable.
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_gm_rhythm_ignores_controller(
+    controller: u8,
+    result: *mut bool,
+) -> ZmidiStatus {
+    if result.is_null() || controller > 0x7F {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: caller contract above.
+    unsafe { *result = zmidi_io::rhythm_ignores_controller(controller) };
+    ZmidiStatus::Ok
+}
+
+/// Gives whether GM2 recommends that a Rhythm Channel does not respond to `parameter`
+/// (RP-024 3.4; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `parameter` is null or readable; `result` is null or writable.
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_gm_rhythm_ignores_parameter(
+    parameter: *const ZmidiParameter,
+    result: *mut bool,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let p = unsafe { parameter.as_ref() }.and_then(|p| rust_parameter(*p));
+    match (p, result.is_null()) {
+        (Some(p), false) => {
+            // SAFETY: caller contract above.
+            unsafe { *result = zmidi_io::rhythm_ignores_parameter(p) };
+            ZmidiStatus::Ok
+        }
+        _ => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Gives whether GM2 recommends that a Rhythm Channel does not respond to `message`: Pitch Bend,
+/// Channel Pressure and the controllers of [`zmidi_gm_rhythm_ignores_controller`] (RP-024 3.3,
+/// 3.6, 3.7; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `message` is null or readable; `result` is null or writable.
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_gm_rhythm_ignores_message(
+    message: *const ZmidiMidi1Message,
+    result: *mut bool,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    match (unsafe { channel_voice_at(message) }, result.is_null()) {
+        (Some(m), false) => {
+            // SAFETY: caller contract above.
+            unsafe { *result = zmidi_io::rhythm_ignores_message(&m) };
+            ZmidiStatus::Ok
+        }
+        _ => ZmidiStatus::InvalidArgument,
+    }
+}
+
+/// Gives the Modulation Depth Range of a 14-bit RPN 00H 05H value in hundredths of a cent: 100
+/// cents for each MSB step and 100/128 cent for each LSB step, rounded (RP-024 3.4.4;
+/// REQ-FFI-MIDI1-016). The GM2 default 00H 40H gives 5000.
+///
+/// # Safety
+/// `hundredths` is null or writable.
+#[cfg(feature = "gm")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_modulation_depth_range(
+    value: u16,
+    hundredths: *mut u32,
+) -> ZmidiStatus {
+    if hundredths.is_null() || value > 0x3FFF {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: caller contract above.
+    unsafe { *hundredths = zmidi_ump::controller::modulation_depth_range(value) };
+    ZmidiStatus::Ok
+}

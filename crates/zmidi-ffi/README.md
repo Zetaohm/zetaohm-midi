@@ -10,9 +10,12 @@ and other languages. `no_std`, no allocator, no callbacks.
   header gives a `Zmidi<Object>` type of that size for static or stack storage. The library never
   calls `malloc`.
 - Parts: UMP, MIDI 1.0 byte stream, MIDI-CI (each category separately), MIDI Clip File, Network MIDI
-  2.0 (with optional authentication), USB-MIDI and BLE-MIDI, and the MIDI 1.0 receiver states (typed
-  messages on bytes, Channel Mode, controllers, RPN and NRPN). A build contains only the parts that
-  you select, and the header shows only their declarations.
+  2.0 (with optional authentication), USB-MIDI and BLE-MIDI, the MIDI 1.0 receiver states (typed
+  messages on bytes, Channel Mode, controllers, RPN and NRPN, sync, Active Sensing, MPE and the
+  General MIDI receiver), and Universal System Exclusive (Device Inquiry, the General MIDI System
+  messages, Device Control, MIDI Tuning, MIDI Time Code and the MIDI Machine Control transport
+  tier). A build contains only the parts that you select, and the header shows only their
+  declarations.
 - A MIDI 1.0-only build (`midi1`) links no MIDI 2.0 code: about 11 KB of flash on Cortex-M4F for a
   16-channel DIN receiver with the io, ble and usb parts.
 - The same library runs on bare metal, on a desktop and in WebAssembly. The
@@ -167,12 +170,20 @@ with LTO, so the linker removes the functions that the program does not call.
 | `sync` | `ZMIDI_SYNC` | MIDI 1.0 sync receiver: Start, Stop, Continue, Timing Clock, Song Position Pointer, Song Select. |
 | `active-sensing` | `ZMIDI_ACTIVE_SENSING` | MIDI 1.0 Active Sensing monitor (330 ms timeout) and sender (270 ms interval). |
 | `mpe` | `ZMIDI_MPE` | MIDI Polyphonic Expression: Zone layout, receiver, Appendix E classes, pitch helper, writers and note allocator. Turns on `parameters`. |
+| `gm` | `ZMIDI_GM` | General MIDI receiver (RP-024): Rhythm Channels, the GM2 Channel Mode rules, the GM2 controller defaults, and the GM System messages. Turns on `channel-mode`, `controllers`, `parameters` and `sysex`. |
+| `sysex` | `ZMIDI_SYSEX` | System Exclusive base: one whole message, the ID classes, the Universal header and the writers. |
+| `inquiry` | `ZMIDI_INQUIRY` | Device Inquiry: Identity Request and Identity Reply. |
+| `device-control` | `ZMIDI_DEVICE_CONTROL` | Device Control: Master Volume, Balance, Fine Tuning and Coarse Tuning. |
+| `tuning` | `ZMIDI_TUNING` | MIDI Tuning: the dumps and their request, Single Note Tuning Change and Scale/Octave Tuning. |
+| `mtc` | `ZMIDI_MTC` | MIDI Time Code: the time functions, the Quarter Frame generator and reader, Full Message and User Bits. |
+| `mmc-transport` | `ZMIDI_MMC_TRANSPORT` | MIDI Machine Control transport tier: the Set 1 commands with PLAY and PAUSE, the Standard Time Code and the response fields. Turns on `mtc`. |
 | `midi1` | `ZMIDI_MIDI1` | All MIDI 1.0 parts above, with no MIDI 2.0 code. |
 | `std` | – | Host builds. |
 | `panic-handler` | – | Bare-metal and WebAssembly builds: a panic handler for the library. |
 
-`ZMIDI_CI` also defines the five `ZMIDI_CI_*` macros. `ZMIDI_MIDI1` defines the ten MIDI 1.0 macros, `ZMIDI_MPE` also
-defines `ZMIDI_PARAMETERS`, and `ZMIDI_IO`, `ZMIDI_USB` and `ZMIDI_BLE` also define their `*_MIDI1` macro. Define the macros of the features of
+`ZMIDI_CI` also defines the five `ZMIDI_CI_*` macros. `ZMIDI_MIDI1` defines the sixteen MIDI 1.0 macros, `ZMIDI_MPE` also
+defines `ZMIDI_PARAMETERS`, `ZMIDI_GM` defines `ZMIDI_CHANNEL_MODE`, `ZMIDI_CONTROLLERS` and `ZMIDI_PARAMETERS`,
+`ZMIDI_MMC_TRANSPORT` defines `ZMIDI_MTC`, each System Exclusive part defines `ZMIDI_SYSEX`, and `ZMIDI_IO`, `ZMIDI_USB` and `ZMIDI_BLE` also define their `*_MIDI1` macro. Define the macros of the features of
 your library build: with neither `io` nor `ble`, the readers of `io-midi1` and `ble-midi1` have a smaller storage size. `ZMIDI_ABI_MAJOR` and `ZMIDI_ABI_MINOR` give
 the ABI version of the header.
 

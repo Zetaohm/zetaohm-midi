@@ -245,6 +245,10 @@ final class ControllerCore implements Finalizable {
   /// The Reset All Controllers action.
   void reset() => check(zmidi_controllers_reset(_p), 'resetAllControllers');
 
+  /// The GM reset for [channel].
+  void gmReset(int channel) =>
+      check(zmidi_gm_reset_controller_state(_p, channel), 'gmReset');
+
   /// The held bank, or null.
   int? bank() => _s.run((arena) {
     final has = arena<Bool>();
@@ -840,3 +844,103 @@ final class AllocatorCore implements Finalizable {
     _s.release();
   }
 }
+
+/// The C state of a GmReceiver.
+final class GmCore implements Finalizable {
+  /// A GM receiver from its configuration.
+  GmCore(int rhythmCapable, bool rhythmMono) {
+    _p = allocState(this, zmidi_gm_receiver_size());
+    using((arena) {
+      final c = arena<ZmidiGmConfig>();
+      c.ref
+        ..rhythm_capable = rhythmCapable
+        ..rhythm_mono = rhythmMono;
+      check(zmidi_gm_receiver_init(_p, c), 'GmReceiver');
+    });
+  }
+
+  final _s = Scratch();
+  late Pointer<ZmidiGmReceiver> _p;
+
+  /// The GM reset of a level: 0 off, 1 GM1, 2 GM2.
+  void reset(int level) => check(zmidi_gm_receiver_reset(_p, level), 'reset');
+
+  /// The program selection of [channel] with its bank, or null.
+  void program(int channel, int? bank) => check(
+    zmidi_gm_receiver_program(_p, channel, bank != null, bank ?? 0),
+    'program',
+  );
+
+  /// Takes one message; gives (kind, channel, voice, on, changed, alternate).
+  (int, int, int, bool, bool, bool) receive(RawMessage m) => _s.run((arena) {
+    final pm = arena<ZmidiMidi1Message>();
+    _messageIn(pm, m);
+    final a = arena<ZmidiModeAction>();
+    check(zmidi_gm_receiver_receive(_p, pm, a), 'receive');
+    final r = a.ref;
+    return (r.kind, r.channel, r.voice, r.on, r.changed, r.alternate);
+  });
+
+  /// (level, rhythm channels, mono channels).
+  (int, int, int) info() => _s.run((arena) {
+    final i = arena<ZmidiGmInfo>();
+    check(zmidi_gm_receiver_info(_p, i), 'info');
+    return (i.ref.level, i.ref.rhythm_channels, i.ref.mono_channels);
+  });
+
+  /// Frees the C state and the scratch block.
+  void free() {
+    if (_p != nullptr) {
+      releaseState(this, _p);
+      _p = nullptr;
+    }
+    _s.release();
+  }
+}
+
+/// The GM2 default of a controller, or null.
+int? gm2ControllerDefault(int controller) => using((arena) {
+  final has = arena<Bool>();
+  final v = arena<Uint8>();
+  check(
+    zmidi_gm2_controller_default(controller, has, v),
+    'gm2ControllerDefault',
+  );
+  return has.value ? v.value : null;
+});
+
+/// True when a Rhythm Channel does not respond to [controller].
+bool rhythmIgnoresController(int controller) => using((arena) {
+  final r = arena<Bool>();
+  check(
+    zmidi_gm_rhythm_ignores_controller(controller, r),
+    'rhythmIgnoresController',
+  );
+  return r.value;
+});
+
+/// True when a Rhythm Channel does not respond to the parameter.
+bool rhythmIgnoresParameter(bool registered, int msb, int lsb) =>
+    using((arena) {
+      final p = arena<ZmidiParameter>();
+      _parameterIn(p, registered, msb, lsb);
+      final r = arena<Bool>();
+      check(zmidi_gm_rhythm_ignores_parameter(p, r), 'rhythmIgnoresParameter');
+      return r.value;
+    });
+
+/// True when a Rhythm Channel does not respond to the message.
+bool rhythmIgnoresMessage(RawMessage m) => using((arena) {
+  final pm = arena<ZmidiMidi1Message>();
+  _messageIn(pm, m);
+  final r = arena<Bool>();
+  check(zmidi_gm_rhythm_ignores_message(pm, r), 'rhythmIgnoresMessage');
+  return r.value;
+});
+
+/// The Modulation Depth Range of a 14-bit value, in hundredths of a cent.
+int modulationDepthRange(int value) => using((arena) {
+  final r = arena<Uint32>();
+  check(zmidi_modulation_depth_range(value, r), 'modulationDepthRange');
+  return r.value;
+});

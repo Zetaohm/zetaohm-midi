@@ -280,3 +280,39 @@ def test_mpe_sender_helpers() -> None:
     ):
         with pytest.raises(zm.InvalidValueError):
             bad()
+
+
+def test_gm_receiver_rp024() -> None:
+    # RP-024 2.4: channel 10 is a Rhythm Channel at the start; a bank MSB 78H program selection
+    # makes channel 11 one too. 3.5.6: Mono On with M = 1 on a Rhythm Channel gives All Notes Off.
+    gm = zm.GmReceiver()
+    assert (gm.level, gm.rhythm_channels, gm.kind(9), gm.kind(0)) == (
+        "gm2",
+        0x0200,
+        "rhythm",
+        "melody",
+    )
+    gm.program(10, 0x78 << 7)
+    assert gm.kind(10) == "rhythm" and gm.rhythm_channels == 0x0600
+    a = gm.receive(zm.Midi1Message(0xB0, 0x7E, 0x01))
+    assert a.kind == "mode_change" and gm.is_mono(0)
+    assert gm.receive(zm.Midi1Message(0xB9, 0x7E, 0x01)).kind == "all_notes_off" and not gm.is_mono(
+        9
+    )
+    # 4.9.2, 4.9.3: GM1 System On resets the channels; GM System Off gives the level off.
+    gm.reset("gm1")
+    assert (gm.level, gm.rhythm_channels, gm.is_mono(0)) == ("gm1", 0x0200, False)
+    gm.system_off()
+    assert gm.level == "off"
+    with pytest.raises(zm.InvalidValueError):
+        gm.reset("gm3")
+    # 3.3: the GM reset of a controller state holds the Rhythm bank on channel 10.
+    s = zm.ControllerState()
+    zm.gm_reset_controller_state(s, 9)
+    assert s.bank == 0x78 << 7
+    assert zm.gm2_controller_default(7) == 100 and zm.gm2_controller_default(120) is None
+    assert zm.rhythm_ignores_controller(1) and not zm.rhythm_ignores_controller(7)
+    assert zm.rhythm_ignores_parameter(zm.Parameter(0, 0))
+    assert zm.rhythm_ignores_message(zm.Midi1Message(0xE9, 0x00, 0x40))
+    # 3.4.4: the GM2 default 00H 40H is 50 cents.
+    assert zm.modulation_depth_range(0x40) == 5000

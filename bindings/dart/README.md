@@ -18,6 +18,12 @@ native platforms, and the WASM build on the web (dart2js and dart2wasm).
   `ActiveSensingSender`; `MpeReceiver` (Zones from the MCM, Pitch Bend Sensitivity, the controls of each
   channel), `MpeNoteAllocator`, `MpeLayout`, `mpeClass` (Appendix E), `pitchBendValue` and `pitchOffset`,
   and writers such as `mcmMessages` and `noteMessages`.
+- General MIDI: `GmReceiver` (Rhythm Channels, the GM2 Channel Mode rules) and the GM2 helpers such as
+  `gm2ControllerDefault` and `rhythmIgnoresMessage` (RP-024).
+- Universal System Exclusive: `parseSysex`, Device Inquiry (`readInquiry`, `respondIdentity`), the GM
+  System messages, Device Control, MIDI Tuning (`readTuning` and the dump writers), MIDI Time Code
+  (`MtcGenerator`, `MtcReader`, the Full Message) and the MMC transport tier (`readMmc`,
+  `mmcCommands`, `mmcResponses`).
 - MIDI-CI: `CiDevice`. Network MIDI 2.0: `NetHost` and `NetClient`, with authentication.
 - USB-MIDI: `UsbLink`. BLE-MIDI: `BleReader` and `BleWriter`.
 - USB descriptors: `UsbFunction` takes the full description of a USB MIDI function in one constructor

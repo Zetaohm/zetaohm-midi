@@ -1,10 +1,11 @@
-// MIDI 1.0 typed messages and receiver states (REQ-TS-MIDI1-*): M1 v4.2.1, RP-015, RP-018.
+// MIDI 1.0 typed messages and receiver states (REQ-TS-MIDI1-*): M1 v4.2.1, RP-015, RP-018, RP-024.
 import { beforeAll, describe, expect, test } from "vitest";
 
 import {
   ActiveSensingMonitor,
   ActiveSensingSender,
   ControllerState,
+  GmReceiver,
   InvalidValueError,
   Midi1Reader,
   Midi1Writer,
@@ -19,10 +20,12 @@ import {
   bankProgramMessages,
   changeMessage,
   controller14Messages,
+  gm2ControllerDefault,
   init,
   mcmMessages,
   midi1Message,
   modeMessage,
+  modulationDepthRange,
   mpeClass,
   mpeLayout,
   mpeLayoutWithMcm,
@@ -32,6 +35,9 @@ import {
   pitchBendValue,
   pitchOffset,
   resetValue,
+  rhythmIgnoresController,
+  rhythmIgnoresMessage,
+  rhythmIgnoresParameter,
   selectMessages,
   sensitivityMessages,
   sysexMessage,
@@ -335,6 +341,36 @@ describe("midi1", () => {
       expect(bad).toThrow(InvalidValueError);
     }
     a.free();
+    s.free();
+  });
+
+  test("the GM receiver: RP-024 rules", () => {
+    // 2.4: channel 10 is a Rhythm Channel at the start; a bank MSB 78H makes channel 11 one too.
+    const gm = new GmReceiver();
+    expect([gm.level, gm.rhythmChannels, gm.kind(9), gm.kind(0)]).toEqual(["gm2", 0x0200, "rhythm", "melody"]);
+    gm.program(10, 0x78 << 7);
+    expect([gm.kind(10), gm.rhythmChannels]).toEqual(["rhythm", 0x0600]);
+    // 3.5.6: Mono On with M = 1 gives Mode 4 on a Melody Channel, All Notes Off on a Rhythm Channel.
+    expect(gm.receive(midi1Message(0xb0, 0x7e, 0x01)).kind).toBe("modeChange");
+    expect(gm.isMono(0)).toBe(true);
+    expect(gm.receive(midi1Message(0xb9, 0x7e, 0x01)).kind).toBe("allNotesOff");
+    // 4.9.2, 4.9.3: GM1 System On resets the channels; GM System Off gives the level off.
+    gm.reset("gm1");
+    expect([gm.level, gm.rhythmChannels, gm.isMono(0)]).toEqual(["gm1", 0x0200, false]);
+    gm.systemOff();
+    expect(gm.level).toBe("off");
+    // 3.3: the GM reset of a controller state holds the Rhythm bank on channel 10.
+    const s = new ControllerState();
+    s.gmReset(9);
+    expect(s.bank).toBe(0x78 << 7);
+    expect([gm2ControllerDefault(7), gm2ControllerDefault(120)]).toEqual([100, null]);
+    expect([rhythmIgnoresController(1), rhythmIgnoresController(7)]).toEqual([true, false]);
+    expect(rhythmIgnoresParameter({ msb: 0, lsb: 0, registered: true })).toBe(true);
+    expect(rhythmIgnoresMessage(midi1Message(0xe9, 0x00, 0x40))).toBe(true);
+    // 3.4.4: the GM2 default 00H 40H is 50 cents.
+    expect(modulationDepthRange(0x40)).toBe(5000);
+    expect(() => modulationDepthRange(0x4000)).toThrow(InvalidValueError);
+    gm.free();
     s.free();
   });
 });

@@ -67,6 +67,45 @@ after_includes = """
 #ifndef ZMIDI_MPE
 #define ZMIDI_MPE
 #endif
+#ifndef ZMIDI_GM
+#define ZMIDI_GM
+#endif
+#ifndef ZMIDI_INQUIRY
+#define ZMIDI_INQUIRY
+#endif
+#ifndef ZMIDI_DEVICE_CONTROL
+#define ZMIDI_DEVICE_CONTROL
+#endif
+#ifndef ZMIDI_TUNING
+#define ZMIDI_TUNING
+#endif
+#ifndef ZMIDI_MTC
+#define ZMIDI_MTC
+#endif
+#ifndef ZMIDI_MMC_TRANSPORT
+#define ZMIDI_MMC_TRANSPORT
+#endif
+#endif
+/* The General MIDI receiver needs the mode, controller and parameter parts, and the GM System
+ * messages need the sysex base, as the Cargo feature gm does. */
+#if defined(ZMIDI_GM)
+#ifndef ZMIDI_CHANNEL_MODE
+#define ZMIDI_CHANNEL_MODE
+#endif
+#ifndef ZMIDI_CONTROLLERS
+#define ZMIDI_CONTROLLERS
+#endif
+#ifndef ZMIDI_PARAMETERS
+#define ZMIDI_PARAMETERS
+#endif
+#endif
+/* The MMC transport tier uses the MTC time, and each sysex part the sysex base. */
+#if defined(ZMIDI_MMC_TRANSPORT) && !defined(ZMIDI_MTC)
+#define ZMIDI_MTC
+#endif
+#if !defined(ZMIDI_SYSEX) && (defined(ZMIDI_GM) || defined(ZMIDI_INQUIRY) || \
+    defined(ZMIDI_DEVICE_CONTROL) || defined(ZMIDI_TUNING) || defined(ZMIDI_MTC))
+#define ZMIDI_SYSEX
 #endif
 /* The MPE receiver takes the events of the parameter receiver, as the Cargo feature mpe does. */
 #if defined(ZMIDI_MPE) && !defined(ZMIDI_PARAMETERS)
@@ -109,6 +148,13 @@ aligned_n = "ZMIDI_ALIGNED"
 "feature = sync" = "ZMIDI_SYNC"
 "feature = active-sensing" = "ZMIDI_ACTIVE_SENSING"
 "feature = mpe" = "ZMIDI_MPE"
+"feature = gm" = "ZMIDI_GM"
+"feature = sysex" = "ZMIDI_SYSEX"
+"feature = inquiry" = "ZMIDI_INQUIRY"
+"feature = device-control" = "ZMIDI_DEVICE_CONTROL"
+"feature = tuning" = "ZMIDI_TUNING"
+"feature = mtc" = "ZMIDI_MTC"
+"feature = mmc-transport" = "ZMIDI_MMC_TRANSPORT"
 "feature = midi1" = "ZMIDI_MIDI1"
 "target_pointer_width = 64" = "ZMIDI_PTR64"
 
@@ -116,7 +162,7 @@ aligned_n = "ZMIDI_ALIGNED"
 rename_variants = "ScreamingSnakeCase"
 prefix_with_name = true
 
-# The kinds of the MIDI 1.0 parts (module Midi1): no signature names them (the structs hold a
+# The kinds of the MIDI 1.0 parts (modules Midi1 and Sysex): no signature names them (the structs hold a
 # uint32_t), so the header exports them by name for their constants.
 [export]
 include = [
@@ -131,4 +177,10 @@ include = [
   "ZmidiMpeEventKind",
   "ZmidiMpeClass",
   "ZmidiMpeMessage",
+  "ZmidiGmLevel",
+  "ZmidiSysexClass",
+  "ZmidiDeviceControlKind",
+  "ZmidiTuningKind",
+  "ZmidiMmcCommandKind",
+  "ZmidiMmcFieldKind",
 ]

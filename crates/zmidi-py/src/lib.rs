@@ -12,6 +12,7 @@ pub mod midi1;
 pub mod native;
 pub mod net;
 pub mod pe;
+pub mod sysex;
 pub mod ump;
 pub mod usb;
 

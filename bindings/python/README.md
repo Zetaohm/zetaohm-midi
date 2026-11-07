@@ -18,6 +18,12 @@ typed package over the Rust crates of [zetaohm-midi](../../README.md).
   `ActiveSensingSender`; `MpeReceiver` (Zones from the MCM, Pitch Bend Sensitivity, the controls of each
   channel), `MpeNoteAllocator`, `MpeLayout`, `mpe_class` (Appendix E), `pitch_bend_value` and
   `pitch_offset`, and writers such as `mcm_messages` and `note_messages`.
+- General MIDI: `GmReceiver` (Rhythm Channels, the GM2 Channel Mode rules) and the GM2 helpers such as
+  `gm2_controller_default` and `rhythm_ignores_message` (RP-024).
+- Universal System Exclusive: `parse_sysex`, Device Inquiry (`read_inquiry`, `respond_identity`), the
+  GM System messages, Device Control, MIDI Tuning (`read_tuning` and the dump writers), MIDI Time Code
+  (`MtcGenerator`, `MtcReader`, the Full Message) and the MMC transport tier (`read_mmc`,
+  `mmc_commands`, `mmc_responses`).
 - MIDI-CI: `CiDevice`, with Profiles, Property Exchange and Process Inquiry.
 - Network MIDI 2.0: `NetHost` and `NetClient`, with authentication.
 - USB-MIDI: `UsbLink`. BLE-MIDI: `BleReader` and `BleWriter`.

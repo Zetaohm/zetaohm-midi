@@ -1167,6 +1167,7 @@ dependencies = [
  "zmidi-file",
  "zmidi-io",
  "zmidi-net",
+ "zmidi-sysex",
  "zmidi-ump",
  "zmidi-usb",
 ]
@@ -1211,6 +1212,7 @@ dependencies = [
  "zmidi-file",
  "zmidi-io",
  "zmidi-net",
+ "zmidi-sysex",
  "zmidi-ump",
  "zmidi-usb",
 ]

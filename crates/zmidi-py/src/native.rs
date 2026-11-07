@@ -50,19 +50,36 @@ pub mod _native {
         ControllerState, Midi1Message, Midi1Reader, Midi1Writer, ModeAction, ModeState, Parameter,
         ParameterEvent, ParameterState, SyncEvent, SyncReceiver,
     };
+    /// Pitch units for one semitone: an MPE pitch offset is in hundredths of a cent.
+    #[pymodule_export]
+    use crate::midi1::{
+        gm2_controller_default, gm_reset_controller_state, modulation_depth_range,
+        rhythm_ignores_controller, rhythm_ignores_message, rhythm_ignores_parameter, GmReceiver,
+    };
     #[pymodule_export]
     use crate::midi1::{
         mcm_messages, mode_message, mpe_class, note_messages, pitch_bend_value, pitch_offset,
         sensitivity_messages, zone_sensitivity_messages, MpeEvent, MpeLayout, MpeNoteAllocator,
         MpeReceiver,
     };
-    /// Pitch units for one semitone: an MPE pitch offset is in hundredths of a cent.
     #[pymodule_export]
     const PITCH_UNITS_PER_SEMITONE: i32 = 10_000;
     #[pymodule_export]
     use crate::net::{NetClient, NetEvent, NetHost};
     #[pymodule_export]
     use crate::pe::{PeEngine, PeEvent, PeResource, PeSubscription};
+    #[pymodule_export]
+    use crate::sysex::{
+        coarse_tuning_semitones, fine_tuning_offset, frequency_word, frequency_word_bytes,
+        gm_system, identity_reply, identity_request, manufacturer_sysex, mmc_commands, mmc_fields,
+        mmc_full_name, mmc_responses, mmc_short_name, mtc_full, mtc_user_bits, parse_sysex,
+        read_device_control, read_gm_system, read_inquiry, read_mmc, read_mmc_fields,
+        read_mtc_full, read_mtc_user_bits, read_tuning, respond_identity, sysex_addressed,
+        tuning_checksum, tuning_dump_request, tuning_key_dump, tuning_note_change,
+        tuning_scale_dump, tuning_scale_octave, universal_sysex, DeviceControl, Identity,
+        InquiryMessage, MmcCommand, MmcField, MmcMessage, MtcEvent, MtcGenerator, MtcReader,
+        MtcTime, SysexInfo, TimeCode, TuningMessage,
+    };
     #[pymodule_export]
     use crate::ump::{
         downscale, midi2_channel_pressure, midi2_control_change, midi2_note_off, midi2_note_on,

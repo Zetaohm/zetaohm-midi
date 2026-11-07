@@ -26,6 +26,8 @@ pub mod net;
 #[cfg(feature = "ci-property-exchange")]
 pub mod pe;
 pub mod status;
+#[cfg(feature = "sysex")]
+pub mod sysex;
 #[cfg(feature = "ump")]
 pub mod ump;
 #[cfg(feature = "usb-midi1")]

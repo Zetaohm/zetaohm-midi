@@ -2108,6 +2108,26 @@ ZmidiStatus zmidi_clip_writer_start(
   );
 }
 
+/// Gives the semitones from A440 of a Master Coarse Tuning MSB, -64 to +63 (CA-025;
+/// REQ-FFI-SX-005).
+///
+/// # Safety
+/// `semitones` is null or writable.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Uint8, ffi.Pointer<ffi.Int8>)>(
+  symbol: 'zmidi_coarse_tuning_semitones',
+)
+external int _zmidi_coarse_tuning_semitones(
+  int msb,
+  ffi.Pointer<ffi.Int8> semitones,
+);
+
+ZmidiStatus zmidi_coarse_tuning_semitones(
+  int msb,
+  ffi.Pointer<ffi.Int8> semitones,
+) {
+  return ZmidiStatus.fromValue(_zmidi_coarse_tuning_semitones(msb, semitones));
+}
+
 /// Writes a 14-bit controller value (`controller` 0 to 31, `value` 0 to 3FFFH) on `channel` (0
 /// to 15) as the MSB and then the LSB Control Change into `out` (`capacity` entries, at least 2),
 /// and 2 into `count`.
@@ -2258,6 +2278,594 @@ external int _zmidi_controllers_reset(ffi.Pointer<ZmidiControllerState> state);
 
 ZmidiStatus zmidi_controllers_reset(ffi.Pointer<ZmidiControllerState> state) {
   return ZmidiStatus.fromValue(_zmidi_controllers_reset(state));
+}
+
+/// Reads a Device Control message (REQ-FFI-SX-005).
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ZmidiDeviceControl>,
+  )
+>(symbol: 'zmidi_device_control_read')
+external int _zmidi_device_control_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ZmidiDeviceControl> out,
+);
+
+ZmidiStatus zmidi_device_control_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ZmidiDeviceControl> out,
+) {
+  return ZmidiStatus.fromValue(_zmidi_device_control_read(bytes, length, out));
+}
+
+/// Writes a Device Control message (REQ-FFI-SX-005). A value above its width gives
+/// [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `control` is null or readable; `out` is null or points to `capacity` writable bytes; `length`
+/// is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiDeviceControl>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_device_control_write')
+external int _zmidi_device_control_write(
+  ffi.Pointer<ZmidiDeviceControl> control,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_device_control_write(
+  ffi.Pointer<ZmidiDeviceControl> control,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_device_control_write(control, out, capacity, length),
+  );
+}
+
+/// Gives the signed offset from 8192 of a 14-bit Master Fine Tuning value (CA-025;
+/// REQ-FFI-SX-005).
+///
+/// # Safety
+/// `offset` is null or writable.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Uint16, ffi.Pointer<ffi.Int16>)>(
+  symbol: 'zmidi_fine_tuning_offset',
+)
+external int _zmidi_fine_tuning_offset(
+  int value,
+  ffi.Pointer<ffi.Int16> offset,
+);
+
+ZmidiStatus zmidi_fine_tuning_offset(int value, ffi.Pointer<ffi.Int16> offset) {
+  return ZmidiStatus.fromValue(_zmidi_fine_tuning_offset(value, offset));
+}
+
+/// Reads a frequency word from its three bytes (M1 MIDI Tuning; REQ-FFI-SX-006).
+///
+/// # Safety
+/// `bytes` is null or points to 3 readable bytes; `word` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ZmidiFrequencyWord>,
+  )
+>(symbol: 'zmidi_frequency_word_from_bytes')
+external int _zmidi_frequency_word_from_bytes(
+  ffi.Pointer<ffi.Uint8> bytes,
+  ffi.Pointer<ZmidiFrequencyWord> word,
+);
+
+ZmidiStatus zmidi_frequency_word_from_bytes(
+  ffi.Pointer<ffi.Uint8> bytes,
+  ffi.Pointer<ZmidiFrequencyWord> word,
+) {
+  return ZmidiStatus.fromValue(_zmidi_frequency_word_from_bytes(bytes, word));
+}
+
+/// Writes the three bytes of a frequency word (REQ-FFI-SX-006).
+///
+/// # Safety
+/// `word` is null or readable; `bytes` is null or points to 3 writable bytes.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiFrequencyWord>,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'zmidi_frequency_word_to_bytes')
+external int _zmidi_frequency_word_to_bytes(
+  ffi.Pointer<ZmidiFrequencyWord> word,
+  ffi.Pointer<ffi.Uint8> bytes,
+);
+
+ZmidiStatus zmidi_frequency_word_to_bytes(
+  ffi.Pointer<ZmidiFrequencyWord> word,
+  ffi.Pointer<ffi.Uint8> bytes,
+) {
+  return ZmidiStatus.fromValue(_zmidi_frequency_word_to_bytes(word, bytes));
+}
+
+/// Gives the GM2 default of controller 0 to 127: `*has_default` is false for a controller with
+/// no GM2 default (RP-024 3.3; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `has_default` and `value` are null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Pointer<ffi.Bool>,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'zmidi_gm2_controller_default')
+external int _zmidi_gm2_controller_default(
+  int controller,
+  ffi.Pointer<ffi.Bool> has_default,
+  ffi.Pointer<ffi.Uint8> value,
+);
+
+ZmidiStatus zmidi_gm2_controller_default(
+  int controller,
+  ffi.Pointer<ffi.Bool> has_default,
+  ffi.Pointer<ffi.Uint8> value,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_gm2_controller_default(controller, has_default, value),
+  );
+}
+
+/// Gives the level, the Rhythm Channels, the channels in Mode 4 and the configuration
+/// (REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `receiver` is null or was set up by [`zmidi_gm_receiver_init`]; `info` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiGmReceiver>,
+    ffi.Pointer<ZmidiGmInfo>,
+  )
+>(symbol: 'zmidi_gm_receiver_info')
+external int _zmidi_gm_receiver_info(
+  ffi.Pointer<ZmidiGmReceiver> receiver,
+  ffi.Pointer<ZmidiGmInfo> info,
+);
+
+ZmidiStatus zmidi_gm_receiver_info(
+  ffi.Pointer<ZmidiGmReceiver> receiver,
+  ffi.Pointer<ZmidiGmInfo> info,
+) {
+  return ZmidiStatus.fromValue(_zmidi_gm_receiver_info(receiver, info));
+}
+
+/// Sets up `receiver` from `config`: channel 10 a Rhythm Channel, each channel in Mode 3, level
+/// GM2 (RP-024 2.4, 2.5; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `receiver` is null or points to writable storage of a [`ZmidiGmReceiver`]; `config` is null
+/// or readable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiGmReceiver>,
+    ffi.Pointer<ZmidiGmConfig>,
+  )
+>(symbol: 'zmidi_gm_receiver_init')
+external int _zmidi_gm_receiver_init(
+  ffi.Pointer<ZmidiGmReceiver> receiver,
+  ffi.Pointer<ZmidiGmConfig> config,
+);
+
+ZmidiStatus zmidi_gm_receiver_init(
+  ffi.Pointer<ZmidiGmReceiver> receiver,
+  ffi.Pointer<ZmidiGmConfig> config,
+) {
+  return ZmidiStatus.fromValue(_zmidi_gm_receiver_init(receiver, config));
+}
+
+/// Takes the program selection of `channel` (0 to 15) with the bank that its controller state
+/// holds: bank MSB 78H makes it a Rhythm Channel when the configuration permits it, 79H a Melody
+/// Channel (RP-024 2.4, 3.3.1; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `receiver` is null or was set up by [`zmidi_gm_receiver_init`].
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiGmReceiver>,
+    ffi.Uint8,
+    ffi.Bool,
+    ffi.Uint16,
+  )
+>(symbol: 'zmidi_gm_receiver_program')
+external int _zmidi_gm_receiver_program(
+  ffi.Pointer<ZmidiGmReceiver> receiver,
+  int channel,
+  bool has_bank,
+  int bank,
+);
+
+ZmidiStatus zmidi_gm_receiver_program(
+  ffi.Pointer<ZmidiGmReceiver> receiver,
+  int channel,
+  bool has_bank,
+  int bank,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_gm_receiver_program(receiver, channel, has_bank, bank),
+  );
+}
+
+/// Takes one Channel Voice `message` and writes its action by the GM2 Channel Mode rules into
+/// `action` (RP-024 2.5, 3.5; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `receiver` is null or was set up by [`zmidi_gm_receiver_init`]; `message` is null or
+/// readable; `action` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiGmReceiver>,
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.Pointer<ZmidiModeAction>,
+  )
+>(symbol: 'zmidi_gm_receiver_receive')
+external int _zmidi_gm_receiver_receive(
+  ffi.Pointer<ZmidiGmReceiver> receiver,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiModeAction> action,
+);
+
+ZmidiStatus zmidi_gm_receiver_receive(
+  ffi.Pointer<ZmidiGmReceiver> receiver,
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ZmidiModeAction> action,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_gm_receiver_receive(receiver, message, action),
+  );
+}
+
+/// The GM reset of a GM1 or GM2 System On, or GM System Off for [`ZmidiGmLevel::Off`]
+/// (RP-024 4.9; REQ-FFI-MIDI1-016). The program then mutes the notes, calls
+/// [`zmidi_gm_reset_controller_state`] for each channel and resets each parameter receiver.
+///
+/// # Safety
+/// `receiver` is null or was set up by [`zmidi_gm_receiver_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiGmReceiver>, ffi.Uint32)>(
+  symbol: 'zmidi_gm_receiver_reset',
+)
+external int _zmidi_gm_receiver_reset(
+  ffi.Pointer<ZmidiGmReceiver> receiver,
+  int level,
+);
+
+ZmidiStatus zmidi_gm_receiver_reset(
+  ffi.Pointer<ZmidiGmReceiver> receiver,
+  int level,
+) {
+  return ZmidiStatus.fromValue(_zmidi_gm_receiver_reset(receiver, level));
+}
+
+/// Gives `size_of` the Rust GM receiver, for a binding that checks its copy of the layout
+/// (DEC-019 rule 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_gm_receiver_size();
+
+/// Sets `state`, the controller state of `channel` (0 to 15), for a GM reset: the GM2 defaults,
+/// the Rhythm bank on channel 10 and the Melody bank on the others (RP-024 3.3, 4.9.1;
+/// REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `state` is null or was set up by [`zmidi_controllers_init`].
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiControllerState>, ffi.Uint8)
+>(symbol: 'zmidi_gm_reset_controller_state')
+external int _zmidi_gm_reset_controller_state(
+  ffi.Pointer<ZmidiControllerState> state,
+  int channel,
+);
+
+ZmidiStatus zmidi_gm_reset_controller_state(
+  ffi.Pointer<ZmidiControllerState> state,
+  int channel,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_gm_reset_controller_state(state, channel),
+  );
+}
+
+/// Gives whether GM2 recommends that a Rhythm Channel does not respond to `controller`
+/// (RP-024 3.3; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `result` is null or writable.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Uint8, ffi.Pointer<ffi.Bool>)>(
+  symbol: 'zmidi_gm_rhythm_ignores_controller',
+)
+external int _zmidi_gm_rhythm_ignores_controller(
+  int controller,
+  ffi.Pointer<ffi.Bool> result,
+);
+
+ZmidiStatus zmidi_gm_rhythm_ignores_controller(
+  int controller,
+  ffi.Pointer<ffi.Bool> result,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_gm_rhythm_ignores_controller(controller, result),
+  );
+}
+
+/// Gives whether GM2 recommends that a Rhythm Channel does not respond to `message`: Pitch Bend,
+/// Channel Pressure and the controllers of [`zmidi_gm_rhythm_ignores_controller`] (RP-024 3.3,
+/// 3.6, 3.7; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `message` is null or readable; `result` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMidi1Message>,
+    ffi.Pointer<ffi.Bool>,
+  )
+>(symbol: 'zmidi_gm_rhythm_ignores_message')
+external int _zmidi_gm_rhythm_ignores_message(
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ffi.Bool> result,
+);
+
+ZmidiStatus zmidi_gm_rhythm_ignores_message(
+  ffi.Pointer<ZmidiMidi1Message> message,
+  ffi.Pointer<ffi.Bool> result,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_gm_rhythm_ignores_message(message, result),
+  );
+}
+
+/// Gives whether GM2 recommends that a Rhythm Channel does not respond to `parameter`
+/// (RP-024 3.4; REQ-FFI-MIDI1-016).
+///
+/// # Safety
+/// `parameter` is null or readable; `result` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiParameter>, ffi.Pointer<ffi.Bool>)
+>(symbol: 'zmidi_gm_rhythm_ignores_parameter')
+external int _zmidi_gm_rhythm_ignores_parameter(
+  ffi.Pointer<ZmidiParameter> parameter,
+  ffi.Pointer<ffi.Bool> result,
+);
+
+ZmidiStatus zmidi_gm_rhythm_ignores_parameter(
+  ffi.Pointer<ZmidiParameter> parameter,
+  ffi.Pointer<ffi.Bool> result,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_gm_rhythm_ignores_parameter(parameter, result),
+  );
+}
+
+/// Reads a General MIDI System message (REQ-FFI-SX-004): `*command` is 1 (GM1 System On), 2 (GM
+/// System Off) or 3 (GM2 System On).
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `device_id` and `command` are null or
+/// writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'zmidi_gm_system_read')
+external int _zmidi_gm_system_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Uint8> device_id,
+  ffi.Pointer<ffi.Uint8> command,
+);
+
+ZmidiStatus zmidi_gm_system_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Uint8> device_id,
+  ffi.Pointer<ffi.Uint8> command,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_gm_system_read(bytes, length, device_id, command),
+  );
+}
+
+/// Writes a General MIDI System message: `command` 1, 2 or 3 as [`zmidi_gm_system_read`] gives
+/// it (REQ-FFI-SX-004).
+///
+/// # Safety
+/// `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_gm_system_write')
+external int _zmidi_gm_system_write(
+  int device_id,
+  int command,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_gm_system_write(
+  int device_id,
+  int command,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_gm_system_write(device_id, command, out, capacity, length),
+  );
+}
+
+/// Reads an Identity Request or an Identity Reply (REQ-FFI-SX-003). `*is_reply` tells which;
+/// `*identity` is the identity of a reply, and zeroes for a request.
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `is_reply`, `device_id` and `identity`
+/// are null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Bool>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ZmidiIdentity>,
+  )
+>(symbol: 'zmidi_inquiry_read')
+external int _zmidi_inquiry_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Bool> is_reply,
+  ffi.Pointer<ffi.Uint8> device_id,
+  ffi.Pointer<ZmidiIdentity> identity,
+);
+
+ZmidiStatus zmidi_inquiry_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Bool> is_reply,
+  ffi.Pointer<ffi.Uint8> device_id,
+  ffi.Pointer<ZmidiIdentity> identity,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_inquiry_read(bytes, length, is_reply, device_id, identity),
+  );
+}
+
+/// Writes an Identity Reply from `device_id` with `identity` (REQ-FFI-SX-003).
+///
+/// # Safety
+/// `identity` is null or readable; `out` is null or points to `capacity` writable bytes;
+/// `length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Pointer<ZmidiIdentity>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_inquiry_reply_write')
+external int _zmidi_inquiry_reply_write(
+  int device_id,
+  ffi.Pointer<ZmidiIdentity> identity,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_inquiry_reply_write(
+  int device_id,
+  ffi.Pointer<ZmidiIdentity> identity,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_inquiry_reply_write(device_id, identity, out, capacity, length),
+  );
+}
+
+/// Writes an Identity Request to `device_id` (7FH: all devices; REQ-FFI-SX-003).
+///
+/// # Safety
+/// `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_inquiry_request_write')
+external int _zmidi_inquiry_request_write(
+  int device_id,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_inquiry_request_write(
+  int device_id,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_inquiry_request_write(device_id, out, capacity, length),
+  );
+}
+
+/// Answers an Identity Request for `own_device_id` or for all devices with the Identity Reply
+/// (REQ-FFI-SX-003). Another message, or a request for another device, gives
+/// [`ZmidiStatus::NoPending`].
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `identity` is null or readable; `out`
+/// is null or points to `capacity` writable bytes; `out_length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiIdentity>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_inquiry_respond')
+external int _zmidi_inquiry_respond(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  int own_device_id,
+  ffi.Pointer<ZmidiIdentity> identity,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> out_length,
+);
+
+ZmidiStatus zmidi_inquiry_respond(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  int own_device_id,
+  ffi.Pointer<ZmidiIdentity> identity,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> out_length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_inquiry_respond(
+      bytes,
+      length,
+      own_device_id,
+      identity,
+      out,
+      capacity,
+      out_length,
+    ),
+  );
 }
 
 /// Sets up `reader`: no running status and no System Exclusive message in progress.
@@ -2432,6 +3040,289 @@ ZmidiStatus zmidi_midi1_writer_write(
   );
 }
 
+/// Gives the time code field 01H to 1FH of a short name 21H to 3FH (RP-013 p. 9;
+/// REQ-FFI-SX-008).
+///
+/// # Safety
+/// `field` is null or writable.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Uint8, ffi.Pointer<ffi.Uint8>)>(
+  symbol: 'zmidi_mmc_full_name',
+)
+external int _zmidi_mmc_full_name(int short_, ffi.Pointer<ffi.Uint8> field);
+
+ZmidiStatus zmidi_mmc_full_name(int short_, ffi.Pointer<ffi.Uint8> field) {
+  return ZmidiStatus.fromValue(_zmidi_mmc_full_name(short_, field));
+}
+
+/// Reads the command at `*offset` of a command string (the bytes at `string_offset` of a
+/// [`ZmidiMmcMessage`]) and moves `*offset` past it (RP-013 p. 5; REQ-FFI-SX-008). The end
+/// gives [`ZmidiStatus::NoPending`]; a string cut short gives [`ZmidiStatus::InvalidArgument`]
+/// and moves `*offset` to the end.
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `offset` is null or writable;
+/// `command` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+    ffi.Pointer<ZmidiMmcCommand>,
+  )
+>(symbol: 'zmidi_mmc_next_command')
+external int _zmidi_mmc_next_command(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.UintPtr> offset,
+  ffi.Pointer<ZmidiMmcCommand> command,
+);
+
+ZmidiStatus zmidi_mmc_next_command(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.UintPtr> offset,
+  ffi.Pointer<ZmidiMmcCommand> command,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mmc_next_command(bytes, length, offset, command),
+  );
+}
+
+/// Reads the Information Field at `*offset` of a response string or of the data of WRITE, and
+/// moves `*offset` past it, with the end and error rules of [`zmidi_mmc_next_command`]
+/// (REQ-FFI-SX-008).
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `offset` is null or writable; `field`
+/// is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+    ffi.Pointer<ZmidiMmcField>,
+  )
+>(symbol: 'zmidi_mmc_next_field')
+external int _zmidi_mmc_next_field(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.UintPtr> offset,
+  ffi.Pointer<ZmidiMmcField> field,
+);
+
+ZmidiStatus zmidi_mmc_next_field(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.UintPtr> offset,
+  ffi.Pointer<ZmidiMmcField> field,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mmc_next_field(bytes, length, offset, field),
+  );
+}
+
+/// Reads the header of an MMC message (REQ-FFI-SX-008). Another message gives
+/// [`ZmidiStatus::NoPending`]; an empty string gives [`ZmidiStatus::InvalidArgument`]. Read the
+/// string with [`zmidi_mmc_next_command`] or [`zmidi_mmc_next_field`].
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ZmidiMmcMessage>,
+  )
+>(symbol: 'zmidi_mmc_read')
+external int _zmidi_mmc_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ZmidiMmcMessage> out,
+);
+
+ZmidiStatus zmidi_mmc_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ZmidiMmcMessage> out,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mmc_read(bytes, length, out));
+}
+
+/// Gives the short name (the name plus 20H) of a time code field 01H to 1FH (RP-013 p. 9;
+/// REQ-FFI-SX-008).
+///
+/// # Safety
+/// `short` is null or writable.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Uint8, ffi.Pointer<ffi.Uint8>)>(
+  symbol: 'zmidi_mmc_short_name',
+)
+external int _zmidi_mmc_short_name(int field, ffi.Pointer<ffi.Uint8> short_);
+
+ZmidiStatus zmidi_mmc_short_name(int field, ffi.Pointer<ffi.Uint8> short_) {
+  return ZmidiStatus.fromValue(_zmidi_mmc_short_name(field, short_));
+}
+
+/// Writes an MMC command message to `device_id` from `count` commands (RP-013 p. 1;
+/// REQ-FFI-SX-008). The offsets of Write and Other point into `data`. A string above 48 bytes,
+/// an empty string, a register outside 08H to 0FH, a LOCATE target in the {st} form or a MOVE
+/// name outside 01H to 1FH give [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `commands` is null or points to `count` readable commands; `data` is null or points to
+/// `data_length` readable bytes; `out` is null or points to `capacity` writable bytes; `length`
+/// is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMmcCommand>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_mmc_write_commands')
+external int _zmidi_mmc_write_commands(
+  int device_id,
+  ffi.Pointer<ZmidiMmcCommand> commands,
+  int count,
+  ffi.Pointer<ffi.Uint8> data,
+  int data_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_mmc_write_commands(
+  int device_id,
+  ffi.Pointer<ZmidiMmcCommand> commands,
+  int count,
+  ffi.Pointer<ffi.Uint8> data,
+  int data_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mmc_write_commands(
+      device_id,
+      commands,
+      count,
+      data,
+      data_length,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
+/// Writes the name and data pairs of `count` Information Fields, for the data of a WRITE
+/// command, with the rules of [`zmidi_mmc_write_responses`] (REQ-FFI-SX-008).
+///
+/// # Safety
+/// `fields` is null or points to `count` readable fields; `data` is null or points to
+/// `data_length` readable bytes; `out` is null or points to `capacity` writable bytes; `length`
+/// is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMmcField>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_mmc_write_fields')
+external int _zmidi_mmc_write_fields(
+  ffi.Pointer<ZmidiMmcField> fields,
+  int count,
+  ffi.Pointer<ffi.Uint8> data,
+  int data_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_mmc_write_fields(
+  ffi.Pointer<ZmidiMmcField> fields,
+  int count,
+  ffi.Pointer<ffi.Uint8> data,
+  int data_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mmc_write_fields(
+      fields,
+      count,
+      data,
+      data_length,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
+/// Writes an MMC response message from `device_id` (00H to 7EH, AMB-RP-013-04) with `count`
+/// Information Fields (RP-013 p. 1; REQ-FFI-SX-008). The offsets of Other point into `data`.
+/// SELECTED TIME CODE needs the {st} form and no sign; GP0 needs the {ff} form.
+///
+/// # Safety
+/// `fields` is null or points to `count` readable fields; `data` is null or points to
+/// `data_length` readable bytes; `out` is null or points to `capacity` writable bytes; `length`
+/// is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMmcField>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_mmc_write_responses')
+external int _zmidi_mmc_write_responses(
+  int device_id,
+  ffi.Pointer<ZmidiMmcField> fields,
+  int count,
+  ffi.Pointer<ffi.Uint8> data,
+  int data_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_mmc_write_responses(
+  int device_id,
+  ffi.Pointer<ZmidiMmcField> fields,
+  int count,
+  ffi.Pointer<ffi.Uint8> data,
+  int data_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mmc_write_responses(
+      device_id,
+      fields,
+      count,
+      data,
+      data_length,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
 /// Writes the mode information of `state` into `info`.
 ///
 /// # Safety
@@ -2591,6 +3482,29 @@ external int _zmidi_mode_system_reset(ffi.Pointer<ZmidiModeState> state);
 
 ZmidiStatus zmidi_mode_system_reset(ffi.Pointer<ZmidiModeState> state) {
   return ZmidiStatus.fromValue(_zmidi_mode_system_reset(state));
+}
+
+/// Gives the Modulation Depth Range of a 14-bit RPN 00H 05H value in hundredths of a cent: 100
+/// cents for each MSB step and 100/128 cent for each LSB step, rounded (RP-024 3.4.4;
+/// REQ-FFI-MIDI1-016). The GM2 default 00H 40H gives 5000.
+///
+/// # Safety
+/// `hundredths` is null or writable.
+@ffi.Native<ffi.UnsignedInt Function(ffi.Uint16, ffi.Pointer<ffi.Uint32>)>(
+  symbol: 'zmidi_modulation_depth_range',
+)
+external int _zmidi_modulation_depth_range(
+  int value,
+  ffi.Pointer<ffi.Uint32> hundredths,
+);
+
+ZmidiStatus zmidi_modulation_depth_range(
+  int value,
+  ffi.Pointer<ffi.Uint32> hundredths,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_modulation_depth_range(value, hundredths),
+  );
 }
 
 /// Writes the count of active notes on `channel` (0 to 15) into `count`.
@@ -3315,6 +4229,502 @@ ZmidiStatus zmidi_mpe_zone_sensitivity_messages(
       capacity,
       count,
     ),
+  );
+}
+
+/// Gives the time `delta` frames after (or before) `time`, with the 24-hour wrap
+/// (REQ-FFI-SX-007).
+///
+/// # Safety
+/// `time` is null or readable; `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMtcTime>,
+    ffi.Int32,
+    ffi.Pointer<ZmidiMtcTime>,
+  )
+>(symbol: 'zmidi_mtc_add_frames')
+external int _zmidi_mtc_add_frames(
+  ffi.Pointer<ZmidiMtcTime> time,
+  int delta,
+  ffi.Pointer<ZmidiMtcTime> out,
+);
+
+ZmidiStatus zmidi_mtc_add_frames(
+  ffi.Pointer<ZmidiMtcTime> time,
+  int delta,
+  ffi.Pointer<ZmidiMtcTime> out,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_add_frames(time, delta, out));
+}
+
+/// Gives the time of `count` frames from 00:00:00:00 for the type `rate`, with the 24-hour wrap
+/// (REQ-FFI-SX-007).
+///
+/// # Safety
+/// `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Uint32, ffi.Uint8, ffi.Pointer<ZmidiMtcTime>)
+>(symbol: 'zmidi_mtc_from_frame_count')
+external int _zmidi_mtc_from_frame_count(
+  int count,
+  int rate,
+  ffi.Pointer<ZmidiMtcTime> out,
+);
+
+ZmidiStatus zmidi_mtc_from_frame_count(
+  int count,
+  int rate,
+  ffi.Pointer<ZmidiMtcTime> out,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_from_frame_count(count, rate, out));
+}
+
+/// Reads an MTC Full Message (RP-004 p. 5; REQ-FFI-SX-007). The counts are as received.
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `device_id` and `time` are null or
+/// writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ZmidiMtcTime>,
+  )
+>(symbol: 'zmidi_mtc_full_read')
+external int _zmidi_mtc_full_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Uint8> device_id,
+  ffi.Pointer<ZmidiMtcTime> time,
+);
+
+ZmidiStatus zmidi_mtc_full_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Uint8> device_id,
+  ffi.Pointer<ZmidiMtcTime> time,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mtc_full_read(bytes, length, device_id, time),
+  );
+}
+
+/// Writes an MTC Full Message (RP-004 p. 5; REQ-FFI-SX-007). A time that is not valid gives
+/// [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `time` is null or readable; `out` is null or points to `capacity` writable bytes; `length`
+/// is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMtcTime>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_mtc_full_write')
+external int _zmidi_mtc_full_write(
+  int device_id,
+  ffi.Pointer<ZmidiMtcTime> time,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_mtc_full_write(
+  int device_id,
+  ffi.Pointer<ZmidiMtcTime> time,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mtc_full_write(device_id, time, out, capacity, length),
+  );
+}
+
+/// Sets up `generator`, running: the first sequence encodes `time` and starts at piece 0, or at
+/// piece 7 when `reverse` (RP-004 p. 3; REQ-FFI-SX-007). A time that is not valid gives
+/// [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `generator` is null or points to writable storage of a [`ZmidiMtcGenerator`]; `time` is null
+/// or readable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMtcGenerator>,
+    ffi.Pointer<ZmidiMtcTime>,
+    ffi.Bool,
+  )
+>(symbol: 'zmidi_mtc_generator_init')
+external int _zmidi_mtc_generator_init(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  ffi.Pointer<ZmidiMtcTime> time,
+  bool reverse,
+);
+
+ZmidiStatus zmidi_mtc_generator_init(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  ffi.Pointer<ZmidiMtcTime> time,
+  bool reverse,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mtc_generator_init(generator, time, reverse),
+  );
+}
+
+/// Moves the generator to `time`; the next piece is the first piece of the direction
+/// (REQ-FFI-SX-007). A time that is not valid gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `generator` is null or was set up by [`zmidi_mtc_generator_init`]; `time` is null or
+/// readable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMtcGenerator>,
+    ffi.Pointer<ZmidiMtcTime>,
+  )
+>(symbol: 'zmidi_mtc_generator_locate')
+external int _zmidi_mtc_generator_locate(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  ffi.Pointer<ZmidiMtcTime> time,
+);
+
+ZmidiStatus zmidi_mtc_generator_locate(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  ffi.Pointer<ZmidiMtcTime> time,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_generator_locate(generator, time));
+}
+
+/// Gives the data byte of the next piece in `*byte`, or [`ZmidiStatus::NoPending`] while the
+/// generator is stopped (REQ-FFI-SX-007).
+///
+/// # Safety
+/// `generator` is null or was set up by [`zmidi_mtc_generator_init`]; `byte` is null or
+/// writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMtcGenerator>,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'zmidi_mtc_generator_next')
+external int _zmidi_mtc_generator_next(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  ffi.Pointer<ffi.Uint8> byte,
+);
+
+ZmidiStatus zmidi_mtc_generator_next(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  ffi.Pointer<ffi.Uint8> byte,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_generator_next(generator, byte));
+}
+
+/// Sets the direction: the next piece is the next one in the new order (AMB-RP-004-13;
+/// REQ-FFI-SX-007).
+///
+/// # Safety
+/// `generator` is null or was set up by [`zmidi_mtc_generator_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiMtcGenerator>, ffi.Bool)>(
+  symbol: 'zmidi_mtc_generator_set_direction',
+)
+external int _zmidi_mtc_generator_set_direction(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  bool reverse,
+);
+
+ZmidiStatus zmidi_mtc_generator_set_direction(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  bool reverse,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mtc_generator_set_direction(generator, reverse),
+  );
+}
+
+/// Runs or stops the generator (RP-004 p. 3; REQ-FFI-SX-007).
+///
+/// # Safety
+/// `generator` is null or was set up by [`zmidi_mtc_generator_init`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiMtcGenerator>, ffi.Bool)>(
+  symbol: 'zmidi_mtc_generator_set_running',
+)
+external int _zmidi_mtc_generator_set_running(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  bool running,
+);
+
+ZmidiStatus zmidi_mtc_generator_set_running(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  bool running,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mtc_generator_set_running(generator, running),
+  );
+}
+
+/// Gives `size_of` the Rust generator, for a binding that checks its copy of the layout (DEC-019
+/// rule 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_mtc_generator_size();
+
+/// Gives the time that the current or next sequence encodes at its piece 0 (REQ-FFI-SX-007).
+///
+/// # Safety
+/// `generator` is null or was set up by [`zmidi_mtc_generator_init`]; `time` is null or
+/// writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMtcGenerator>,
+    ffi.Pointer<ZmidiMtcTime>,
+  )
+>(symbol: 'zmidi_mtc_generator_time')
+external int _zmidi_mtc_generator_time(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  ffi.Pointer<ZmidiMtcTime> time,
+);
+
+ZmidiStatus zmidi_mtc_generator_time(
+  ffi.Pointer<ZmidiMtcGenerator> generator,
+  ffi.Pointer<ZmidiMtcTime> time,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_generator_time(generator, time));
+}
+
+/// Gives `time`, or frame 02 for a frame number that the drop-frame type skips (RP-013 Drop
+/// Frame Notes; REQ-FFI-SX-007).
+///
+/// # Safety
+/// `time` is null or readable; `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiMtcTime>, ffi.Pointer<ZmidiMtcTime>)
+>(symbol: 'zmidi_mtc_next_valid')
+external int _zmidi_mtc_next_valid(
+  ffi.Pointer<ZmidiMtcTime> time,
+  ffi.Pointer<ZmidiMtcTime> out,
+);
+
+ZmidiStatus zmidi_mtc_next_valid(
+  ffi.Pointer<ZmidiMtcTime> time,
+  ffi.Pointer<ZmidiMtcTime> out,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_next_valid(time, out));
+}
+
+/// Gives the 8 Quarter Frame data bytes of `time`, piece 0 first (RP-004 p. 2;
+/// REQ-FFI-SX-007).
+///
+/// # Safety
+/// `time` is null or readable; `bytes` is null or points to 8 writable bytes.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiMtcTime>, ffi.Pointer<ffi.Uint8>)
+>(symbol: 'zmidi_mtc_quarter_frames')
+external int _zmidi_mtc_quarter_frames(
+  ffi.Pointer<ZmidiMtcTime> time,
+  ffi.Pointer<ffi.Uint8> bytes,
+);
+
+ZmidiStatus zmidi_mtc_quarter_frames(
+  ffi.Pointer<ZmidiMtcTime> time,
+  ffi.Pointer<ffi.Uint8> bytes,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_quarter_frames(time, bytes));
+}
+
+/// Takes the time of a Full Message: the reader has this time and is stopped until the next
+/// Quarter Frame data byte (AMB-RP-004-06; REQ-FFI-SX-007).
+///
+/// # Safety
+/// `reader` is null or was set up by [`zmidi_mtc_reader_init`]; `time` is null or readable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMtcReader>,
+    ffi.Pointer<ZmidiMtcTime>,
+  )
+>(symbol: 'zmidi_mtc_reader_full_message')
+external int _zmidi_mtc_reader_full_message(
+  ffi.Pointer<ZmidiMtcReader> reader,
+  ffi.Pointer<ZmidiMtcTime> time,
+);
+
+ZmidiStatus zmidi_mtc_reader_full_message(
+  ffi.Pointer<ZmidiMtcReader> reader,
+  ffi.Pointer<ZmidiMtcTime> time,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_reader_full_message(reader, time));
+}
+
+/// Gives the state of the reader (REQ-FFI-SX-007).
+///
+/// # Safety
+/// `reader` is null or was set up by [`zmidi_mtc_reader_init`]; `info` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMtcReader>,
+    ffi.Pointer<ZmidiMtcReaderInfo>,
+  )
+>(symbol: 'zmidi_mtc_reader_info')
+external int _zmidi_mtc_reader_info(
+  ffi.Pointer<ZmidiMtcReader> reader,
+  ffi.Pointer<ZmidiMtcReaderInfo> info,
+);
+
+ZmidiStatus zmidi_mtc_reader_info(
+  ffi.Pointer<ZmidiMtcReader> reader,
+  ffi.Pointer<ZmidiMtcReaderInfo> info,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_reader_info(reader, info));
+}
+
+/// Sets up `reader`: not locked, stopped, no time (REQ-FFI-SX-007).
+///
+/// # Safety
+/// `reader` is null or points to writable storage of a [`ZmidiMtcReader`].
+@ffi.Native<ffi.UnsignedInt Function(ffi.Pointer<ZmidiMtcReader>)>(
+  symbol: 'zmidi_mtc_reader_init',
+)
+external int _zmidi_mtc_reader_init(ffi.Pointer<ZmidiMtcReader> reader);
+
+ZmidiStatus zmidi_mtc_reader_init(ffi.Pointer<ZmidiMtcReader> reader) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_reader_init(reader));
+}
+
+/// Takes one Quarter Frame data byte, 00H to 7FH (RP-004 p. 3; REQ-FFI-SX-007).
+///
+/// # Safety
+/// `reader` is null or was set up by [`zmidi_mtc_reader_init`]; `event` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiMtcReader>,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMtcEvent>,
+  )
+>(symbol: 'zmidi_mtc_reader_receive')
+external int _zmidi_mtc_reader_receive(
+  ffi.Pointer<ZmidiMtcReader> reader,
+  int byte,
+  ffi.Pointer<ZmidiMtcEvent> event,
+);
+
+ZmidiStatus zmidi_mtc_reader_receive(
+  ffi.Pointer<ZmidiMtcReader> reader,
+  int byte,
+  ffi.Pointer<ZmidiMtcEvent> event,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_reader_receive(reader, byte, event));
+}
+
+/// Gives `size_of` the Rust reader, for a binding that checks its copy of the layout (DEC-019
+/// rule 6).
+@ffi.Native<ffi.UintPtr Function()>()
+external int zmidi_mtc_reader_size();
+
+/// Gives in `*valid` whether each count of `time` is in its range and the frame number is not
+/// one that the drop-frame type skips (REQ-FFI-SX-007).
+///
+/// # Safety
+/// `time` is null or readable; `valid` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiMtcTime>, ffi.Pointer<ffi.Bool>)
+>(symbol: 'zmidi_mtc_time_is_valid')
+external int _zmidi_mtc_time_is_valid(
+  ffi.Pointer<ZmidiMtcTime> time,
+  ffi.Pointer<ffi.Bool> valid,
+);
+
+ZmidiStatus zmidi_mtc_time_is_valid(
+  ffi.Pointer<ZmidiMtcTime> time,
+  ffi.Pointer<ffi.Bool> valid,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_time_is_valid(time, valid));
+}
+
+/// Gives the frames from 00:00:00:00 to `time` by the rule of its type (REQ-FFI-SX-007).
+///
+/// # Safety
+/// `time` is null or readable; `count` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiMtcTime>, ffi.Pointer<ffi.Uint32>)
+>(symbol: 'zmidi_mtc_to_frame_count')
+external int _zmidi_mtc_to_frame_count(
+  ffi.Pointer<ZmidiMtcTime> time,
+  ffi.Pointer<ffi.Uint32> count,
+);
+
+ZmidiStatus zmidi_mtc_to_frame_count(
+  ffi.Pointer<ZmidiMtcTime> time,
+  ffi.Pointer<ffi.Uint32> count,
+) {
+  return ZmidiStatus.fromValue(_zmidi_mtc_to_frame_count(time, count));
+}
+
+/// Reads an MTC User Bits message (RP-004 p. 6; REQ-FFI-SX-007).
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `device_id` and `bits` are null or
+/// writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ZmidiMtcUserBits>,
+  )
+>(symbol: 'zmidi_mtc_user_bits_read')
+external int _zmidi_mtc_user_bits_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Uint8> device_id,
+  ffi.Pointer<ZmidiMtcUserBits> bits,
+);
+
+ZmidiStatus zmidi_mtc_user_bits_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Uint8> device_id,
+  ffi.Pointer<ZmidiMtcUserBits> bits,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mtc_user_bits_read(bytes, length, device_id, bits),
+  );
+}
+
+/// Writes an MTC User Bits message (RP-004 p. 6; REQ-FFI-SX-007). A group above 0FH or flags
+/// above 03H give [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `bits` is null or readable; `out` is null or points to `capacity` writable bytes; `length` is
+/// null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Pointer<ZmidiMtcUserBits>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_mtc_user_bits_write')
+external int _zmidi_mtc_user_bits_write(
+  int device_id,
+  ffi.Pointer<ZmidiMtcUserBits> bits,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_mtc_user_bits_write(
+  int device_id,
+  ffi.Pointer<ZmidiMtcUserBits> bits,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_mtc_user_bits_write(device_id, bits, out, capacity, length),
   );
 }
 
@@ -5218,6 +6628,634 @@ ZmidiStatus zmidi_sync_system_reset(ffi.Pointer<ZmidiSyncReceiver> state) {
   return ZmidiStatus.fromValue(_zmidi_sync_system_reset(state));
 }
 
+/// Gives in `*result` whether a received Device ID addresses the device: 7FH or `own`
+/// (REQ-FFI-SX-001).
+///
+/// # Safety
+/// `result` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Uint8, ffi.Uint8, ffi.Pointer<ffi.Bool>)
+>(symbol: 'zmidi_sysex_addressed')
+external int _zmidi_sysex_addressed(
+  int device_id,
+  int own,
+  ffi.Pointer<ffi.Bool> result,
+);
+
+ZmidiStatus zmidi_sysex_addressed(
+  int device_id,
+  int own,
+  ffi.Pointer<ffi.Bool> result,
+) {
+  return ZmidiStatus.fromValue(_zmidi_sysex_addressed(device_id, own, result));
+}
+
+/// Reads one whole System Exclusive message, with or without F0H and F7H (REQ-FFI-SX-001). A
+/// message that is not valid gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ZmidiSysex>,
+  )
+>(symbol: 'zmidi_sysex_parse')
+external int _zmidi_sysex_parse(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ZmidiSysex> out,
+);
+
+ZmidiStatus zmidi_sysex_parse(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ZmidiSysex> out,
+) {
+  return ZmidiStatus.fromValue(_zmidi_sysex_parse(bytes, length, out));
+}
+
+/// Writes F0H, the Manufacturer ID (`[id, 0, 0]` or `[00H, b2, b3]`), the data and F7H
+/// (REQ-FFI-SX-001). The reserved ID 00H 00H 00H, an ID that is not valid and the Universal IDs
+/// 7EH and 7FH give [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `manufacturer` is null or points to 3 readable bytes; `data` is null or points to
+/// `data_length` readable bytes; `out` is null or points to `capacity` writable bytes; `length`
+/// is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_sysex_write_manufacturer')
+external int _zmidi_sysex_write_manufacturer(
+  ffi.Pointer<ffi.Uint8> manufacturer,
+  ffi.Pointer<ffi.Uint8> data,
+  int data_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_sysex_write_manufacturer(
+  ffi.Pointer<ffi.Uint8> manufacturer,
+  ffi.Pointer<ffi.Uint8> data,
+  int data_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_sysex_write_manufacturer(
+      manufacturer,
+      data,
+      data_length,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
+/// Writes a Universal message: F0H, 7EH or 7FH, the Device ID, Sub-ID#1, Sub-ID#2 when
+/// `has_sub_id2`, the data and F7H (REQ-FFI-SX-001). A Sub-ID#2 that does not match the family
+/// of Sub-ID#1 gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `data` is null or points to `data_length` readable bytes; `out` is null or points to
+/// `capacity` writable bytes; `length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Bool,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Bool,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_sysex_write_universal')
+external int _zmidi_sysex_write_universal(
+  bool real_time,
+  int device_id,
+  int sub_id1,
+  bool has_sub_id2,
+  int sub_id2,
+  ffi.Pointer<ffi.Uint8> data,
+  int data_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_sysex_write_universal(
+  bool real_time,
+  int device_id,
+  int sub_id1,
+  bool has_sub_id2,
+  int sub_id2,
+  ffi.Pointer<ffi.Uint8> data,
+  int data_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_sysex_write_universal(
+      real_time,
+      device_id,
+      sub_id1,
+      has_sub_id2,
+      sub_id2,
+      data,
+      data_length,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
+/// Reads a Standard Time Code from its 5 bytes; the counts are masked to their widths
+/// (REQ-FFI-SX-008).
+///
+/// # Safety
+/// `bytes` is null or points to 5 readable bytes; `code` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ffi.Uint8>, ffi.Pointer<ZmidiTimeCode>)
+>(symbol: 'zmidi_time_code_from_bytes')
+external int _zmidi_time_code_from_bytes(
+  ffi.Pointer<ffi.Uint8> bytes,
+  ffi.Pointer<ZmidiTimeCode> code,
+);
+
+ZmidiStatus zmidi_time_code_from_bytes(
+  ffi.Pointer<ffi.Uint8> bytes,
+  ffi.Pointer<ZmidiTimeCode> code,
+) {
+  return ZmidiStatus.fromValue(_zmidi_time_code_from_bytes(bytes, code));
+}
+
+/// Writes the 2 bytes of the short form of a time code: the frames, the sign and the final byte
+/// (RP-013 p. 9; REQ-FFI-SX-008). Frames above 29 or subframes above 99 give
+/// [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `code` is null or readable; `bytes` is null or points to 2 writable bytes.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiTimeCode>, ffi.Pointer<ffi.Uint8>)
+>(symbol: 'zmidi_time_code_short_bytes')
+external int _zmidi_time_code_short_bytes(
+  ffi.Pointer<ZmidiTimeCode> code,
+  ffi.Pointer<ffi.Uint8> bytes,
+);
+
+ZmidiStatus zmidi_time_code_short_bytes(
+  ffi.Pointer<ZmidiTimeCode> code,
+  ffi.Pointer<ffi.Uint8> bytes,
+) {
+  return ZmidiStatus.fromValue(_zmidi_time_code_short_bytes(code, bytes));
+}
+
+/// Writes the 5 bytes of a Standard Time Code (REQ-FFI-SX-008). Subframes above 99 or a time
+/// that is not valid give [`ZmidiStatus::InvalidArgument`]; a blank time code is written as
+/// zeroes.
+///
+/// # Safety
+/// `code` is null or readable; `bytes` is null or points to 5 writable bytes.
+@ffi.Native<
+  ffi.UnsignedInt Function(ffi.Pointer<ZmidiTimeCode>, ffi.Pointer<ffi.Uint8>)
+>(symbol: 'zmidi_time_code_to_bytes')
+external int _zmidi_time_code_to_bytes(
+  ffi.Pointer<ZmidiTimeCode> code,
+  ffi.Pointer<ffi.Uint8> bytes,
+);
+
+ZmidiStatus zmidi_time_code_to_bytes(
+  ffi.Pointer<ZmidiTimeCode> code,
+  ffi.Pointer<ffi.Uint8> bytes,
+) {
+  return ZmidiStatus.fromValue(_zmidi_time_code_to_bytes(code, bytes));
+}
+
+/// The MOVE rule from {ff} to {st}: e 0, v 0, d from `video_field1`, n 1; an {st} value stays
+/// as it is (RP-013 p. 32; REQ-FFI-SX-008).
+///
+/// # Safety
+/// `code` is null or readable; `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiTimeCode>,
+    ffi.Bool,
+    ffi.Pointer<ZmidiTimeCode>,
+  )
+>(symbol: 'zmidi_time_code_to_status_form')
+external int _zmidi_time_code_to_status_form(
+  ffi.Pointer<ZmidiTimeCode> code,
+  bool video_field1,
+  ffi.Pointer<ZmidiTimeCode> out,
+);
+
+ZmidiStatus zmidi_time_code_to_status_form(
+  ffi.Pointer<ZmidiTimeCode> code,
+  bool video_field1,
+  ffi.Pointer<ZmidiTimeCode> out,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_time_code_to_status_form(code, video_field1, out),
+  );
+}
+
+/// The MOVE rule from {st} to {ff}: subframes 0; an {ff} value stays as it is (RP-013 p. 32;
+/// REQ-FFI-SX-008).
+///
+/// # Safety
+/// `code` is null or readable; `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiTimeCode>,
+    ffi.Pointer<ZmidiTimeCode>,
+  )
+>(symbol: 'zmidi_time_code_to_subframes_form')
+external int _zmidi_time_code_to_subframes_form(
+  ffi.Pointer<ZmidiTimeCode> code,
+  ffi.Pointer<ZmidiTimeCode> out,
+);
+
+ZmidiStatus zmidi_time_code_to_subframes_form(
+  ffi.Pointer<ZmidiTimeCode> code,
+  ffi.Pointer<ZmidiTimeCode> out,
+) {
+  return ZmidiStatus.fromValue(_zmidi_time_code_to_subframes_form(code, out));
+}
+
+/// Applies the 2 bytes of a short time code to the last full value `last`: hours, minutes,
+/// seconds and their flags stay (RP-013 p. 9; REQ-FFI-SX-008).
+///
+/// # Safety
+/// `last` is null or readable; `bytes` is null or points to 2 readable bytes; `code` is null or
+/// writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ZmidiTimeCode>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ZmidiTimeCode>,
+  )
+>(symbol: 'zmidi_time_code_with_short')
+external int _zmidi_time_code_with_short(
+  ffi.Pointer<ZmidiTimeCode> last,
+  ffi.Pointer<ffi.Uint8> bytes,
+  ffi.Pointer<ZmidiTimeCode> code,
+);
+
+ZmidiStatus zmidi_time_code_with_short(
+  ffi.Pointer<ZmidiTimeCode> last,
+  ffi.Pointer<ffi.Uint8> bytes,
+  ffi.Pointer<ZmidiTimeCode> code,
+) {
+  return ZmidiStatus.fromValue(_zmidi_time_code_with_short(last, bytes, code));
+}
+
+/// Gives the checksum of `bytes`: the XOR of the bytes, masked to 7 bits (M1 MIDI Tuning;
+/// REQ-FFI-SX-006).
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `checksum` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+  )
+>(symbol: 'zmidi_tuning_checksum')
+external int _zmidi_tuning_checksum(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Uint8> checksum,
+);
+
+ZmidiStatus zmidi_tuning_checksum(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Uint8> checksum,
+) {
+  return ZmidiStatus.fromValue(_zmidi_tuning_checksum(bytes, length, checksum));
+}
+
+/// Writes a Bulk Tuning Dump Request: 00H, or 03H with `bank` when `has_bank`
+/// (REQ-FFI-SX-006).
+///
+/// # Safety
+/// `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Bool,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_tuning_dump_request_write')
+external int _zmidi_tuning_dump_request_write(
+  int device_id,
+  bool has_bank,
+  int bank,
+  int program,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_tuning_dump_request_write(
+  int device_id,
+  bool has_bank,
+  int bank,
+  int program,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_tuning_dump_request_write(
+      device_id,
+      has_bank,
+      bank,
+      program,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
+/// Writes a Bulk Tuning Dump (01H), or a Key-Based Tuning Dump (04H) with `bank` when
+/// `has_bank`, from the 16-byte `name` and 128 `words` (REQ-FFI-SX-006).
+///
+/// # Safety
+/// `name` is null or points to 16 readable bytes; `words` is null or points to 128 readable
+/// words; `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Bool,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ZmidiFrequencyWord>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_tuning_key_dump_write')
+external int _zmidi_tuning_key_dump_write(
+  int device_id,
+  bool has_bank,
+  int bank,
+  int program,
+  ffi.Pointer<ffi.Uint8> name,
+  ffi.Pointer<ZmidiFrequencyWord> words,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_tuning_key_dump_write(
+  int device_id,
+  bool has_bank,
+  int bank,
+  int program,
+  ffi.Pointer<ffi.Uint8> name,
+  ffi.Pointer<ZmidiFrequencyWord> words,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_tuning_key_dump_write(
+      device_id,
+      has_bank,
+      bank,
+      program,
+      name,
+      words,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
+/// Writes a Single Note Tuning Change: Real Time 02H, or 07H with `bank` when `has_bank` (the
+/// Non-Real Time form needs a bank), from 1 to 127 `notes` (REQ-FFI-SX-006).
+///
+/// # Safety
+/// `notes` is null or points to `count` readable notes; `out` is null or points to `capacity`
+/// writable bytes; `length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Bool,
+    ffi.Uint8,
+    ffi.Bool,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ZmidiTuningNote>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_tuning_note_change_write')
+external int _zmidi_tuning_note_change_write(
+  bool real_time,
+  int device_id,
+  bool has_bank,
+  int bank,
+  int program,
+  ffi.Pointer<ZmidiTuningNote> notes,
+  int count,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_tuning_note_change_write(
+  bool real_time,
+  int device_id,
+  bool has_bank,
+  int bank,
+  int program,
+  ffi.Pointer<ZmidiTuningNote> notes,
+  int count,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_tuning_note_change_write(
+      real_time,
+      device_id,
+      has_bank,
+      bank,
+      program,
+      notes,
+      count,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
+/// Reads a MIDI Tuning message (REQ-FFI-SX-006). The notes go into `notes`: 128 for a key-based
+/// dump (key = index), the sets of a note change. When `capacity` is smaller than the count,
+/// `*tuning` holds the message with the count and the status is
+/// [`ZmidiStatus::BufferTooSmall`]; `notes` may be null when `capacity` is 0.
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `tuning` is null or writable; `notes`
+/// is null or points to `capacity` writable notes.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ZmidiTuning>,
+    ffi.Pointer<ZmidiTuningNote>,
+    ffi.UintPtr,
+  )
+>(symbol: 'zmidi_tuning_read')
+external int _zmidi_tuning_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ZmidiTuning> tuning,
+  ffi.Pointer<ZmidiTuningNote> notes,
+  int capacity,
+);
+
+ZmidiStatus zmidi_tuning_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ZmidiTuning> tuning,
+  ffi.Pointer<ZmidiTuningNote> notes,
+  int capacity,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_tuning_read(bytes, length, tuning, notes, capacity),
+  );
+}
+
+/// Writes a Scale/Octave Tuning Dump (05H or 06H by the form of `offsets`) with the 16-byte
+/// `name` (REQ-FFI-SX-006).
+///
+/// # Safety
+/// `name` is null or points to 16 readable bytes; `offsets` is null or readable; `out` is null
+/// or points to `capacity` writable bytes; `length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ZmidiTuningOffsets>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_tuning_scale_dump_write')
+external int _zmidi_tuning_scale_dump_write(
+  int device_id,
+  int bank,
+  int program,
+  ffi.Pointer<ffi.Uint8> name,
+  ffi.Pointer<ZmidiTuningOffsets> offsets,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_tuning_scale_dump_write(
+  int device_id,
+  int bank,
+  int program,
+  ffi.Pointer<ffi.Uint8> name,
+  ffi.Pointer<ZmidiTuningOffsets> offsets,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_tuning_scale_dump_write(
+      device_id,
+      bank,
+      program,
+      name,
+      offsets,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
+/// Writes a Scale/Octave Tuning message (08H or 09H by the form of `offsets`), Real Time or
+/// Non-Real Time, for the `channels` mask (REQ-FFI-SX-006).
+///
+/// # Safety
+/// `offsets` is null or readable; `out` is null or points to `capacity` writable bytes; `length`
+/// is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Bool,
+    ffi.Uint8,
+    ffi.Uint16,
+    ffi.Pointer<ZmidiTuningOffsets>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_tuning_scale_octave_write')
+external int _zmidi_tuning_scale_octave_write(
+  bool real_time,
+  int device_id,
+  int channels,
+  ffi.Pointer<ZmidiTuningOffsets> offsets,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_tuning_scale_octave_write(
+  bool real_time,
+  int device_id,
+  int channels,
+  ffi.Pointer<ZmidiTuningOffsets> offsets,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_tuning_scale_octave_write(
+      real_time,
+      device_id,
+      channels,
+      offsets,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
 /// Scales `value` from `src_bits` down to `dst_bits` (M2-115) into `out`.
 ///
 /// # Safety
@@ -6378,7 +8416,7 @@ ZmidiStatus zmidi_usb_link_write_packet(
 
 const int ZMIDI_ABI_MAJOR = 0;
 
-const int ZMIDI_ABI_MINOR = 10;
+const int ZMIDI_ABI_MINOR = 11;
 
 const int ZMIDI_ACTIVE_SENSING_INTERVAL_US = 270000;
 
@@ -6416,6 +8454,10 @@ const int ZMIDI_CONTROLLER_KEEP = 255;
 
 const int ZMIDI_CONTROLLER_STATE_WORDS = 5;
 
+const int ZMIDI_GM_RECEIVER_WORDS = 2;
+
+const int ZMIDI_GM_RHYTHM_CAPABLE_DEFAULT = 1536;
+
 const int ZMIDI_MIDI1_READER_MAX_EVENTS = 2;
 
 const int ZMIDI_MIDI1_READER_WORDS = 5;
@@ -6427,6 +8469,10 @@ const int ZMIDI_MODE_STATE_WORDS = 2;
 const int ZMIDI_MPE_NOTE_ALLOCATOR_WORDS = 13;
 
 const int ZMIDI_MPE_RECEIVER_WORDS = 10;
+
+const int ZMIDI_MTC_GENERATOR_WORDS = 2;
+
+const int ZMIDI_MTC_READER_WORDS = 4;
 
 const int ZMIDI_NET_AUTH_SHARED_SECRET = 1;
 
@@ -7227,6 +9273,165 @@ final class ZmidiControllerState extends ffi.Struct {
   external ffi.Array<ffi.Uint64> _opaque;
 }
 
+/// One Device Control message (REQ-FFI-SX-005).
+final class ZmidiDeviceControl extends ffi.Struct {
+  /// A [`ZmidiDeviceControlKind`] value.
+  @ffi.Uint32()
+  external int kind;
+
+  /// The Device ID; 7FH addresses all devices.
+  @ffi.Uint8()
+  external int device_id;
+
+  /// The value: 14 bits, or 7 bits for Master Coarse Tuning.
+  @ffi.Uint16()
+  external int value;
+
+  static ffi.Pointer<ZmidiDeviceControl> $allocate(
+    ffi.Allocator $allocator, {
+    required int kind,
+    required int device_id,
+    required int value,
+  }) => $allocator<ZmidiDeviceControl>()
+    ..ref.kind = kind
+    ..ref.device_id = device_id
+    ..ref.value = value;
+}
+
+/// The kind of a Device Control message (REQ-FFI-SX-005).
+enum ZmidiDeviceControlKind {
+  /// 04H 01H Master Volume, 14 bits.
+  ZMIDI_DEVICE_CONTROL_KIND_MASTER_VOLUME(0),
+
+  /// 04H 02H Master Balance, 14 bits.
+  ZMIDI_DEVICE_CONTROL_KIND_MASTER_BALANCE(1),
+
+  /// 04H 03H Master Fine Tuning, 14 bits.
+  ZMIDI_DEVICE_CONTROL_KIND_MASTER_FINE_TUNING(2),
+
+  /// 04H 04H Master Coarse Tuning, the 7-bit MSB.
+  ZMIDI_DEVICE_CONTROL_KIND_MASTER_COARSE_TUNING(3);
+
+  final int value;
+  const ZmidiDeviceControlKind(this.value);
+
+  static ZmidiDeviceControlKind fromValue(int value) => switch (value) {
+    0 => ZMIDI_DEVICE_CONTROL_KIND_MASTER_VOLUME,
+    1 => ZMIDI_DEVICE_CONTROL_KIND_MASTER_BALANCE,
+    2 => ZMIDI_DEVICE_CONTROL_KIND_MASTER_FINE_TUNING,
+    3 => ZMIDI_DEVICE_CONTROL_KIND_MASTER_COARSE_TUNING,
+    _ => throw ArgumentError(
+      'Unknown value for ZmidiDeviceControlKind: $value',
+    ),
+  };
+}
+
+/// A MIDI Tuning frequency word: the semitone and the 14-bit fraction (REQ-FFI-SX-006).
+final class ZmidiFrequencyWord extends ffi.Struct {
+  /// The semitone, 0 to 127.
+  @ffi.Uint8()
+  external int semitone;
+
+  /// The fraction in steps of 100/16384 cent, 0 to 3FFFH.
+  @ffi.Uint16()
+  external int fraction;
+
+  static ffi.Pointer<ZmidiFrequencyWord> $allocate(
+    ffi.Allocator $allocator, {
+    required int semitone,
+    required int fraction,
+  }) => $allocator<ZmidiFrequencyWord>()
+    ..ref.semitone = semitone
+    ..ref.fraction = fraction;
+}
+
+/// The configuration of a [`ZmidiGmReceiver`] (REQ-FFI-MIDI1-016).
+final class ZmidiGmConfig extends ffi.Struct {
+  /// Bit n is set when the channel with packet value n can be a Rhythm Channel
+  /// ([`ZMIDI_GM_RHYTHM_CAPABLE_DEFAULT`]: channels 10 and 11).
+  @ffi.Uint16()
+  external int rhythm_capable;
+
+  /// True when a Mono On with M = 1 sets Mode 4 on a Rhythm Channel too.
+  @ffi.Bool()
+  external bool rhythm_mono;
+
+  static ffi.Pointer<ZmidiGmConfig> $allocate(
+    ffi.Allocator $allocator, {
+    required int rhythm_capable,
+    required bool rhythm_mono,
+  }) => $allocator<ZmidiGmConfig>()
+    ..ref.rhythm_capable = rhythm_capable
+    ..ref.rhythm_mono = rhythm_mono;
+}
+
+/// The state of a [`ZmidiGmReceiver`] (REQ-FFI-MIDI1-016).
+final class ZmidiGmInfo extends ffi.Struct {
+  /// A [`ZmidiGmLevel`] value.
+  @ffi.Uint32()
+  external int level;
+
+  /// The Rhythm Channels: bit n is the channel with packet value n.
+  @ffi.Uint16()
+  external int rhythm_channels;
+
+  /// The channels in Mode 4 (Omni Off, Mono); the others are in Mode 3.
+  @ffi.Uint16()
+  external int mono_channels;
+
+  /// The configuration.
+  external ZmidiGmConfig config;
+}
+
+/// The General MIDI level (REQ-FFI-MIDI1-016).
+enum ZmidiGmLevel {
+  /// After a GM System Off: the device is in its own mode.
+  ZMIDI_GM_LEVEL_OFF(0),
+
+  /// After a GM1 System On.
+  ZMIDI_GM_LEVEL_GM1(1),
+
+  /// At the start and after a GM2 System On.
+  ZMIDI_GM_LEVEL_GM2(2);
+
+  final int value;
+  const ZmidiGmLevel(this.value);
+
+  static ZmidiGmLevel fromValue(int value) => switch (value) {
+    0 => ZMIDI_GM_LEVEL_OFF,
+    1 => ZMIDI_GM_LEVEL_GM1,
+    2 => ZMIDI_GM_LEVEL_GM2,
+    _ => throw ArgumentError('Unknown value for ZmidiGmLevel: $value'),
+  };
+}
+
+/// Storage of the General MIDI state of the 16 channels of one input. The program gives it;
+/// [`zmidi_gm_receiver_init`] sets it up (REQ-FFI-MIDI1-016).
+final class ZmidiGmReceiver extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([2])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// The identity of a device (M1 General Information; REQ-FFI-SX-003).
+final class ZmidiIdentity extends ffi.Struct {
+  /// The Manufacturer ID: `[id, 0, 0]` or `[00H, b2, b3]`.
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Uint8> manufacturer;
+
+  /// The device family code, 14 bits.
+  @ffi.Uint16()
+  external int family;
+
+  /// The device family member code, 14 bits.
+  @ffi.Uint16()
+  external int member;
+
+  /// The software revision level, four 7-bit bytes.
+  @ffi.Array.multi([4])
+  external ffi.Array<ffi.Uint8> revision;
+}
+
 /// The kind of a [`ZmidiMidi1Message`].
 enum ZmidiMidi1Kind {
   /// No message.
@@ -7308,6 +9513,198 @@ final class ZmidiMidi1Writer extends ffi.Struct {
   /// Opaque content.
   @ffi.Array.multi([1])
   external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// One MMC command (REQ-FFI-SX-008). The offsets are into the bytes given to the call; the
+/// fields that the kind does not use are 0.
+final class ZmidiMmcCommand extends ffi.Struct {
+  /// A [`ZmidiMmcCommandKind`] value.
+  @ffi.Uint32()
+  external int kind;
+
+  /// The register of LocateField.
+  @ffi.Uint8()
+  external int register_;
+
+  /// The destination of Move.
+  @ffi.Uint8()
+  external int destination;
+
+  /// The source of Move.
+  @ffi.Uint8()
+  external int source;
+
+  /// The target of LocateTarget.
+  external ZmidiTimeCode target;
+
+  /// The offset of the name of Other (with its 00H extension prefixes); of the 1-byte name for
+  /// a reader of the other kinds.
+  @ffi.Uint32()
+  external int name_offset;
+
+  /// The length of the name, 1 to 3.
+  @ffi.Uint32()
+  external int name_length;
+
+  /// The offset of the data of Write and Other.
+  @ffi.Uint32()
+  external int data_offset;
+
+  /// The length of the data.
+  @ffi.Uint32()
+  external int data_length;
+}
+
+/// The kind of an MMC command (RP-013 pp. 20 to 32; REQ-FFI-SX-008).
+enum ZmidiMmcCommandKind {
+  /// 01H STOP.
+  ZMIDI_MMC_COMMAND_KIND_STOP(0),
+
+  /// 02H PLAY.
+  ZMIDI_MMC_COMMAND_KIND_PLAY(1),
+
+  /// 03H DEFERRED PLAY.
+  ZMIDI_MMC_COMMAND_KIND_DEFERRED_PLAY(2),
+
+  /// 04H FAST FORWARD.
+  ZMIDI_MMC_COMMAND_KIND_FAST_FORWARD(3),
+
+  /// 05H REWIND.
+  ZMIDI_MMC_COMMAND_KIND_REWIND(4),
+
+  /// 06H RECORD STROBE.
+  ZMIDI_MMC_COMMAND_KIND_RECORD_STROBE(5),
+
+  /// 07H RECORD EXIT.
+  ZMIDI_MMC_COMMAND_KIND_RECORD_EXIT(6),
+
+  /// 09H PAUSE.
+  ZMIDI_MMC_COMMAND_KIND_PAUSE(7),
+
+  /// 0DH MMC RESET.
+  ZMIDI_MMC_COMMAND_KIND_RESET(8),
+
+  /// 40H WRITE: `data_offset` and `data_length` give the Information Field string.
+  ZMIDI_MMC_COMMAND_KIND_WRITE(9),
+
+  /// 44H LOCATE [I/F] with `register`, 08H to 0FH.
+  ZMIDI_MMC_COMMAND_KIND_LOCATE_FIELD(10),
+
+  /// 44H LOCATE [TARGET] with `target` in the {ff} form.
+  ZMIDI_MMC_COMMAND_KIND_LOCATE_TARGET(11),
+
+  /// 4CH MOVE from `source` to `destination`, 01H to 1FH.
+  ZMIDI_MMC_COMMAND_KIND_MOVE(12),
+
+  /// Any other command: the name and the data as offsets.
+  ZMIDI_MMC_COMMAND_KIND_OTHER(13);
+
+  final int value;
+  const ZmidiMmcCommandKind(this.value);
+
+  static ZmidiMmcCommandKind fromValue(int value) => switch (value) {
+    0 => ZMIDI_MMC_COMMAND_KIND_STOP,
+    1 => ZMIDI_MMC_COMMAND_KIND_PLAY,
+    2 => ZMIDI_MMC_COMMAND_KIND_DEFERRED_PLAY,
+    3 => ZMIDI_MMC_COMMAND_KIND_FAST_FORWARD,
+    4 => ZMIDI_MMC_COMMAND_KIND_REWIND,
+    5 => ZMIDI_MMC_COMMAND_KIND_RECORD_STROBE,
+    6 => ZMIDI_MMC_COMMAND_KIND_RECORD_EXIT,
+    7 => ZMIDI_MMC_COMMAND_KIND_PAUSE,
+    8 => ZMIDI_MMC_COMMAND_KIND_RESET,
+    9 => ZMIDI_MMC_COMMAND_KIND_WRITE,
+    10 => ZMIDI_MMC_COMMAND_KIND_LOCATE_FIELD,
+    11 => ZMIDI_MMC_COMMAND_KIND_LOCATE_TARGET,
+    12 => ZMIDI_MMC_COMMAND_KIND_MOVE,
+    13 => ZMIDI_MMC_COMMAND_KIND_OTHER,
+    _ => throw ArgumentError('Unknown value for ZmidiMmcCommandKind: $value'),
+  };
+}
+
+/// One MMC Information Field (REQ-FFI-SX-008). The offsets are into the bytes given to the call.
+final class ZmidiMmcField extends ffi.Struct {
+  /// A [`ZmidiMmcFieldKind`] value.
+  @ffi.Uint32()
+  external int kind;
+
+  /// The field name of TimeCode and Short (the full name 01H to 1FH).
+  @ffi.Uint8()
+  external int field;
+
+  /// The time code of TimeCode and Short.
+  external ZmidiTimeCode code;
+
+  /// The offset of the name (with its 00H extension prefixes).
+  @ffi.Uint32()
+  external int name_offset;
+
+  /// The length of the name, 1 to 3.
+  @ffi.Uint32()
+  external int name_length;
+
+  /// The offset of the data bytes, after the count byte when the name has one.
+  @ffi.Uint32()
+  external int data_offset;
+
+  /// The length of the data.
+  @ffi.Uint32()
+  external int data_length;
+}
+
+/// The kind of an MMC Information Field (REQ-FFI-SX-008).
+enum ZmidiMmcFieldKind {
+  /// A time code field 01H to 1FH with its 5 data bytes in `code`.
+  ZMIDI_MMC_FIELD_KIND_TIME_CODE(0),
+
+  /// The short form 21H to 3FH of the field `field`: `code` has the frames, the sign and the
+  /// final byte; apply its data bytes to the last full value with
+  /// [`zmidi_time_code_with_short`].
+  ZMIDI_MMC_FIELD_KIND_SHORT(1),
+
+  /// Any other field: the name and the data as offsets.
+  ZMIDI_MMC_FIELD_KIND_OTHER(2);
+
+  final int value;
+  const ZmidiMmcFieldKind(this.value);
+
+  static ZmidiMmcFieldKind fromValue(int value) => switch (value) {
+    0 => ZMIDI_MMC_FIELD_KIND_TIME_CODE,
+    1 => ZMIDI_MMC_FIELD_KIND_SHORT,
+    2 => ZMIDI_MMC_FIELD_KIND_OTHER,
+    _ => throw ArgumentError('Unknown value for ZmidiMmcFieldKind: $value'),
+  };
+}
+
+/// The header of an MMC message (RP-013 p. 1; REQ-FFI-SX-008).
+final class ZmidiMmcMessage extends ffi.Struct {
+  /// True for a response (Sub-ID#1 07H), false for commands (06H).
+  @ffi.Bool()
+  external bool response;
+
+  /// The destination of commands, or the source of responses (7FH is not valid there,
+  /// AMB-RP-013-04).
+  @ffi.Uint8()
+  external int device_id;
+
+  /// The offset in the input of the command or response string.
+  @ffi.Uint32()
+  external int string_offset;
+
+  /// The length of the string.
+  @ffi.Uint32()
+  external int string_length;
+
+  static ffi.Pointer<ZmidiMmcMessage> $allocate(
+    ffi.Allocator $allocator, {
+    required bool response,
+    required int device_id,
+    required int string_offset,
+    required int string_length,
+  }) => $allocator<ZmidiMmcMessage>()
+    ..ref.response = response
+    ..ref.device_id = device_id
+    ..ref.string_offset = string_offset
+    ..ref.string_length = string_length;
 }
 
 /// The action of one received message.
@@ -7815,6 +10212,127 @@ enum ZmidiMpeZone {
     1 => ZMIDI_MPE_ZONE_UPPER,
     _ => throw ArgumentError('Unknown value for ZmidiMpeZone: $value'),
   };
+}
+
+/// What one Quarter Frame data byte gives (REQ-FFI-SX-007).
+final class ZmidiMtcEvent extends ffi.Struct {
+  /// The piece, 0 to 7.
+  @ffi.Uint8()
+  external int piece;
+
+  /// True for pieces 0 and 4, which mark frame boundaries.
+  @ffi.Bool()
+  external bool boundary;
+
+  /// True at the end of a full sequence: the fields below are set.
+  @ffi.Bool()
+  external bool has_sequence;
+
+  /// The assembled time, counts as received.
+  external ZmidiMtcTime raw;
+
+  /// The current time: `raw` plus 2 frames forward, minus 1 frame in reverse
+  /// (AMB-RP-004-03).
+  external ZmidiMtcTime current;
+
+  /// True for a reverse sequence.
+  @ffi.Bool()
+  external bool reverse;
+
+  /// True when `raw` is not the previous raw time plus 2 frames (minus 2 in reverse).
+  @ffi.Bool()
+  external bool discontinuity;
+}
+
+/// Storage of one Quarter Frame generator. The program gives it; [`zmidi_mtc_generator_init`]
+/// sets it up (REQ-FFI-SX-009).
+final class ZmidiMtcGenerator extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([2])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// Storage of one Quarter Frame reader. The program gives it; [`zmidi_mtc_reader_init`] sets it
+/// up (REQ-FFI-SX-009).
+final class ZmidiMtcReader extends ffi.Struct {
+  /// Opaque content.
+  @ffi.Array.multi([4])
+  external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// The state of a reader (REQ-FFI-SX-007).
+final class ZmidiMtcReaderInfo extends ffi.Struct {
+  /// True after a full sequence, until a broken order or a direction change.
+  @ffi.Bool()
+  external bool locked;
+
+  /// True after a Quarter Frame data byte, false after a Full Message.
+  @ffi.Bool()
+  external bool running;
+
+  /// True when two pieces gave the direction.
+  @ffi.Bool()
+  external bool has_direction;
+
+  /// True for reverse, when `has_direction`.
+  @ffi.Bool()
+  external bool reverse;
+
+  /// True when `time` is set.
+  @ffi.Bool()
+  external bool has_time;
+
+  /// The current time of the last full sequence, or the time of a Full Message after it.
+  external ZmidiMtcTime time;
+}
+
+/// An MTC time (RP-004; REQ-FFI-SX-007). A reader gives the counts as received; a writer checks
+/// them.
+final class ZmidiMtcTime extends ffi.Struct {
+  /// Hours, 0 to 23.
+  @ffi.Uint8()
+  external int hours;
+
+  /// Minutes, 0 to 59.
+  @ffi.Uint8()
+  external int minutes;
+
+  /// Seconds, 0 to 59.
+  @ffi.Uint8()
+  external int seconds;
+
+  /// Frames, below the frame rate of the type.
+  @ffi.Uint8()
+  external int frames;
+
+  /// The time code type: 0 (24), 1 (25), 2 (30 drop-frame) or 3 (30 frames per second).
+  @ffi.Uint8()
+  external int rate;
+
+  static ffi.Pointer<ZmidiMtcTime> $allocate(
+    ffi.Allocator $allocator, {
+    required int hours,
+    required int minutes,
+    required int seconds,
+    required int frames,
+    required int rate,
+  }) => $allocator<ZmidiMtcTime>()
+    ..ref.hours = hours
+    ..ref.minutes = minutes
+    ..ref.seconds = seconds
+    ..ref.frames = frames
+    ..ref.rate = rate;
+}
+
+/// The MTC User Bits (RP-004 p. 6; REQ-FFI-SX-007).
+final class ZmidiMtcUserBits extends ffi.Struct {
+  /// Binary Groups 1 to 8, 4 bits each.
+  @ffi.Array.multi([8])
+  external ffi.Array<ffi.Uint8> groups;
+
+  /// The Binary Group Flag Bits: bit 1 is j, bit 0 is i.
+  @ffi.Uint8()
+  external int flags;
 }
 
 /// An IP address and a UDP port.
@@ -8985,6 +11503,209 @@ final class ZmidiSyncReceiver extends ffi.Struct {
   /// Opaque content.
   @ffi.Array.multi([1])
   external ffi.Array<ffi.Uint64> _opaque;
+}
+
+/// One System Exclusive message as flat values (REQ-FFI-SX-001).
+final class ZmidiSysex extends ffi.Struct {
+  /// A [`ZmidiSysexClass`] value.
+  @ffi.Uint32()
+  external int kind;
+
+  /// The Manufacturer ID of the class Manufacturer: `[id, 0, 0]` or `[00H, b2, b3]`.
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Uint8> manufacturer;
+
+  /// The Device ID of a Universal message.
+  @ffi.Uint8()
+  external int device_id;
+
+  /// Sub-ID#1 of a Universal message.
+  @ffi.Uint8()
+  external int sub_id1;
+
+  /// Sub-ID#2 when `has_sub_id2`.
+  @ffi.Uint8()
+  external int sub_id2;
+
+  /// True when the family of Sub-ID#1 has a Sub-ID#2.
+  @ffi.Bool()
+  external bool has_sub_id2;
+
+  /// The offset in the input of the data after the header (after the ID for a manufacturer or
+  /// Non-Commercial message), without F7H.
+  @ffi.Uint32()
+  external int data_offset;
+
+  /// The length of the data.
+  @ffi.Uint32()
+  external int data_length;
+}
+
+/// The class of a System Exclusive message (M1 Table VII; REQ-FFI-SX-001).
+enum ZmidiSysexClass {
+  /// A manufacturer ID.
+  ZMIDI_SYSEX_CLASS_MANUFACTURER(0),
+
+  /// 7DH, Non-Commercial.
+  ZMIDI_SYSEX_CLASS_NON_COMMERCIAL(1),
+
+  /// 7EH, Universal Non-Real Time.
+  ZMIDI_SYSEX_CLASS_NON_REAL_TIME(2),
+
+  /// 7FH, Universal Real Time.
+  ZMIDI_SYSEX_CLASS_REAL_TIME(3);
+
+  final int value;
+  const ZmidiSysexClass(this.value);
+
+  static ZmidiSysexClass fromValue(int value) => switch (value) {
+    0 => ZMIDI_SYSEX_CLASS_MANUFACTURER,
+    1 => ZMIDI_SYSEX_CLASS_NON_COMMERCIAL,
+    2 => ZMIDI_SYSEX_CLASS_NON_REAL_TIME,
+    3 => ZMIDI_SYSEX_CLASS_REAL_TIME,
+    _ => throw ArgumentError('Unknown value for ZmidiSysexClass: $value'),
+  };
+}
+
+/// An MMC Standard Time Code (RP-013 pp. 8, 9; REQ-FFI-SX-008).
+final class ZmidiTimeCode extends ffi.Struct {
+  /// The time with its type; a reader gives the counts as received.
+  external ZmidiMtcTime time;
+
+  /// c: the color frame flag.
+  @ffi.Bool()
+  external bool color_frame;
+
+  /// k: the blank flag.
+  @ffi.Bool()
+  external bool blank;
+
+  /// g: the sign.
+  @ffi.Bool()
+  external bool negative;
+
+  /// i: true for the status form {st}, false for the subframes form {ff}.
+  @ffi.Bool()
+  external bool status_form;
+
+  /// The subframes of the {ff} form, 0 to 99.
+  @ffi.Uint8()
+  external int subframes;
+
+  /// e: the estimated code flag of the {st} form.
+  @ffi.Bool()
+  external bool estimated;
+
+  /// v: the invalid code flag of the {st} form.
+  @ffi.Bool()
+  external bool invalid;
+
+  /// d: video field 1, of the {st} form.
+  @ffi.Bool()
+  external bool video_field1;
+
+  /// n: no time code, of the {st} form.
+  @ffi.Bool()
+  external bool no_time_code;
+}
+
+/// One MIDI Tuning message as flat values; the fields that the kind does not have are 0
+/// (REQ-FFI-SX-006).
+final class ZmidiTuning extends ffi.Struct {
+  /// A [`ZmidiTuningKind`] value.
+  @ffi.Uint32()
+  external int kind;
+
+  /// True for the Real Time form (NoteChange, ScaleOctave).
+  @ffi.Bool()
+  external bool real_time;
+
+  /// The Device ID.
+  @ffi.Uint8()
+  external int device_id;
+
+  /// True when the message has a bank.
+  @ffi.Bool()
+  external bool has_bank;
+
+  /// The bank, 0 to 127.
+  @ffi.Uint8()
+  external int bank;
+
+  /// The tuning program, 0 to 127.
+  @ffi.Uint8()
+  external int program;
+
+  /// The 16-byte tuning name (KeyDump, ScaleDump).
+  @ffi.Array.multi([16])
+  external ffi.Array<ffi.Uint8> name;
+
+  /// The result of the checksum check of a 01H Bulk Tuning Dump (true for the other kinds).
+  @ffi.Bool()
+  external bool checksum_ok;
+
+  /// The channels of ScaleOctave: bit n is the channel with packet value n.
+  @ffi.Uint16()
+  external int channels;
+
+  /// The offsets of ScaleDump and ScaleOctave.
+  external ZmidiTuningOffsets offsets;
+
+  /// The count of notes: 128 for KeyDump, the sets of NoteChange.
+  @ffi.Uint32()
+  external int count;
+}
+
+/// The kind of a MIDI Tuning message (REQ-FFI-SX-006).
+enum ZmidiTuningKind {
+  /// 00H or 03H Bulk Tuning Dump Request.
+  ZMIDI_TUNING_KIND_DUMP_REQUEST(0),
+
+  /// 01H Bulk Tuning Dump or 04H Key-Based Tuning Dump.
+  ZMIDI_TUNING_KIND_KEY_DUMP(1),
+
+  /// 02H or 07H Single Note Tuning Change.
+  ZMIDI_TUNING_KIND_NOTE_CHANGE(2),
+
+  /// 05H or 06H Scale/Octave Tuning Dump.
+  ZMIDI_TUNING_KIND_SCALE_DUMP(3),
+
+  /// 08H or 09H Scale/Octave Tuning.
+  ZMIDI_TUNING_KIND_SCALE_OCTAVE(4);
+
+  final int value;
+  const ZmidiTuningKind(this.value);
+
+  static ZmidiTuningKind fromValue(int value) => switch (value) {
+    0 => ZMIDI_TUNING_KIND_DUMP_REQUEST,
+    1 => ZMIDI_TUNING_KIND_KEY_DUMP,
+    2 => ZMIDI_TUNING_KIND_NOTE_CHANGE,
+    3 => ZMIDI_TUNING_KIND_SCALE_DUMP,
+    4 => ZMIDI_TUNING_KIND_SCALE_OCTAVE,
+    _ => throw ArgumentError('Unknown value for ZmidiTuningKind: $value'),
+  };
+}
+
+/// One note of a tuning: the key and its frequency word (REQ-FFI-SX-006).
+final class ZmidiTuningNote extends ffi.Struct {
+  /// The key, 0 to 127.
+  @ffi.Uint8()
+  external int key;
+
+  /// The frequency word.
+  external ZmidiFrequencyWord word;
+}
+
+/// The 12 scale/octave offsets from C to B (REQ-FFI-SX-006).
+final class ZmidiTuningOffsets extends ffi.Struct {
+  /// True for the 2-byte form (-8192 to +8191, steps of 100/8192 cent); false for the 1-byte
+  /// form (cents, -64 to +63).
+  @ffi.Bool()
+  external bool two_byte;
+
+  /// The offsets.
+  @ffi.Array.multi([12])
+  external ffi.Array<ffi.Int16> offsets;
 }
 
 /// One UMP as plain values (REQ-FFI-UMP-002).

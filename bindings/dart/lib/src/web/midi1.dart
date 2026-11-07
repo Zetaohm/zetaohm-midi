@@ -212,6 +212,9 @@ final class ControllerCore {
   /// The Reset All Controllers action.
   void reset() => call<JSAny?>(_o, 'resetAllControllers');
 
+  /// The GM reset for [channel].
+  void gmReset(int channel) => call<JSAny?>(_o, 'gmReset', [channel.toJS]);
+
   /// The held bank, or null.
   int? bank() => intOrNull(prop(_o, 'bank'));
 
@@ -674,3 +677,78 @@ final class AllocatorCore {
   /// Frees the WASM memory.
   void free() => call<JSAny?>(_o, 'free');
 }
+
+const _gmLevels = ['off', 'gm1', 'gm2'];
+
+/// The TypeScript GmReceiver.
+final class GmCore {
+  /// A GM receiver from its configuration.
+  GmCore(int rhythmCapable, bool rhythmMono)
+    : _o = tsNew('GmReceiver', [
+        jsObject({
+          'rhythmCapable': rhythmCapable.toJS,
+          'rhythmMono': rhythmMono.toJS,
+        }),
+      ]);
+
+  final JSObject _o;
+
+  /// The GM reset of a level: 0 off, 1 GM1, 2 GM2.
+  void reset(int level) => call<JSAny?>(_o, 'reset', [_gmLevels[level].toJS]);
+
+  /// The program selection of [channel] with its bank, or null.
+  void program(int channel, int? bank) =>
+      call<JSAny?>(_o, 'program', [channel.toJS, bank?.toJS]);
+
+  /// Takes one message; gives (kind, channel, voice, on, changed, alternate).
+  (int, int, int, bool, bool, bool) receive(RawMessage m) {
+    final a = call<JSObject>(_o, 'receive', [_messageIn(m)]);
+    return (
+      _index(_modeKinds, prop(a, 'kind')),
+      intOrNull(prop(a, 'channel')) ?? 0xFF,
+      intOrNull(prop(a, 'voice')) ?? 0xFF,
+      boolOf(prop(a, 'on')),
+      boolOf(prop(a, 'changed')),
+      boolOf(prop(a, 'alternate')),
+    );
+  }
+
+  /// (level, rhythm channels, mono channels).
+  (int, int, int) info() {
+    var mono = 0;
+    for (var c = 0; c < 16; c++) {
+      if (boolOf(call(_o, 'isMono', [c.toJS]))) {
+        mono |= 1 << c;
+      }
+    }
+    return (
+      _index(_gmLevels, prop(_o, 'level')),
+      intOf(prop(_o, 'rhythmChannels')),
+      mono,
+    );
+  }
+
+  /// Frees the WASM memory.
+  void free() => call<JSAny?>(_o, 'free');
+}
+
+/// The GM2 default of a controller, or null.
+int? gm2ControllerDefault(int controller) =>
+    intOrNull(tsCall('gm2ControllerDefault', [controller.toJS]));
+
+/// True when a Rhythm Channel does not respond to [controller].
+bool rhythmIgnoresController(int controller) =>
+    boolOf(tsCall('rhythmIgnoresController', [controller.toJS]));
+
+/// True when a Rhythm Channel does not respond to the parameter.
+bool rhythmIgnoresParameter(bool registered, int msb, int lsb) => boolOf(
+  tsCall('rhythmIgnoresParameter', [_parameter(registered, msb, lsb)]),
+);
+
+/// True when a Rhythm Channel does not respond to the message.
+bool rhythmIgnoresMessage(RawMessage m) =>
+    boolOf(tsCall('rhythmIgnoresMessage', [_messageIn(m)]));
+
+/// The Modulation Depth Range of a 14-bit value, in hundredths of a cent.
+int modulationDepthRange(int value) =>
+    intOf(tsCall('modulationDepthRange', [value.toJS]));

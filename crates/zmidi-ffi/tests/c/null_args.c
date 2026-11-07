@@ -33,6 +33,12 @@ static ZmidiUsbLinkConfig usb_link_config = {false, 0xFFFF, 64, 1};
 #if defined(ZMIDI_CHANNEL_MODE)
 static ZmidiModeConfig mode_config = {0, 0x0F, true, 16, false};
 #endif
+#if defined(ZMIDI_GM)
+static ZmidiGmConfig gm_config = {ZMIDI_GM_RHYTHM_CAPABLE_DEFAULT, false};
+#endif
+#if defined(ZMIDI_MTC)
+static ZmidiMtcTime mtc_time = {1, 2, 3, 4, 3};
+#endif
 
 #if defined(ZMIDI_IO)
 static ZmidiBytesToUmp f_ZmidiBytesToUmp, s_ZmidiBytesToUmp;
@@ -99,6 +105,15 @@ static ZmidiMpeReceiver f_ZmidiMpeReceiver, s_ZmidiMpeReceiver;
 #endif
 #if defined(ZMIDI_MPE)
 static ZmidiMpeNoteAllocator f_ZmidiMpeNoteAllocator, s_ZmidiMpeNoteAllocator;
+#endif
+#if defined(ZMIDI_GM)
+static ZmidiGmReceiver f_ZmidiGmReceiver, s_ZmidiGmReceiver;
+#endif
+#if defined(ZMIDI_MTC)
+static ZmidiMtcGenerator f_ZmidiMtcGenerator, s_ZmidiMtcGenerator;
+#endif
+#if defined(ZMIDI_MTC)
+static ZmidiMtcReader f_ZmidiMtcReader, s_ZmidiMtcReader;
 #endif
 
 #if defined(ZMIDI_FILE)
@@ -206,6 +221,15 @@ static void snapshot(void) {
 #if defined(ZMIDI_MPE)
   memcpy(&s_ZmidiMpeNoteAllocator, &f_ZmidiMpeNoteAllocator, sizeof f_ZmidiMpeNoteAllocator);
 #endif
+#if defined(ZMIDI_GM)
+  memcpy(&s_ZmidiGmReceiver, &f_ZmidiGmReceiver, sizeof f_ZmidiGmReceiver);
+#endif
+#if defined(ZMIDI_MTC)
+  memcpy(&s_ZmidiMtcGenerator, &f_ZmidiMtcGenerator, sizeof f_ZmidiMtcGenerator);
+#endif
+#if defined(ZMIDI_MTC)
+  memcpy(&s_ZmidiMtcReader, &f_ZmidiMtcReader, sizeof f_ZmidiMtcReader);
+#endif
 }
 
 /* Asserts the status and that no state changed. */
@@ -277,6 +301,15 @@ static void check(enum ZmidiStatus st, const char *what) {
 #endif
 #if defined(ZMIDI_MPE)
   same &= memcmp(&s_ZmidiMpeNoteAllocator, &f_ZmidiMpeNoteAllocator, sizeof f_ZmidiMpeNoteAllocator) == 0;
+#endif
+#if defined(ZMIDI_GM)
+  same &= memcmp(&s_ZmidiGmReceiver, &f_ZmidiGmReceiver, sizeof f_ZmidiGmReceiver) == 0;
+#endif
+#if defined(ZMIDI_MTC)
+  same &= memcmp(&s_ZmidiMtcGenerator, &f_ZmidiMtcGenerator, sizeof f_ZmidiMtcGenerator) == 0;
+#endif
+#if defined(ZMIDI_MTC)
+  same &= memcmp(&s_ZmidiMtcReader, &f_ZmidiMtcReader, sizeof f_ZmidiMtcReader) == 0;
 #endif
   if (st != ZMIDI_STATUS_INVALID_ARGUMENT) { fprintf(stderr, "%s: status %d\n", what, (int)st); failures++; }
   if (!same) { fprintf(stderr, "%s: a state changed\n", what); failures++; }
@@ -351,6 +384,15 @@ int main(void) {
 #endif
 #if defined(ZMIDI_MPE)
   if (zmidi_mpe_note_allocator_init(&f_ZmidiMpeNoteAllocator) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiMpeNoteAllocator fixture\n"); failures++; }
+#endif
+#if defined(ZMIDI_GM)
+  if (zmidi_gm_receiver_init(&f_ZmidiGmReceiver, &gm_config) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiGmReceiver fixture\n"); failures++; }
+#endif
+#if defined(ZMIDI_MTC)
+  if (zmidi_mtc_generator_init(&f_ZmidiMtcGenerator, &mtc_time, false) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiMtcGenerator fixture\n"); failures++; }
+#endif
+#if defined(ZMIDI_MTC)
+  if (zmidi_mtc_reader_init(&f_ZmidiMtcReader) != ZMIDI_STATUS_OK) { fprintf(stderr, "ZmidiMtcReader fixture\n"); failures++; }
 #endif
 #if defined(ZMIDI_CI_PROPERTY_EXCHANGE)
   if (zmidi_pe_wait(&f_ZmidiPe, 1, 0, 0, 100) != ZMIDI_STATUS_REJECTED ||
@@ -1123,6 +1165,64 @@ int main(void) {
   snapshot();
   check(zmidi_mpe_note_reset(NULL), "zmidi_mpe_note_reset: state");
 #endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_gm_receiver_init(NULL, (const struct ZmidiGmConfig *)(void *)mem[0]), "zmidi_gm_receiver_init: receiver");
+  snapshot();
+  check(zmidi_gm_receiver_init(&f_ZmidiGmReceiver, NULL), "zmidi_gm_receiver_init: config");
+#endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_gm_receiver_reset(NULL, (uint32_t)1), "zmidi_gm_receiver_reset: receiver");
+#endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_gm_receiver_program(NULL, (uint8_t)1, (bool)1, (uint16_t)1), "zmidi_gm_receiver_program: receiver");
+#endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_gm_receiver_receive(NULL, (const struct ZmidiMidi1Message *)(void *)mem[0], (struct ZmidiModeAction *)(void *)mem[1]), "zmidi_gm_receiver_receive: receiver");
+  snapshot();
+  check(zmidi_gm_receiver_receive(&f_ZmidiGmReceiver, NULL, (struct ZmidiModeAction *)(void *)mem[0]), "zmidi_gm_receiver_receive: message");
+  snapshot();
+  check(zmidi_gm_receiver_receive(&f_ZmidiGmReceiver, (const struct ZmidiMidi1Message *)(void *)mem[0], NULL), "zmidi_gm_receiver_receive: action");
+#endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_gm_receiver_info(NULL, (struct ZmidiGmInfo *)(void *)mem[0]), "zmidi_gm_receiver_info: receiver");
+  snapshot();
+  check(zmidi_gm_receiver_info(&f_ZmidiGmReceiver, NULL), "zmidi_gm_receiver_info: info");
+#endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_gm_reset_controller_state(NULL, (uint8_t)1), "zmidi_gm_reset_controller_state: state");
+#endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_gm2_controller_default((uint8_t)1, NULL, (uint8_t *)(void *)mem[0]), "zmidi_gm2_controller_default: has_default");
+  snapshot();
+  check(zmidi_gm2_controller_default((uint8_t)1, (bool *)(void *)mem[0], NULL), "zmidi_gm2_controller_default: value");
+#endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_gm_rhythm_ignores_controller((uint8_t)1, NULL), "zmidi_gm_rhythm_ignores_controller: result");
+#endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_gm_rhythm_ignores_parameter(NULL, (bool *)(void *)mem[0]), "zmidi_gm_rhythm_ignores_parameter: parameter");
+  snapshot();
+  check(zmidi_gm_rhythm_ignores_parameter((const struct ZmidiParameter *)(void *)mem[0], NULL), "zmidi_gm_rhythm_ignores_parameter: result");
+#endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_gm_rhythm_ignores_message(NULL, (bool *)(void *)mem[0]), "zmidi_gm_rhythm_ignores_message: message");
+  snapshot();
+  check(zmidi_gm_rhythm_ignores_message((const struct ZmidiMidi1Message *)(void *)mem[0], NULL), "zmidi_gm_rhythm_ignores_message: result");
+#endif
+#if defined(ZMIDI_GM)
+  snapshot();
+  check(zmidi_modulation_depth_range((uint16_t)1, NULL), "zmidi_modulation_depth_range: hundredths");
+#endif
 #if defined(ZMIDI_NET)
   snapshot();
   check(zmidi_net_host_init(NULL, (const uint8_t *)(void *)mem[0], (const uint8_t *)(void *)mem[1]), "zmidi_net_host_init: host");
@@ -1440,6 +1540,390 @@ int main(void) {
   check(zmidi_pe_take_ended(NULL, (struct ZmidiPeSubscription *)(void *)mem[0]), "zmidi_pe_take_ended: pe");
   snapshot();
   check(zmidi_pe_take_ended(&f_ZmidiPe, NULL), "zmidi_pe_take_ended: out");
+#endif
+#if defined(ZMIDI_SYSEX)
+  snapshot();
+  check(zmidi_sysex_parse(NULL, (uintptr_t)1, (struct ZmidiSysex *)(void *)mem[0]), "zmidi_sysex_parse: bytes");
+  snapshot();
+  check(zmidi_sysex_parse((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_sysex_parse: out");
+#endif
+#if defined(ZMIDI_SYSEX)
+  snapshot();
+  check(zmidi_sysex_addressed((uint8_t)1, (uint8_t)1, NULL), "zmidi_sysex_addressed: result");
+#endif
+#if defined(ZMIDI_SYSEX)
+  snapshot();
+  check(zmidi_sysex_write_manufacturer(NULL, (const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_sysex_write_manufacturer: manufacturer");
+  snapshot();
+  check(zmidi_sysex_write_manufacturer((const uint8_t *)(void *)mem[0], NULL, (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_sysex_write_manufacturer: data");
+  snapshot();
+  check(zmidi_sysex_write_manufacturer((const uint8_t *)(void *)mem[0], (const uint8_t *)(void *)mem[1], (uintptr_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_sysex_write_manufacturer: out");
+  snapshot();
+  check(zmidi_sysex_write_manufacturer((const uint8_t *)(void *)mem[0], (const uint8_t *)(void *)mem[1], (uintptr_t)1, (uint8_t *)(void *)mem[2], (uintptr_t)1, NULL), "zmidi_sysex_write_manufacturer: length");
+#endif
+#if defined(ZMIDI_SYSEX)
+  snapshot();
+  check(zmidi_sysex_write_universal((bool)1, (uint8_t)1, (uint8_t)1, (bool)1, (uint8_t)1, NULL, (uintptr_t)1, (uint8_t *)(void *)mem[0], (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_sysex_write_universal: data");
+  snapshot();
+  check(zmidi_sysex_write_universal((bool)1, (uint8_t)1, (uint8_t)1, (bool)1, (uint8_t)1, (const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_sysex_write_universal: out");
+  snapshot();
+  check(zmidi_sysex_write_universal((bool)1, (uint8_t)1, (uint8_t)1, (bool)1, (uint8_t)1, (const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, NULL), "zmidi_sysex_write_universal: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_INQUIRY))
+  snapshot();
+  check(zmidi_inquiry_read(NULL, (uintptr_t)1, (bool *)(void *)mem[0], (uint8_t *)(void *)mem[1], (struct ZmidiIdentity *)(void *)mem[2]), "zmidi_inquiry_read: bytes");
+  snapshot();
+  check(zmidi_inquiry_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL, (uint8_t *)(void *)mem[1], (struct ZmidiIdentity *)(void *)mem[2]), "zmidi_inquiry_read: is_reply");
+  snapshot();
+  check(zmidi_inquiry_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, (bool *)(void *)mem[1], NULL, (struct ZmidiIdentity *)(void *)mem[2]), "zmidi_inquiry_read: device_id");
+  snapshot();
+  check(zmidi_inquiry_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, (bool *)(void *)mem[1], (uint8_t *)(void *)mem[2], NULL), "zmidi_inquiry_read: identity");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_INQUIRY))
+  snapshot();
+  check(zmidi_inquiry_request_write((uint8_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[0]), "zmidi_inquiry_request_write: out");
+  snapshot();
+  check(zmidi_inquiry_request_write((uint8_t)1, (uint8_t *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_inquiry_request_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_INQUIRY))
+  snapshot();
+  check(zmidi_inquiry_reply_write((uint8_t)1, NULL, (uint8_t *)(void *)mem[0], (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_inquiry_reply_write: identity");
+  snapshot();
+  check(zmidi_inquiry_reply_write((uint8_t)1, (const struct ZmidiIdentity *)(void *)mem[0], NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_inquiry_reply_write: out");
+  snapshot();
+  check(zmidi_inquiry_reply_write((uint8_t)1, (const struct ZmidiIdentity *)(void *)mem[0], (uint8_t *)(void *)mem[1], (uintptr_t)1, NULL), "zmidi_inquiry_reply_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_INQUIRY))
+  snapshot();
+  check(zmidi_inquiry_respond(NULL, (uintptr_t)1, (uint8_t)1, (const struct ZmidiIdentity *)(void *)mem[0], (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_inquiry_respond: bytes");
+  snapshot();
+  check(zmidi_inquiry_respond((const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t)1, NULL, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_inquiry_respond: identity");
+  snapshot();
+  check(zmidi_inquiry_respond((const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t)1, (const struct ZmidiIdentity *)(void *)mem[1], NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_inquiry_respond: out");
+  snapshot();
+  check(zmidi_inquiry_respond((const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t)1, (const struct ZmidiIdentity *)(void *)mem[1], (uint8_t *)(void *)mem[2], (uintptr_t)1, NULL), "zmidi_inquiry_respond: out_length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_GM))
+  snapshot();
+  check(zmidi_gm_system_read(NULL, (uintptr_t)1, (uint8_t *)(void *)mem[0], (uint8_t *)(void *)mem[1]), "zmidi_gm_system_read: bytes");
+  snapshot();
+  check(zmidi_gm_system_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL, (uint8_t *)(void *)mem[1]), "zmidi_gm_system_read: device_id");
+  snapshot();
+  check(zmidi_gm_system_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], NULL), "zmidi_gm_system_read: command");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_GM))
+  snapshot();
+  check(zmidi_gm_system_write((uint8_t)1, (uint8_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[0]), "zmidi_gm_system_write: out");
+  snapshot();
+  check(zmidi_gm_system_write((uint8_t)1, (uint8_t)1, (uint8_t *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_gm_system_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_DEVICE_CONTROL))
+  snapshot();
+  check(zmidi_device_control_read(NULL, (uintptr_t)1, (struct ZmidiDeviceControl *)(void *)mem[0]), "zmidi_device_control_read: bytes");
+  snapshot();
+  check(zmidi_device_control_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_device_control_read: out");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_DEVICE_CONTROL))
+  snapshot();
+  check(zmidi_device_control_write(NULL, (uint8_t *)(void *)mem[0], (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_device_control_write: control");
+  snapshot();
+  check(zmidi_device_control_write((const struct ZmidiDeviceControl *)(void *)mem[0], NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_device_control_write: out");
+  snapshot();
+  check(zmidi_device_control_write((const struct ZmidiDeviceControl *)(void *)mem[0], (uint8_t *)(void *)mem[1], (uintptr_t)1, NULL), "zmidi_device_control_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_DEVICE_CONTROL))
+  snapshot();
+  check(zmidi_fine_tuning_offset((uint16_t)1, NULL), "zmidi_fine_tuning_offset: offset");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_DEVICE_CONTROL))
+  snapshot();
+  check(zmidi_coarse_tuning_semitones((uint8_t)1, NULL), "zmidi_coarse_tuning_semitones: semitones");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+  snapshot();
+  check(zmidi_tuning_read(NULL, (uintptr_t)1, (struct ZmidiTuning *)(void *)mem[0], (struct ZmidiTuningNote *)(void *)mem[1], (uintptr_t)1), "zmidi_tuning_read: bytes");
+  snapshot();
+  check(zmidi_tuning_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL, (struct ZmidiTuningNote *)(void *)mem[1], (uintptr_t)1), "zmidi_tuning_read: tuning");
+  snapshot();
+  check(zmidi_tuning_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, (struct ZmidiTuning *)(void *)mem[1], NULL, (uintptr_t)1), "zmidi_tuning_read: notes");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+  snapshot();
+  check(zmidi_frequency_word_from_bytes(NULL, (struct ZmidiFrequencyWord *)(void *)mem[0]), "zmidi_frequency_word_from_bytes: bytes");
+  snapshot();
+  check(zmidi_frequency_word_from_bytes((const uint8_t *)(void *)mem[0], NULL), "zmidi_frequency_word_from_bytes: word");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+  snapshot();
+  check(zmidi_frequency_word_to_bytes(NULL, (uint8_t *)(void *)mem[0]), "zmidi_frequency_word_to_bytes: word");
+  snapshot();
+  check(zmidi_frequency_word_to_bytes((const struct ZmidiFrequencyWord *)(void *)mem[0], NULL), "zmidi_frequency_word_to_bytes: bytes");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+  snapshot();
+  check(zmidi_tuning_checksum(NULL, (uintptr_t)1, (uint8_t *)(void *)mem[0]), "zmidi_tuning_checksum: bytes");
+  snapshot();
+  check(zmidi_tuning_checksum((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_tuning_checksum: checksum");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+  snapshot();
+  check(zmidi_tuning_dump_request_write((uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[0]), "zmidi_tuning_dump_request_write: out");
+  snapshot();
+  check(zmidi_tuning_dump_request_write((uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, (uint8_t *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_tuning_dump_request_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+  snapshot();
+  check(zmidi_tuning_key_dump_write((uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, NULL, (const struct ZmidiFrequencyWord *)(void *)mem[0], (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_tuning_key_dump_write: name");
+  snapshot();
+  check(zmidi_tuning_key_dump_write((uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, (const uint8_t *)(void *)mem[0], NULL, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_tuning_key_dump_write: words");
+  snapshot();
+  check(zmidi_tuning_key_dump_write((uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, (const uint8_t *)(void *)mem[0], (const struct ZmidiFrequencyWord *)(void *)mem[1], NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_tuning_key_dump_write: out");
+  snapshot();
+  check(zmidi_tuning_key_dump_write((uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, (const uint8_t *)(void *)mem[0], (const struct ZmidiFrequencyWord *)(void *)mem[1], (uint8_t *)(void *)mem[2], (uintptr_t)1, NULL), "zmidi_tuning_key_dump_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+  snapshot();
+  check(zmidi_tuning_note_change_write((bool)1, (uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, NULL, (uintptr_t)1, (uint8_t *)(void *)mem[0], (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_tuning_note_change_write: notes");
+  snapshot();
+  check(zmidi_tuning_note_change_write((bool)1, (uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, (const struct ZmidiTuningNote *)(void *)mem[0], (uintptr_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_tuning_note_change_write: out");
+  snapshot();
+  check(zmidi_tuning_note_change_write((bool)1, (uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, (const struct ZmidiTuningNote *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, NULL), "zmidi_tuning_note_change_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+  snapshot();
+  check(zmidi_tuning_scale_dump_write((uint8_t)1, (uint8_t)1, (uint8_t)1, NULL, (const struct ZmidiTuningOffsets *)(void *)mem[0], (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_tuning_scale_dump_write: name");
+  snapshot();
+  check(zmidi_tuning_scale_dump_write((uint8_t)1, (uint8_t)1, (uint8_t)1, (const uint8_t *)(void *)mem[0], NULL, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_tuning_scale_dump_write: offsets");
+  snapshot();
+  check(zmidi_tuning_scale_dump_write((uint8_t)1, (uint8_t)1, (uint8_t)1, (const uint8_t *)(void *)mem[0], (const struct ZmidiTuningOffsets *)(void *)mem[1], NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_tuning_scale_dump_write: out");
+  snapshot();
+  check(zmidi_tuning_scale_dump_write((uint8_t)1, (uint8_t)1, (uint8_t)1, (const uint8_t *)(void *)mem[0], (const struct ZmidiTuningOffsets *)(void *)mem[1], (uint8_t *)(void *)mem[2], (uintptr_t)1, NULL), "zmidi_tuning_scale_dump_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+  snapshot();
+  check(zmidi_tuning_scale_octave_write((bool)1, (uint8_t)1, (uint16_t)1, NULL, (uint8_t *)(void *)mem[0], (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_tuning_scale_octave_write: offsets");
+  snapshot();
+  check(zmidi_tuning_scale_octave_write((bool)1, (uint8_t)1, (uint16_t)1, (const struct ZmidiTuningOffsets *)(void *)mem[0], NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_tuning_scale_octave_write: out");
+  snapshot();
+  check(zmidi_tuning_scale_octave_write((bool)1, (uint8_t)1, (uint16_t)1, (const struct ZmidiTuningOffsets *)(void *)mem[0], (uint8_t *)(void *)mem[1], (uintptr_t)1, NULL), "zmidi_tuning_scale_octave_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_time_is_valid(NULL, (bool *)(void *)mem[0]), "zmidi_mtc_time_is_valid: time");
+  snapshot();
+  check(zmidi_mtc_time_is_valid((const struct ZmidiMtcTime *)(void *)mem[0], NULL), "zmidi_mtc_time_is_valid: valid");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_next_valid(NULL, (struct ZmidiMtcTime *)(void *)mem[0]), "zmidi_mtc_next_valid: time");
+  snapshot();
+  check(zmidi_mtc_next_valid((const struct ZmidiMtcTime *)(void *)mem[0], NULL), "zmidi_mtc_next_valid: out");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_to_frame_count(NULL, (uint32_t *)(void *)mem[0]), "zmidi_mtc_to_frame_count: time");
+  snapshot();
+  check(zmidi_mtc_to_frame_count((const struct ZmidiMtcTime *)(void *)mem[0], NULL), "zmidi_mtc_to_frame_count: count");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_from_frame_count((uint32_t)1, (uint8_t)1, NULL), "zmidi_mtc_from_frame_count: out");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_add_frames(NULL, (int32_t)1, (struct ZmidiMtcTime *)(void *)mem[0]), "zmidi_mtc_add_frames: time");
+  snapshot();
+  check(zmidi_mtc_add_frames((const struct ZmidiMtcTime *)(void *)mem[0], (int32_t)1, NULL), "zmidi_mtc_add_frames: out");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_quarter_frames(NULL, (uint8_t *)(void *)mem[0]), "zmidi_mtc_quarter_frames: time");
+  snapshot();
+  check(zmidi_mtc_quarter_frames((const struct ZmidiMtcTime *)(void *)mem[0], NULL), "zmidi_mtc_quarter_frames: bytes");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_generator_init(NULL, (const struct ZmidiMtcTime *)(void *)mem[0], (bool)1), "zmidi_mtc_generator_init: generator");
+  snapshot();
+  check(zmidi_mtc_generator_init(&f_ZmidiMtcGenerator, NULL, (bool)1), "zmidi_mtc_generator_init: time");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_generator_next(NULL, (uint8_t *)(void *)mem[0]), "zmidi_mtc_generator_next: generator");
+  snapshot();
+  check(zmidi_mtc_generator_next(&f_ZmidiMtcGenerator, NULL), "zmidi_mtc_generator_next: byte");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_generator_set_running(NULL, (bool)1), "zmidi_mtc_generator_set_running: generator");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_generator_set_direction(NULL, (bool)1), "zmidi_mtc_generator_set_direction: generator");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_generator_locate(NULL, (const struct ZmidiMtcTime *)(void *)mem[0]), "zmidi_mtc_generator_locate: generator");
+  snapshot();
+  check(zmidi_mtc_generator_locate(&f_ZmidiMtcGenerator, NULL), "zmidi_mtc_generator_locate: time");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_generator_time(NULL, (struct ZmidiMtcTime *)(void *)mem[0]), "zmidi_mtc_generator_time: generator");
+  snapshot();
+  check(zmidi_mtc_generator_time(&f_ZmidiMtcGenerator, NULL), "zmidi_mtc_generator_time: time");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_reader_init(NULL), "zmidi_mtc_reader_init: reader");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_reader_receive(NULL, (uint8_t)1, (struct ZmidiMtcEvent *)(void *)mem[0]), "zmidi_mtc_reader_receive: reader");
+  snapshot();
+  check(zmidi_mtc_reader_receive(&f_ZmidiMtcReader, (uint8_t)1, NULL), "zmidi_mtc_reader_receive: event");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_reader_full_message(NULL, (const struct ZmidiMtcTime *)(void *)mem[0]), "zmidi_mtc_reader_full_message: reader");
+  snapshot();
+  check(zmidi_mtc_reader_full_message(&f_ZmidiMtcReader, NULL), "zmidi_mtc_reader_full_message: time");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_reader_info(NULL, (struct ZmidiMtcReaderInfo *)(void *)mem[0]), "zmidi_mtc_reader_info: reader");
+  snapshot();
+  check(zmidi_mtc_reader_info(&f_ZmidiMtcReader, NULL), "zmidi_mtc_reader_info: info");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_full_read(NULL, (uintptr_t)1, (uint8_t *)(void *)mem[0], (struct ZmidiMtcTime *)(void *)mem[1]), "zmidi_mtc_full_read: bytes");
+  snapshot();
+  check(zmidi_mtc_full_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL, (struct ZmidiMtcTime *)(void *)mem[1]), "zmidi_mtc_full_read: device_id");
+  snapshot();
+  check(zmidi_mtc_full_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], NULL), "zmidi_mtc_full_read: time");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_full_write((uint8_t)1, NULL, (uint8_t *)(void *)mem[0], (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_mtc_full_write: time");
+  snapshot();
+  check(zmidi_mtc_full_write((uint8_t)1, (const struct ZmidiMtcTime *)(void *)mem[0], NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_mtc_full_write: out");
+  snapshot();
+  check(zmidi_mtc_full_write((uint8_t)1, (const struct ZmidiMtcTime *)(void *)mem[0], (uint8_t *)(void *)mem[1], (uintptr_t)1, NULL), "zmidi_mtc_full_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_user_bits_read(NULL, (uintptr_t)1, (uint8_t *)(void *)mem[0], (struct ZmidiMtcUserBits *)(void *)mem[1]), "zmidi_mtc_user_bits_read: bytes");
+  snapshot();
+  check(zmidi_mtc_user_bits_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL, (struct ZmidiMtcUserBits *)(void *)mem[1]), "zmidi_mtc_user_bits_read: device_id");
+  snapshot();
+  check(zmidi_mtc_user_bits_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], NULL), "zmidi_mtc_user_bits_read: bits");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+  snapshot();
+  check(zmidi_mtc_user_bits_write((uint8_t)1, NULL, (uint8_t *)(void *)mem[0], (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_mtc_user_bits_write: bits");
+  snapshot();
+  check(zmidi_mtc_user_bits_write((uint8_t)1, (const struct ZmidiMtcUserBits *)(void *)mem[0], NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_mtc_user_bits_write: out");
+  snapshot();
+  check(zmidi_mtc_user_bits_write((uint8_t)1, (const struct ZmidiMtcUserBits *)(void *)mem[0], (uint8_t *)(void *)mem[1], (uintptr_t)1, NULL), "zmidi_mtc_user_bits_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_time_code_from_bytes(NULL, (struct ZmidiTimeCode *)(void *)mem[0]), "zmidi_time_code_from_bytes: bytes");
+  snapshot();
+  check(zmidi_time_code_from_bytes((const uint8_t *)(void *)mem[0], NULL), "zmidi_time_code_from_bytes: code");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_time_code_to_bytes(NULL, (uint8_t *)(void *)mem[0]), "zmidi_time_code_to_bytes: code");
+  snapshot();
+  check(zmidi_time_code_to_bytes((const struct ZmidiTimeCode *)(void *)mem[0], NULL), "zmidi_time_code_to_bytes: bytes");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_time_code_with_short(NULL, (const uint8_t *)(void *)mem[0], (struct ZmidiTimeCode *)(void *)mem[1]), "zmidi_time_code_with_short: last");
+  snapshot();
+  check(zmidi_time_code_with_short((const struct ZmidiTimeCode *)(void *)mem[0], NULL, (struct ZmidiTimeCode *)(void *)mem[1]), "zmidi_time_code_with_short: bytes");
+  snapshot();
+  check(zmidi_time_code_with_short((const struct ZmidiTimeCode *)(void *)mem[0], (const uint8_t *)(void *)mem[1], NULL), "zmidi_time_code_with_short: code");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_time_code_short_bytes(NULL, (uint8_t *)(void *)mem[0]), "zmidi_time_code_short_bytes: code");
+  snapshot();
+  check(zmidi_time_code_short_bytes((const struct ZmidiTimeCode *)(void *)mem[0], NULL), "zmidi_time_code_short_bytes: bytes");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_time_code_to_subframes_form(NULL, (struct ZmidiTimeCode *)(void *)mem[0]), "zmidi_time_code_to_subframes_form: code");
+  snapshot();
+  check(zmidi_time_code_to_subframes_form((const struct ZmidiTimeCode *)(void *)mem[0], NULL), "zmidi_time_code_to_subframes_form: out");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_time_code_to_status_form(NULL, (bool)1, (struct ZmidiTimeCode *)(void *)mem[0]), "zmidi_time_code_to_status_form: code");
+  snapshot();
+  check(zmidi_time_code_to_status_form((const struct ZmidiTimeCode *)(void *)mem[0], (bool)1, NULL), "zmidi_time_code_to_status_form: out");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_mmc_short_name((uint8_t)1, NULL), "zmidi_mmc_short_name: short_");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_mmc_full_name((uint8_t)1, NULL), "zmidi_mmc_full_name: field");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_mmc_read(NULL, (uintptr_t)1, (struct ZmidiMmcMessage *)(void *)mem[0]), "zmidi_mmc_read: bytes");
+  snapshot();
+  check(zmidi_mmc_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_mmc_read: out");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_mmc_next_command(NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[0], (struct ZmidiMmcCommand *)(void *)mem[1]), "zmidi_mmc_next_command: bytes");
+  snapshot();
+  check(zmidi_mmc_next_command((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL, (struct ZmidiMmcCommand *)(void *)mem[1]), "zmidi_mmc_next_command: offset");
+  snapshot();
+  check(zmidi_mmc_next_command((const uint8_t *)(void *)mem[0], (uintptr_t)1, (uintptr_t *)(void *)mem[1], NULL), "zmidi_mmc_next_command: command");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_mmc_next_field(NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[0], (struct ZmidiMmcField *)(void *)mem[1]), "zmidi_mmc_next_field: bytes");
+  snapshot();
+  check(zmidi_mmc_next_field((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL, (struct ZmidiMmcField *)(void *)mem[1]), "zmidi_mmc_next_field: offset");
+  snapshot();
+  check(zmidi_mmc_next_field((const uint8_t *)(void *)mem[0], (uintptr_t)1, (uintptr_t *)(void *)mem[1], NULL), "zmidi_mmc_next_field: field");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_mmc_write_commands((uint8_t)1, NULL, (uintptr_t)1, (const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_mmc_write_commands: commands");
+  snapshot();
+  check(zmidi_mmc_write_commands((uint8_t)1, (const struct ZmidiMmcCommand *)(void *)mem[0], (uintptr_t)1, NULL, (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_mmc_write_commands: data");
+  snapshot();
+  check(zmidi_mmc_write_commands((uint8_t)1, (const struct ZmidiMmcCommand *)(void *)mem[0], (uintptr_t)1, (const uint8_t *)(void *)mem[1], (uintptr_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_mmc_write_commands: out");
+  snapshot();
+  check(zmidi_mmc_write_commands((uint8_t)1, (const struct ZmidiMmcCommand *)(void *)mem[0], (uintptr_t)1, (const uint8_t *)(void *)mem[1], (uintptr_t)1, (uint8_t *)(void *)mem[2], (uintptr_t)1, NULL), "zmidi_mmc_write_commands: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_mmc_write_responses((uint8_t)1, NULL, (uintptr_t)1, (const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_mmc_write_responses: fields");
+  snapshot();
+  check(zmidi_mmc_write_responses((uint8_t)1, (const struct ZmidiMmcField *)(void *)mem[0], (uintptr_t)1, NULL, (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_mmc_write_responses: data");
+  snapshot();
+  check(zmidi_mmc_write_responses((uint8_t)1, (const struct ZmidiMmcField *)(void *)mem[0], (uintptr_t)1, (const uint8_t *)(void *)mem[1], (uintptr_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_mmc_write_responses: out");
+  snapshot();
+  check(zmidi_mmc_write_responses((uint8_t)1, (const struct ZmidiMmcField *)(void *)mem[0], (uintptr_t)1, (const uint8_t *)(void *)mem[1], (uintptr_t)1, (uint8_t *)(void *)mem[2], (uintptr_t)1, NULL), "zmidi_mmc_write_responses: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+  snapshot();
+  check(zmidi_mmc_write_fields(NULL, (uintptr_t)1, (const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_mmc_write_fields: fields");
+  snapshot();
+  check(zmidi_mmc_write_fields((const struct ZmidiMmcField *)(void *)mem[0], (uintptr_t)1, NULL, (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_mmc_write_fields: data");
+  snapshot();
+  check(zmidi_mmc_write_fields((const struct ZmidiMmcField *)(void *)mem[0], (uintptr_t)1, (const uint8_t *)(void *)mem[1], (uintptr_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[2]), "zmidi_mmc_write_fields: out");
+  snapshot();
+  check(zmidi_mmc_write_fields((const struct ZmidiMmcField *)(void *)mem[0], (uintptr_t)1, (const uint8_t *)(void *)mem[1], (uintptr_t)1, (uint8_t *)(void *)mem[2], (uintptr_t)1, NULL), "zmidi_mmc_write_fields: length");
 #endif
 #if defined(ZMIDI_UMP)
   snapshot();

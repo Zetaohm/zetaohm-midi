@@ -67,6 +67,44 @@
 #ifndef ZMIDI_MPE
 #define ZMIDI_MPE
 #endif
+#ifndef ZMIDI_GM
+#define ZMIDI_GM
+#endif
+#ifndef ZMIDI_INQUIRY
+#define ZMIDI_INQUIRY
+#endif
+#ifndef ZMIDI_DEVICE_CONTROL
+#define ZMIDI_DEVICE_CONTROL
+#endif
+#ifndef ZMIDI_TUNING
+#define ZMIDI_TUNING
+#endif
+#ifndef ZMIDI_MTC
+#define ZMIDI_MTC
+#endif
+#ifndef ZMIDI_MMC_TRANSPORT
+#define ZMIDI_MMC_TRANSPORT
+#endif
+#endif
+/* The General MIDI receiver needs the mode, controller and parameter parts, and the GM System
+ * messages need the sysex base, as the Cargo feature gm does. */
+#if defined(ZMIDI_GM)
+#ifndef ZMIDI_CHANNEL_MODE
+#define ZMIDI_CHANNEL_MODE
+#endif
+#ifndef ZMIDI_CONTROLLERS
+#define ZMIDI_CONTROLLERS
+#endif
+#ifndef ZMIDI_PARAMETERS
+#define ZMIDI_PARAMETERS
+#endif
+#endif
+/* The MMC transport tier uses the MTC time, and each sysex part the sysex base. */
+#if defined(ZMIDI_MMC_TRANSPORT) && !defined(ZMIDI_MTC)
+#define ZMIDI_MTC
+#endif
+#if !defined(ZMIDI_SYSEX) && (defined(ZMIDI_GM) || defined(ZMIDI_INQUIRY) || defined(ZMIDI_DEVICE_CONTROL) || defined(ZMIDI_TUNING) || defined(ZMIDI_MTC))
+#define ZMIDI_SYSEX
 #endif
 /* The MPE receiver takes the events of the parameter receiver, as the Cargo feature mpe does. */
 #if defined(ZMIDI_MPE) && !defined(ZMIDI_PARAMETERS)
@@ -343,6 +381,21 @@
 #define ZMIDI_MPE_NOTE_ALLOCATOR_WORDS 13
 #endif
 
+#if defined(ZMIDI_GM)
+/**
+ * Storage words of a [`ZmidiGmReceiver`].
+ */
+#define ZMIDI_GM_RECEIVER_WORDS 2
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * The Rhythm-capable channels of the default configuration: channels 10 and 11 (bits 9 and 10;
+ * RP-024 2.4).
+ */
+#define ZMIDI_GM_RHYTHM_CAPABLE_DEFAULT 1536
+#endif
+
 #if (defined(ZMIDI_NET) && (defined(ZMIDI_PTR64) && !defined(ZMIDI_NET_AUTH)))
 /**
  * Storage words of a [`ZmidiNetHost`] on a 64-bit target.
@@ -480,7 +533,21 @@
 /**
  * Minor version of the C ABI. It changes when a function or a status value is added.
  */
-#define ZMIDI_ABI_MINOR 10
+#define ZMIDI_ABI_MINOR 11
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Storage words of a [`ZmidiMtcGenerator`].
+ */
+#define ZMIDI_MTC_GENERATOR_WORDS 2
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Storage words of a [`ZmidiMtcReader`].
+ */
+#define ZMIDI_MTC_READER_WORDS 4
+#endif
 
 #if (defined(ZMIDI_USB_MIDI1) && defined(ZMIDI_PTR64))
 /**
@@ -878,6 +945,58 @@ typedef enum ZmidiControllerEventKind {
 } ZmidiControllerEventKind;
 #endif
 
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_DEVICE_CONTROL))
+/**
+ * The kind of a Device Control message (REQ-FFI-SX-005).
+ */
+typedef enum ZmidiDeviceControlKind {
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 04H 01H Master Volume, 14 bits.
+   */
+  ZMIDI_DEVICE_CONTROL_KIND_MASTER_VOLUME = 0,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 04H 02H Master Balance, 14 bits.
+   */
+  ZMIDI_DEVICE_CONTROL_KIND_MASTER_BALANCE = 1,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 04H 03H Master Fine Tuning, 14 bits.
+   */
+  ZMIDI_DEVICE_CONTROL_KIND_MASTER_FINE_TUNING = 2,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 04H 04H Master Coarse Tuning, the 7-bit MSB.
+   */
+  ZMIDI_DEVICE_CONTROL_KIND_MASTER_COARSE_TUNING = 3,
+#endif
+} ZmidiDeviceControlKind;
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * The General MIDI level (REQ-FFI-MIDI1-016).
+ */
+typedef enum ZmidiGmLevel {
+  /**
+   * After a GM System Off: the device is in its own mode.
+   */
+  ZMIDI_GM_LEVEL_OFF = 0,
+  /**
+   * After a GM1 System On.
+   */
+  ZMIDI_GM_LEVEL_GM1 = 1,
+  /**
+   * At the start and after a GM2 System On.
+   */
+  ZMIDI_GM_LEVEL_GM2 = 2,
+} ZmidiGmLevel;
+#endif
+
 #if (defined(ZMIDI_MESSAGES) || defined(ZMIDI_CHANNEL_MODE) || defined(ZMIDI_CONTROLLERS) || defined(ZMIDI_PARAMETERS) || defined(ZMIDI_SYNC))
 /**
  * The kind of a [`ZmidiMidi1Message`].
@@ -904,6 +1023,126 @@ typedef enum ZmidiMidi1Kind {
    */
   ZMIDI_MIDI1_KIND_SYS_EX_TOO_LONG = 4,
 } ZmidiMidi1Kind;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * The kind of an MMC command (RP-013 pp. 20 to 32; REQ-FFI-SX-008).
+ */
+typedef enum ZmidiMmcCommandKind {
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 01H STOP.
+   */
+  ZMIDI_MMC_COMMAND_KIND_STOP = 0,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 02H PLAY.
+   */
+  ZMIDI_MMC_COMMAND_KIND_PLAY = 1,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 03H DEFERRED PLAY.
+   */
+  ZMIDI_MMC_COMMAND_KIND_DEFERRED_PLAY = 2,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 04H FAST FORWARD.
+   */
+  ZMIDI_MMC_COMMAND_KIND_FAST_FORWARD = 3,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 05H REWIND.
+   */
+  ZMIDI_MMC_COMMAND_KIND_REWIND = 4,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 06H RECORD STROBE.
+   */
+  ZMIDI_MMC_COMMAND_KIND_RECORD_STROBE = 5,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 07H RECORD EXIT.
+   */
+  ZMIDI_MMC_COMMAND_KIND_RECORD_EXIT = 6,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 09H PAUSE.
+   */
+  ZMIDI_MMC_COMMAND_KIND_PAUSE = 7,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 0DH MMC RESET.
+   */
+  ZMIDI_MMC_COMMAND_KIND_RESET = 8,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 40H WRITE: `data_offset` and `data_length` give the Information Field string.
+   */
+  ZMIDI_MMC_COMMAND_KIND_WRITE = 9,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 44H LOCATE [I/F] with `register`, 08H to 0FH.
+   */
+  ZMIDI_MMC_COMMAND_KIND_LOCATE_FIELD = 10,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 44H LOCATE [TARGET] with `target` in the {ff} form.
+   */
+  ZMIDI_MMC_COMMAND_KIND_LOCATE_TARGET = 11,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 4CH MOVE from `source` to `destination`, 01H to 1FH.
+   */
+  ZMIDI_MMC_COMMAND_KIND_MOVE = 12,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * Any other command: the name and the data as offsets.
+   */
+  ZMIDI_MMC_COMMAND_KIND_OTHER = 13,
+#endif
+} ZmidiMmcCommandKind;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * The kind of an MMC Information Field (REQ-FFI-SX-008).
+ */
+typedef enum ZmidiMmcFieldKind {
+#if defined(ZMIDI_SYSEX)
+  /**
+   * A time code field 01H to 1FH with its 5 data bytes in `code`.
+   */
+  ZMIDI_MMC_FIELD_KIND_TIME_CODE = 0,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * The short form 21H to 3FH of the field `field`: `code` has the frames, the sign and the
+   * final byte; apply its data bytes to the last full value with
+   * [`zmidi_time_code_with_short`].
+   */
+  ZMIDI_MMC_FIELD_KIND_SHORT = 1,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * Any other field: the name and the data as offsets.
+   */
+  ZMIDI_MMC_FIELD_KIND_OTHER = 2,
+#endif
+} ZmidiMmcFieldKind;
 #endif
 
 #if defined(ZMIDI_CHANNEL_MODE)
@@ -1793,6 +2032,76 @@ typedef enum ZmidiSyncEventKind {
    */
   ZMIDI_SYNC_EVENT_KIND_SONG = 6,
 } ZmidiSyncEventKind;
+#endif
+
+#if defined(ZMIDI_SYSEX)
+/**
+ * The class of a System Exclusive message (M1 Table VII; REQ-FFI-SX-001).
+ */
+typedef enum ZmidiSysexClass {
+#if defined(ZMIDI_SYSEX)
+  /**
+   * A manufacturer ID.
+   */
+  ZMIDI_SYSEX_CLASS_MANUFACTURER = 0,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 7DH, Non-Commercial.
+   */
+  ZMIDI_SYSEX_CLASS_NON_COMMERCIAL = 1,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 7EH, Universal Non-Real Time.
+   */
+  ZMIDI_SYSEX_CLASS_NON_REAL_TIME = 2,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 7FH, Universal Real Time.
+   */
+  ZMIDI_SYSEX_CLASS_REAL_TIME = 3,
+#endif
+} ZmidiSysexClass;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * The kind of a MIDI Tuning message (REQ-FFI-SX-006).
+ */
+typedef enum ZmidiTuningKind {
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 00H or 03H Bulk Tuning Dump Request.
+   */
+  ZMIDI_TUNING_KIND_DUMP_REQUEST = 0,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 01H Bulk Tuning Dump or 04H Key-Based Tuning Dump.
+   */
+  ZMIDI_TUNING_KIND_KEY_DUMP = 1,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 02H or 07H Single Note Tuning Change.
+   */
+  ZMIDI_TUNING_KIND_NOTE_CHANGE = 2,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 05H or 06H Scale/Octave Tuning Dump.
+   */
+  ZMIDI_TUNING_KIND_SCALE_DUMP = 3,
+#endif
+#if defined(ZMIDI_SYSEX)
+  /**
+   * 08H or 09H Scale/Octave Tuning.
+   */
+  ZMIDI_TUNING_KIND_SCALE_OCTAVE = 4,
+#endif
+} ZmidiTuningKind;
 #endif
 
 #if defined(ZMIDI_USB_MIDI1)
@@ -2797,6 +3106,60 @@ typedef struct ZmidiMpeNoteAllocator {
 } ZmidiMpeNoteAllocator;
 #endif
 
+#if defined(ZMIDI_GM)
+/**
+ * Storage of the General MIDI state of the 16 channels of one input. The program gives it;
+ * [`zmidi_gm_receiver_init`] sets it up (REQ-FFI-MIDI1-016).
+ */
+typedef struct ZmidiGmReceiver {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_GM_RECEIVER_WORDS];
+} ZmidiGmReceiver;
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * The configuration of a [`ZmidiGmReceiver`] (REQ-FFI-MIDI1-016).
+ */
+typedef struct ZmidiGmConfig {
+  /**
+   * Bit n is set when the channel with packet value n can be a Rhythm Channel
+   * ([`ZMIDI_GM_RHYTHM_CAPABLE_DEFAULT`]: channels 10 and 11).
+   */
+  uint16_t rhythm_capable;
+  /**
+   * True when a Mono On with M = 1 sets Mode 4 on a Rhythm Channel too.
+   */
+  bool rhythm_mono;
+} ZmidiGmConfig;
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * The state of a [`ZmidiGmReceiver`] (REQ-FFI-MIDI1-016).
+ */
+typedef struct ZmidiGmInfo {
+  /**
+   * A [`ZmidiGmLevel`] value.
+   */
+  uint32_t level;
+  /**
+   * The Rhythm Channels: bit n is the channel with packet value n.
+   */
+  uint16_t rhythm_channels;
+  /**
+   * The channels in Mode 4 (Omni Off, Mono); the others are in Mode 3.
+   */
+  uint16_t mono_channels;
+  /**
+   * The configuration.
+   */
+  struct ZmidiGmConfig config;
+} ZmidiGmInfo;
+#endif
+
 #if defined(ZMIDI_NET)
 /**
  * Storage of one Host. The program gives it; [`zmidi_net_host_init`] sets it up. 16-byte
@@ -3248,6 +3611,488 @@ typedef struct ZmidiPeSubscription {
    */
   uint8_t res_id[ZMIDI_PE_ID_LEN];
 } ZmidiPeSubscription;
+#endif
+
+#if defined(ZMIDI_SYSEX)
+/**
+ * One System Exclusive message as flat values (REQ-FFI-SX-001).
+ */
+typedef struct ZmidiSysex {
+  /**
+   * A [`ZmidiSysexClass`] value.
+   */
+  uint32_t kind;
+  /**
+   * The Manufacturer ID of the class Manufacturer: `[id, 0, 0]` or `[00H, b2, b3]`.
+   */
+  uint8_t manufacturer[3];
+  /**
+   * The Device ID of a Universal message.
+   */
+  uint8_t device_id;
+  /**
+   * Sub-ID#1 of a Universal message.
+   */
+  uint8_t sub_id1;
+  /**
+   * Sub-ID#2 when `has_sub_id2`.
+   */
+  uint8_t sub_id2;
+  /**
+   * True when the family of Sub-ID#1 has a Sub-ID#2.
+   */
+  bool has_sub_id2;
+  /**
+   * The offset in the input of the data after the header (after the ID for a manufacturer or
+   * Non-Commercial message), without F7H.
+   */
+  uint32_t data_offset;
+  /**
+   * The length of the data.
+   */
+  uint32_t data_length;
+} ZmidiSysex;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_INQUIRY))
+/**
+ * The identity of a device (M1 General Information; REQ-FFI-SX-003).
+ */
+typedef struct ZmidiIdentity {
+  /**
+   * The Manufacturer ID: `[id, 0, 0]` or `[00H, b2, b3]`.
+   */
+  uint8_t manufacturer[3];
+  /**
+   * The device family code, 14 bits.
+   */
+  uint16_t family;
+  /**
+   * The device family member code, 14 bits.
+   */
+  uint16_t member;
+  /**
+   * The software revision level, four 7-bit bytes.
+   */
+  uint8_t revision[4];
+} ZmidiIdentity;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_DEVICE_CONTROL))
+/**
+ * One Device Control message (REQ-FFI-SX-005).
+ */
+typedef struct ZmidiDeviceControl {
+  /**
+   * A [`ZmidiDeviceControlKind`] value.
+   */
+  uint32_t kind;
+  /**
+   * The Device ID; 7FH addresses all devices.
+   */
+  uint8_t device_id;
+  /**
+   * The value: 14 bits, or 7 bits for Master Coarse Tuning.
+   */
+  uint16_t value;
+} ZmidiDeviceControl;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * The 12 scale/octave offsets from C to B (REQ-FFI-SX-006).
+ */
+typedef struct ZmidiTuningOffsets {
+  /**
+   * True for the 2-byte form (-8192 to +8191, steps of 100/8192 cent); false for the 1-byte
+   * form (cents, -64 to +63).
+   */
+  bool two_byte;
+  /**
+   * The offsets.
+   */
+  int16_t offsets[12];
+} ZmidiTuningOffsets;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * One MIDI Tuning message as flat values; the fields that the kind does not have are 0
+ * (REQ-FFI-SX-006).
+ */
+typedef struct ZmidiTuning {
+  /**
+   * A [`ZmidiTuningKind`] value.
+   */
+  uint32_t kind;
+  /**
+   * True for the Real Time form (NoteChange, ScaleOctave).
+   */
+  bool real_time;
+  /**
+   * The Device ID.
+   */
+  uint8_t device_id;
+  /**
+   * True when the message has a bank.
+   */
+  bool has_bank;
+  /**
+   * The bank, 0 to 127.
+   */
+  uint8_t bank;
+  /**
+   * The tuning program, 0 to 127.
+   */
+  uint8_t program;
+  /**
+   * The 16-byte tuning name (KeyDump, ScaleDump).
+   */
+  uint8_t name[16];
+  /**
+   * The result of the checksum check of a 01H Bulk Tuning Dump (true for the other kinds).
+   */
+  bool checksum_ok;
+  /**
+   * The channels of ScaleOctave: bit n is the channel with packet value n.
+   */
+  uint16_t channels;
+  /**
+   * The offsets of ScaleDump and ScaleOctave.
+   */
+  struct ZmidiTuningOffsets offsets;
+  /**
+   * The count of notes: 128 for KeyDump, the sets of NoteChange.
+   */
+  uint32_t count;
+} ZmidiTuning;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * A MIDI Tuning frequency word: the semitone and the 14-bit fraction (REQ-FFI-SX-006).
+ */
+typedef struct ZmidiFrequencyWord {
+  /**
+   * The semitone, 0 to 127.
+   */
+  uint8_t semitone;
+  /**
+   * The fraction in steps of 100/16384 cent, 0 to 3FFFH.
+   */
+  uint16_t fraction;
+} ZmidiFrequencyWord;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * One note of a tuning: the key and its frequency word (REQ-FFI-SX-006).
+ */
+typedef struct ZmidiTuningNote {
+  /**
+   * The key, 0 to 127.
+   */
+  uint8_t key;
+  /**
+   * The frequency word.
+   */
+  struct ZmidiFrequencyWord word;
+} ZmidiTuningNote;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * An MTC time (RP-004; REQ-FFI-SX-007). A reader gives the counts as received; a writer checks
+ * them.
+ */
+typedef struct ZmidiMtcTime {
+  /**
+   * Hours, 0 to 23.
+   */
+  uint8_t hours;
+  /**
+   * Minutes, 0 to 59.
+   */
+  uint8_t minutes;
+  /**
+   * Seconds, 0 to 59.
+   */
+  uint8_t seconds;
+  /**
+   * Frames, below the frame rate of the type.
+   */
+  uint8_t frames;
+  /**
+   * The time code type: 0 (24), 1 (25), 2 (30 drop-frame) or 3 (30 frames per second).
+   */
+  uint8_t rate;
+} ZmidiMtcTime;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Storage of one Quarter Frame generator. The program gives it; [`zmidi_mtc_generator_init`]
+ * sets it up (REQ-FFI-SX-009).
+ */
+typedef struct ZmidiMtcGenerator {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_MTC_GENERATOR_WORDS];
+} ZmidiMtcGenerator;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Storage of one Quarter Frame reader. The program gives it; [`zmidi_mtc_reader_init`] sets it
+ * up (REQ-FFI-SX-009).
+ */
+typedef struct ZmidiMtcReader {
+  /**
+   * Opaque content.
+   */
+  uint64_t _opaque[ZMIDI_MTC_READER_WORDS];
+} ZmidiMtcReader;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * What one Quarter Frame data byte gives (REQ-FFI-SX-007).
+ */
+typedef struct ZmidiMtcEvent {
+  /**
+   * The piece, 0 to 7.
+   */
+  uint8_t piece;
+  /**
+   * True for pieces 0 and 4, which mark frame boundaries.
+   */
+  bool boundary;
+  /**
+   * True at the end of a full sequence: the fields below are set.
+   */
+  bool has_sequence;
+  /**
+   * The assembled time, counts as received.
+   */
+  struct ZmidiMtcTime raw;
+  /**
+   * The current time: `raw` plus 2 frames forward, minus 1 frame in reverse
+   * (AMB-RP-004-03).
+   */
+  struct ZmidiMtcTime current;
+  /**
+   * True for a reverse sequence.
+   */
+  bool reverse;
+  /**
+   * True when `raw` is not the previous raw time plus 2 frames (minus 2 in reverse).
+   */
+  bool discontinuity;
+} ZmidiMtcEvent;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * The state of a reader (REQ-FFI-SX-007).
+ */
+typedef struct ZmidiMtcReaderInfo {
+  /**
+   * True after a full sequence, until a broken order or a direction change.
+   */
+  bool locked;
+  /**
+   * True after a Quarter Frame data byte, false after a Full Message.
+   */
+  bool running;
+  /**
+   * True when two pieces gave the direction.
+   */
+  bool has_direction;
+  /**
+   * True for reverse, when `has_direction`.
+   */
+  bool reverse;
+  /**
+   * True when `time` is set.
+   */
+  bool has_time;
+  /**
+   * The current time of the last full sequence, or the time of a Full Message after it.
+   */
+  struct ZmidiMtcTime time;
+} ZmidiMtcReaderInfo;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * The MTC User Bits (RP-004 p. 6; REQ-FFI-SX-007).
+ */
+typedef struct ZmidiMtcUserBits {
+  /**
+   * Binary Groups 1 to 8, 4 bits each.
+   */
+  uint8_t groups[8];
+  /**
+   * The Binary Group Flag Bits: bit 1 is j, bit 0 is i.
+   */
+  uint8_t flags;
+} ZmidiMtcUserBits;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * An MMC Standard Time Code (RP-013 pp. 8, 9; REQ-FFI-SX-008).
+ */
+typedef struct ZmidiTimeCode {
+  /**
+   * The time with its type; a reader gives the counts as received.
+   */
+  struct ZmidiMtcTime time;
+  /**
+   * c: the color frame flag.
+   */
+  bool color_frame;
+  /**
+   * k: the blank flag.
+   */
+  bool blank;
+  /**
+   * g: the sign.
+   */
+  bool negative;
+  /**
+   * i: true for the status form {st}, false for the subframes form {ff}.
+   */
+  bool status_form;
+  /**
+   * The subframes of the {ff} form, 0 to 99.
+   */
+  uint8_t subframes;
+  /**
+   * e: the estimated code flag of the {st} form.
+   */
+  bool estimated;
+  /**
+   * v: the invalid code flag of the {st} form.
+   */
+  bool invalid;
+  /**
+   * d: video field 1, of the {st} form.
+   */
+  bool video_field1;
+  /**
+   * n: no time code, of the {st} form.
+   */
+  bool no_time_code;
+} ZmidiTimeCode;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * The header of an MMC message (RP-013 p. 1; REQ-FFI-SX-008).
+ */
+typedef struct ZmidiMmcMessage {
+  /**
+   * True for a response (Sub-ID#1 07H), false for commands (06H).
+   */
+  bool response;
+  /**
+   * The destination of commands, or the source of responses (7FH is not valid there,
+   * AMB-RP-013-04).
+   */
+  uint8_t device_id;
+  /**
+   * The offset in the input of the command or response string.
+   */
+  uint32_t string_offset;
+  /**
+   * The length of the string.
+   */
+  uint32_t string_length;
+} ZmidiMmcMessage;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * One MMC command (REQ-FFI-SX-008). The offsets are into the bytes given to the call; the
+ * fields that the kind does not use are 0.
+ */
+typedef struct ZmidiMmcCommand {
+  /**
+   * A [`ZmidiMmcCommandKind`] value.
+   */
+  uint32_t kind;
+  /**
+   * The register of LocateField.
+   */
+  uint8_t register_;
+  /**
+   * The destination of Move.
+   */
+  uint8_t destination;
+  /**
+   * The source of Move.
+   */
+  uint8_t source;
+  /**
+   * The target of LocateTarget.
+   */
+  struct ZmidiTimeCode target;
+  /**
+   * The offset of the name of Other (with its 00H extension prefixes); of the 1-byte name for
+   * a reader of the other kinds.
+   */
+  uint32_t name_offset;
+  /**
+   * The length of the name, 1 to 3.
+   */
+  uint32_t name_length;
+  /**
+   * The offset of the data of Write and Other.
+   */
+  uint32_t data_offset;
+  /**
+   * The length of the data.
+   */
+  uint32_t data_length;
+} ZmidiMmcCommand;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * One MMC Information Field (REQ-FFI-SX-008). The offsets are into the bytes given to the call.
+ */
+typedef struct ZmidiMmcField {
+  /**
+   * A [`ZmidiMmcFieldKind`] value.
+   */
+  uint32_t kind;
+  /**
+   * The field name of TimeCode and Short (the full name 01H to 1FH).
+   */
+  uint8_t field;
+  /**
+   * The time code of TimeCode and Short.
+   */
+  struct ZmidiTimeCode code;
+  /**
+   * The offset of the name (with its 00H extension prefixes).
+   */
+  uint32_t name_offset;
+  /**
+   * The length of the name, 1 to 3.
+   */
+  uint32_t name_length;
+  /**
+   * The offset of the data bytes, after the count byte when the name has one.
+   */
+  uint32_t data_offset;
+  /**
+   * The length of the data.
+   */
+  uint32_t data_length;
+} ZmidiMmcField;
 #endif
 
 #if defined(ZMIDI_UMP)
@@ -5408,6 +6253,153 @@ enum ZmidiStatus zmidi_mpe_note_reset(struct ZmidiMpeNoteAllocator *state);
 uintptr_t zmidi_mpe_note_allocator_size(void);
 #endif
 
+#if defined(ZMIDI_GM)
+/**
+ * Sets up `receiver` from `config`: channel 10 a Rhythm Channel, each channel in Mode 3, level
+ * GM2 (RP-024 2.4, 2.5; REQ-FFI-MIDI1-016).
+ *
+ * # Safety
+ * `receiver` is null or points to writable storage of a [`ZmidiGmReceiver`]; `config` is null
+ * or readable.
+ */
+enum ZmidiStatus zmidi_gm_receiver_init(struct ZmidiGmReceiver *receiver,
+                                        const struct ZmidiGmConfig *config);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * The GM reset of a GM1 or GM2 System On, or GM System Off for [`ZmidiGmLevel::Off`]
+ * (RP-024 4.9; REQ-FFI-MIDI1-016). The program then mutes the notes, calls
+ * [`zmidi_gm_reset_controller_state`] for each channel and resets each parameter receiver.
+ *
+ * # Safety
+ * `receiver` is null or was set up by [`zmidi_gm_receiver_init`].
+ */
+enum ZmidiStatus zmidi_gm_receiver_reset(struct ZmidiGmReceiver *receiver, uint32_t level);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * Takes the program selection of `channel` (0 to 15) with the bank that its controller state
+ * holds: bank MSB 78H makes it a Rhythm Channel when the configuration permits it, 79H a Melody
+ * Channel (RP-024 2.4, 3.3.1; REQ-FFI-MIDI1-016).
+ *
+ * # Safety
+ * `receiver` is null or was set up by [`zmidi_gm_receiver_init`].
+ */
+enum ZmidiStatus zmidi_gm_receiver_program(struct ZmidiGmReceiver *receiver,
+                                           uint8_t channel,
+                                           bool has_bank,
+                                           uint16_t bank);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * Takes one Channel Voice `message` and writes its action by the GM2 Channel Mode rules into
+ * `action` (RP-024 2.5, 3.5; REQ-FFI-MIDI1-016).
+ *
+ * # Safety
+ * `receiver` is null or was set up by [`zmidi_gm_receiver_init`]; `message` is null or
+ * readable; `action` is null or writable.
+ */
+enum ZmidiStatus zmidi_gm_receiver_receive(struct ZmidiGmReceiver *receiver,
+                                           const struct ZmidiMidi1Message *message,
+                                           struct ZmidiModeAction *action);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * Gives the level, the Rhythm Channels, the channels in Mode 4 and the configuration
+ * (REQ-FFI-MIDI1-016).
+ *
+ * # Safety
+ * `receiver` is null or was set up by [`zmidi_gm_receiver_init`]; `info` is null or writable.
+ */
+enum ZmidiStatus zmidi_gm_receiver_info(struct ZmidiGmReceiver *receiver, struct ZmidiGmInfo *info);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * Gives `size_of` the Rust GM receiver, for a binding that checks its copy of the layout
+ * (DEC-019 rule 6).
+ */
+uintptr_t zmidi_gm_receiver_size(void);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * Sets `state`, the controller state of `channel` (0 to 15), for a GM reset: the GM2 defaults,
+ * the Rhythm bank on channel 10 and the Melody bank on the others (RP-024 3.3, 4.9.1;
+ * REQ-FFI-MIDI1-016).
+ *
+ * # Safety
+ * `state` is null or was set up by [`zmidi_controllers_init`].
+ */
+enum ZmidiStatus zmidi_gm_reset_controller_state(struct ZmidiControllerState *state,
+                                                 uint8_t channel);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * Gives the GM2 default of controller 0 to 127: `*has_default` is false for a controller with
+ * no GM2 default (RP-024 3.3; REQ-FFI-MIDI1-016).
+ *
+ * # Safety
+ * `has_default` and `value` are null or writable.
+ */
+enum ZmidiStatus zmidi_gm2_controller_default(uint8_t controller,
+                                              bool *has_default,
+                                              uint8_t *value);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * Gives whether GM2 recommends that a Rhythm Channel does not respond to `controller`
+ * (RP-024 3.3; REQ-FFI-MIDI1-016).
+ *
+ * # Safety
+ * `result` is null or writable.
+ */
+enum ZmidiStatus zmidi_gm_rhythm_ignores_controller(uint8_t controller, bool *result);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * Gives whether GM2 recommends that a Rhythm Channel does not respond to `parameter`
+ * (RP-024 3.4; REQ-FFI-MIDI1-016).
+ *
+ * # Safety
+ * `parameter` is null or readable; `result` is null or writable.
+ */
+enum ZmidiStatus zmidi_gm_rhythm_ignores_parameter(const struct ZmidiParameter *parameter,
+                                                   bool *result);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * Gives whether GM2 recommends that a Rhythm Channel does not respond to `message`: Pitch Bend,
+ * Channel Pressure and the controllers of [`zmidi_gm_rhythm_ignores_controller`] (RP-024 3.3,
+ * 3.6, 3.7; REQ-FFI-MIDI1-016).
+ *
+ * # Safety
+ * `message` is null or readable; `result` is null or writable.
+ */
+enum ZmidiStatus zmidi_gm_rhythm_ignores_message(const struct ZmidiMidi1Message *message,
+                                                 bool *result);
+#endif
+
+#if defined(ZMIDI_GM)
+/**
+ * Gives the Modulation Depth Range of a 14-bit RPN 00H 05H value in hundredths of a cent: 100
+ * cents for each MSB step and 100/128 cent for each LSB step, rounded (RP-024 3.4.4;
+ * REQ-FFI-MIDI1-016). The GM2 default 00H 40H gives 5000.
+ *
+ * # Safety
+ * `hundredths` is null or writable.
+ */
+enum ZmidiStatus zmidi_modulation_depth_range(uint16_t value, uint32_t *hundredths);
+#endif
+
 #if defined(ZMIDI_NET)
 /**
  * Sets up `host` with the UMP Endpoint Name `name` and the Product Instance Id
@@ -6112,6 +7104,824 @@ enum ZmidiPeError zmidi_pe_last_error(const struct ZmidiPe *pe, uint16_t *status
  * version of its copy of the header.
  */
 uint32_t zmidi_abi_version(void);
+
+#if defined(ZMIDI_SYSEX)
+/**
+ * Reads one whole System Exclusive message, with or without F0H and F7H (REQ-FFI-SX-001). A
+ * message that is not valid gives [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_sysex_parse(const uint8_t *bytes, uintptr_t length, struct ZmidiSysex *out);
+#endif
+
+#if defined(ZMIDI_SYSEX)
+/**
+ * Gives in `*result` whether a received Device ID addresses the device: 7FH or `own`
+ * (REQ-FFI-SX-001).
+ *
+ * # Safety
+ * `result` is null or writable.
+ */
+enum ZmidiStatus zmidi_sysex_addressed(uint8_t device_id, uint8_t own, bool *result);
+#endif
+
+#if defined(ZMIDI_SYSEX)
+/**
+ * Writes F0H, the Manufacturer ID (`[id, 0, 0]` or `[00H, b2, b3]`), the data and F7H
+ * (REQ-FFI-SX-001). The reserved ID 00H 00H 00H, an ID that is not valid and the Universal IDs
+ * 7EH and 7FH give [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `manufacturer` is null or points to 3 readable bytes; `data` is null or points to
+ * `data_length` readable bytes; `out` is null or points to `capacity` writable bytes; `length`
+ * is null or writable.
+ */
+enum ZmidiStatus zmidi_sysex_write_manufacturer(const uint8_t *manufacturer,
+                                                const uint8_t *data,
+                                                uintptr_t data_length,
+                                                uint8_t *out,
+                                                uintptr_t capacity,
+                                                uintptr_t *length);
+#endif
+
+#if defined(ZMIDI_SYSEX)
+/**
+ * Writes a Universal message: F0H, 7EH or 7FH, the Device ID, Sub-ID#1, Sub-ID#2 when
+ * `has_sub_id2`, the data and F7H (REQ-FFI-SX-001). A Sub-ID#2 that does not match the family
+ * of Sub-ID#1 gives [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `data` is null or points to `data_length` readable bytes; `out` is null or points to
+ * `capacity` writable bytes; `length` is null or writable.
+ */
+enum ZmidiStatus zmidi_sysex_write_universal(bool real_time,
+                                             uint8_t device_id,
+                                             uint8_t sub_id1,
+                                             bool has_sub_id2,
+                                             uint8_t sub_id2,
+                                             const uint8_t *data,
+                                             uintptr_t data_length,
+                                             uint8_t *out,
+                                             uintptr_t capacity,
+                                             uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_INQUIRY))
+/**
+ * Reads an Identity Request or an Identity Reply (REQ-FFI-SX-003). `*is_reply` tells which;
+ * `*identity` is the identity of a reply, and zeroes for a request.
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `is_reply`, `device_id` and `identity`
+ * are null or writable.
+ */
+enum ZmidiStatus zmidi_inquiry_read(const uint8_t *bytes,
+                                    uintptr_t length,
+                                    bool *is_reply,
+                                    uint8_t *device_id,
+                                    struct ZmidiIdentity *identity);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_INQUIRY))
+/**
+ * Writes an Identity Request to `device_id` (7FH: all devices; REQ-FFI-SX-003).
+ *
+ * # Safety
+ * `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+ */
+enum ZmidiStatus zmidi_inquiry_request_write(uint8_t device_id,
+                                             uint8_t *out,
+                                             uintptr_t capacity,
+                                             uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_INQUIRY))
+/**
+ * Writes an Identity Reply from `device_id` with `identity` (REQ-FFI-SX-003).
+ *
+ * # Safety
+ * `identity` is null or readable; `out` is null or points to `capacity` writable bytes;
+ * `length` is null or writable.
+ */
+enum ZmidiStatus zmidi_inquiry_reply_write(uint8_t device_id,
+                                           const struct ZmidiIdentity *identity,
+                                           uint8_t *out,
+                                           uintptr_t capacity,
+                                           uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_INQUIRY))
+/**
+ * Answers an Identity Request for `own_device_id` or for all devices with the Identity Reply
+ * (REQ-FFI-SX-003). Another message, or a request for another device, gives
+ * [`ZmidiStatus::NoPending`].
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `identity` is null or readable; `out`
+ * is null or points to `capacity` writable bytes; `out_length` is null or writable.
+ */
+enum ZmidiStatus zmidi_inquiry_respond(const uint8_t *bytes,
+                                       uintptr_t length,
+                                       uint8_t own_device_id,
+                                       const struct ZmidiIdentity *identity,
+                                       uint8_t *out,
+                                       uintptr_t capacity,
+                                       uintptr_t *out_length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_GM))
+/**
+ * Reads a General MIDI System message (REQ-FFI-SX-004): `*command` is 1 (GM1 System On), 2 (GM
+ * System Off) or 3 (GM2 System On).
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `device_id` and `command` are null or
+ * writable.
+ */
+enum ZmidiStatus zmidi_gm_system_read(const uint8_t *bytes,
+                                      uintptr_t length,
+                                      uint8_t *device_id,
+                                      uint8_t *command);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_GM))
+/**
+ * Writes a General MIDI System message: `command` 1, 2 or 3 as [`zmidi_gm_system_read`] gives
+ * it (REQ-FFI-SX-004).
+ *
+ * # Safety
+ * `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+ */
+enum ZmidiStatus zmidi_gm_system_write(uint8_t device_id,
+                                       uint8_t command,
+                                       uint8_t *out,
+                                       uintptr_t capacity,
+                                       uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_DEVICE_CONTROL))
+/**
+ * Reads a Device Control message (REQ-FFI-SX-005).
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_device_control_read(const uint8_t *bytes,
+                                           uintptr_t length,
+                                           struct ZmidiDeviceControl *out);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_DEVICE_CONTROL))
+/**
+ * Writes a Device Control message (REQ-FFI-SX-005). A value above its width gives
+ * [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `control` is null or readable; `out` is null or points to `capacity` writable bytes; `length`
+ * is null or writable.
+ */
+enum ZmidiStatus zmidi_device_control_write(const struct ZmidiDeviceControl *control,
+                                            uint8_t *out,
+                                            uintptr_t capacity,
+                                            uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_DEVICE_CONTROL))
+/**
+ * Gives the signed offset from 8192 of a 14-bit Master Fine Tuning value (CA-025;
+ * REQ-FFI-SX-005).
+ *
+ * # Safety
+ * `offset` is null or writable.
+ */
+enum ZmidiStatus zmidi_fine_tuning_offset(uint16_t value, int16_t *offset);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_DEVICE_CONTROL))
+/**
+ * Gives the semitones from A440 of a Master Coarse Tuning MSB, -64 to +63 (CA-025;
+ * REQ-FFI-SX-005).
+ *
+ * # Safety
+ * `semitones` is null or writable.
+ */
+enum ZmidiStatus zmidi_coarse_tuning_semitones(uint8_t msb, int8_t *semitones);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * Reads a MIDI Tuning message (REQ-FFI-SX-006). The notes go into `notes`: 128 for a key-based
+ * dump (key = index), the sets of a note change. When `capacity` is smaller than the count,
+ * `*tuning` holds the message with the count and the status is
+ * [`ZmidiStatus::BufferTooSmall`]; `notes` may be null when `capacity` is 0.
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `tuning` is null or writable; `notes`
+ * is null or points to `capacity` writable notes.
+ */
+enum ZmidiStatus zmidi_tuning_read(const uint8_t *bytes,
+                                   uintptr_t length,
+                                   struct ZmidiTuning *tuning,
+                                   struct ZmidiTuningNote *notes,
+                                   uintptr_t capacity);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * Reads a frequency word from its three bytes (M1 MIDI Tuning; REQ-FFI-SX-006).
+ *
+ * # Safety
+ * `bytes` is null or points to 3 readable bytes; `word` is null or writable.
+ */
+enum ZmidiStatus zmidi_frequency_word_from_bytes(const uint8_t *bytes,
+                                                 struct ZmidiFrequencyWord *word);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * Writes the three bytes of a frequency word (REQ-FFI-SX-006).
+ *
+ * # Safety
+ * `word` is null or readable; `bytes` is null or points to 3 writable bytes.
+ */
+enum ZmidiStatus zmidi_frequency_word_to_bytes(const struct ZmidiFrequencyWord *word,
+                                               uint8_t *bytes);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * Gives the checksum of `bytes`: the XOR of the bytes, masked to 7 bits (M1 MIDI Tuning;
+ * REQ-FFI-SX-006).
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `checksum` is null or writable.
+ */
+enum ZmidiStatus zmidi_tuning_checksum(const uint8_t *bytes, uintptr_t length, uint8_t *checksum);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * Writes a Bulk Tuning Dump Request: 00H, or 03H with `bank` when `has_bank`
+ * (REQ-FFI-SX-006).
+ *
+ * # Safety
+ * `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+ */
+enum ZmidiStatus zmidi_tuning_dump_request_write(uint8_t device_id,
+                                                 bool has_bank,
+                                                 uint8_t bank,
+                                                 uint8_t program,
+                                                 uint8_t *out,
+                                                 uintptr_t capacity,
+                                                 uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * Writes a Bulk Tuning Dump (01H), or a Key-Based Tuning Dump (04H) with `bank` when
+ * `has_bank`, from the 16-byte `name` and 128 `words` (REQ-FFI-SX-006).
+ *
+ * # Safety
+ * `name` is null or points to 16 readable bytes; `words` is null or points to 128 readable
+ * words; `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+ */
+enum ZmidiStatus zmidi_tuning_key_dump_write(uint8_t device_id,
+                                             bool has_bank,
+                                             uint8_t bank,
+                                             uint8_t program,
+                                             const uint8_t *name,
+                                             const struct ZmidiFrequencyWord *words,
+                                             uint8_t *out,
+                                             uintptr_t capacity,
+                                             uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * Writes a Single Note Tuning Change: Real Time 02H, or 07H with `bank` when `has_bank` (the
+ * Non-Real Time form needs a bank), from 1 to 127 `notes` (REQ-FFI-SX-006).
+ *
+ * # Safety
+ * `notes` is null or points to `count` readable notes; `out` is null or points to `capacity`
+ * writable bytes; `length` is null or writable.
+ */
+enum ZmidiStatus zmidi_tuning_note_change_write(bool real_time,
+                                                uint8_t device_id,
+                                                bool has_bank,
+                                                uint8_t bank,
+                                                uint8_t program,
+                                                const struct ZmidiTuningNote *notes,
+                                                uintptr_t count,
+                                                uint8_t *out,
+                                                uintptr_t capacity,
+                                                uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * Writes a Scale/Octave Tuning Dump (05H or 06H by the form of `offsets`) with the 16-byte
+ * `name` (REQ-FFI-SX-006).
+ *
+ * # Safety
+ * `name` is null or points to 16 readable bytes; `offsets` is null or readable; `out` is null
+ * or points to `capacity` writable bytes; `length` is null or writable.
+ */
+enum ZmidiStatus zmidi_tuning_scale_dump_write(uint8_t device_id,
+                                               uint8_t bank,
+                                               uint8_t program,
+                                               const uint8_t *name,
+                                               const struct ZmidiTuningOffsets *offsets,
+                                               uint8_t *out,
+                                               uintptr_t capacity,
+                                               uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
+/**
+ * Writes a Scale/Octave Tuning message (08H or 09H by the form of `offsets`), Real Time or
+ * Non-Real Time, for the `channels` mask (REQ-FFI-SX-006).
+ *
+ * # Safety
+ * `offsets` is null or readable; `out` is null or points to `capacity` writable bytes; `length`
+ * is null or writable.
+ */
+enum ZmidiStatus zmidi_tuning_scale_octave_write(bool real_time,
+                                                 uint8_t device_id,
+                                                 uint16_t channels,
+                                                 const struct ZmidiTuningOffsets *offsets,
+                                                 uint8_t *out,
+                                                 uintptr_t capacity,
+                                                 uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives in `*valid` whether each count of `time` is in its range and the frame number is not
+ * one that the drop-frame type skips (REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `time` is null or readable; `valid` is null or writable.
+ */
+enum ZmidiStatus zmidi_mtc_time_is_valid(const struct ZmidiMtcTime *time, bool *valid);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives `time`, or frame 02 for a frame number that the drop-frame type skips (RP-013 Drop
+ * Frame Notes; REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `time` is null or readable; `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_mtc_next_valid(const struct ZmidiMtcTime *time, struct ZmidiMtcTime *out);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives the frames from 00:00:00:00 to `time` by the rule of its type (REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `time` is null or readable; `count` is null or writable.
+ */
+enum ZmidiStatus zmidi_mtc_to_frame_count(const struct ZmidiMtcTime *time, uint32_t *count);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives the time of `count` frames from 00:00:00:00 for the type `rate`, with the 24-hour wrap
+ * (REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_mtc_from_frame_count(uint32_t count, uint8_t rate, struct ZmidiMtcTime *out);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives the time `delta` frames after (or before) `time`, with the 24-hour wrap
+ * (REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `time` is null or readable; `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_mtc_add_frames(const struct ZmidiMtcTime *time,
+                                      int32_t delta,
+                                      struct ZmidiMtcTime *out);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives the 8 Quarter Frame data bytes of `time`, piece 0 first (RP-004 p. 2;
+ * REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `time` is null or readable; `bytes` is null or points to 8 writable bytes.
+ */
+enum ZmidiStatus zmidi_mtc_quarter_frames(const struct ZmidiMtcTime *time, uint8_t *bytes);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Sets up `generator`, running: the first sequence encodes `time` and starts at piece 0, or at
+ * piece 7 when `reverse` (RP-004 p. 3; REQ-FFI-SX-007). A time that is not valid gives
+ * [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `generator` is null or points to writable storage of a [`ZmidiMtcGenerator`]; `time` is null
+ * or readable.
+ */
+enum ZmidiStatus zmidi_mtc_generator_init(struct ZmidiMtcGenerator *generator,
+                                          const struct ZmidiMtcTime *time,
+                                          bool reverse);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives the data byte of the next piece in `*byte`, or [`ZmidiStatus::NoPending`] while the
+ * generator is stopped (REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `generator` is null or was set up by [`zmidi_mtc_generator_init`]; `byte` is null or
+ * writable.
+ */
+enum ZmidiStatus zmidi_mtc_generator_next(struct ZmidiMtcGenerator *generator, uint8_t *byte);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Runs or stops the generator (RP-004 p. 3; REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `generator` is null or was set up by [`zmidi_mtc_generator_init`].
+ */
+enum ZmidiStatus zmidi_mtc_generator_set_running(struct ZmidiMtcGenerator *generator, bool running);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Sets the direction: the next piece is the next one in the new order (AMB-RP-004-13;
+ * REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `generator` is null or was set up by [`zmidi_mtc_generator_init`].
+ */
+enum ZmidiStatus zmidi_mtc_generator_set_direction(struct ZmidiMtcGenerator *generator,
+                                                   bool reverse);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Moves the generator to `time`; the next piece is the first piece of the direction
+ * (REQ-FFI-SX-007). A time that is not valid gives [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `generator` is null or was set up by [`zmidi_mtc_generator_init`]; `time` is null or
+ * readable.
+ */
+enum ZmidiStatus zmidi_mtc_generator_locate(struct ZmidiMtcGenerator *generator,
+                                            const struct ZmidiMtcTime *time);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives the time that the current or next sequence encodes at its piece 0 (REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `generator` is null or was set up by [`zmidi_mtc_generator_init`]; `time` is null or
+ * writable.
+ */
+enum ZmidiStatus zmidi_mtc_generator_time(struct ZmidiMtcGenerator *generator,
+                                          struct ZmidiMtcTime *time);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives `size_of` the Rust generator, for a binding that checks its copy of the layout (DEC-019
+ * rule 6).
+ */
+uintptr_t zmidi_mtc_generator_size(void);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Sets up `reader`: not locked, stopped, no time (REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `reader` is null or points to writable storage of a [`ZmidiMtcReader`].
+ */
+enum ZmidiStatus zmidi_mtc_reader_init(struct ZmidiMtcReader *reader);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Takes one Quarter Frame data byte, 00H to 7FH (RP-004 p. 3; REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `reader` is null or was set up by [`zmidi_mtc_reader_init`]; `event` is null or writable.
+ */
+enum ZmidiStatus zmidi_mtc_reader_receive(struct ZmidiMtcReader *reader,
+                                          uint8_t byte,
+                                          struct ZmidiMtcEvent *event);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Takes the time of a Full Message: the reader has this time and is stopped until the next
+ * Quarter Frame data byte (AMB-RP-004-06; REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `reader` is null or was set up by [`zmidi_mtc_reader_init`]; `time` is null or readable.
+ */
+enum ZmidiStatus zmidi_mtc_reader_full_message(struct ZmidiMtcReader *reader,
+                                               const struct ZmidiMtcTime *time);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives the state of the reader (REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `reader` is null or was set up by [`zmidi_mtc_reader_init`]; `info` is null or writable.
+ */
+enum ZmidiStatus zmidi_mtc_reader_info(struct ZmidiMtcReader *reader,
+                                       struct ZmidiMtcReaderInfo *info);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Gives `size_of` the Rust reader, for a binding that checks its copy of the layout (DEC-019
+ * rule 6).
+ */
+uintptr_t zmidi_mtc_reader_size(void);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Reads an MTC Full Message (RP-004 p. 5; REQ-FFI-SX-007). The counts are as received.
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `device_id` and `time` are null or
+ * writable.
+ */
+enum ZmidiStatus zmidi_mtc_full_read(const uint8_t *bytes,
+                                     uintptr_t length,
+                                     uint8_t *device_id,
+                                     struct ZmidiMtcTime *time);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Writes an MTC Full Message (RP-004 p. 5; REQ-FFI-SX-007). A time that is not valid gives
+ * [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `time` is null or readable; `out` is null or points to `capacity` writable bytes; `length`
+ * is null or writable.
+ */
+enum ZmidiStatus zmidi_mtc_full_write(uint8_t device_id,
+                                      const struct ZmidiMtcTime *time,
+                                      uint8_t *out,
+                                      uintptr_t capacity,
+                                      uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Reads an MTC User Bits message (RP-004 p. 6; REQ-FFI-SX-007).
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `device_id` and `bits` are null or
+ * writable.
+ */
+enum ZmidiStatus zmidi_mtc_user_bits_read(const uint8_t *bytes,
+                                          uintptr_t length,
+                                          uint8_t *device_id,
+                                          struct ZmidiMtcUserBits *bits);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
+/**
+ * Writes an MTC User Bits message (RP-004 p. 6; REQ-FFI-SX-007). A group above 0FH or flags
+ * above 03H give [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `bits` is null or readable; `out` is null or points to `capacity` writable bytes; `length` is
+ * null or writable.
+ */
+enum ZmidiStatus zmidi_mtc_user_bits_write(uint8_t device_id,
+                                           const struct ZmidiMtcUserBits *bits,
+                                           uint8_t *out,
+                                           uintptr_t capacity,
+                                           uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Reads a Standard Time Code from its 5 bytes; the counts are masked to their widths
+ * (REQ-FFI-SX-008).
+ *
+ * # Safety
+ * `bytes` is null or points to 5 readable bytes; `code` is null or writable.
+ */
+enum ZmidiStatus zmidi_time_code_from_bytes(const uint8_t *bytes, struct ZmidiTimeCode *code);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Writes the 5 bytes of a Standard Time Code (REQ-FFI-SX-008). Subframes above 99 or a time
+ * that is not valid give [`ZmidiStatus::InvalidArgument`]; a blank time code is written as
+ * zeroes.
+ *
+ * # Safety
+ * `code` is null or readable; `bytes` is null or points to 5 writable bytes.
+ */
+enum ZmidiStatus zmidi_time_code_to_bytes(const struct ZmidiTimeCode *code, uint8_t *bytes);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Applies the 2 bytes of a short time code to the last full value `last`: hours, minutes,
+ * seconds and their flags stay (RP-013 p. 9; REQ-FFI-SX-008).
+ *
+ * # Safety
+ * `last` is null or readable; `bytes` is null or points to 2 readable bytes; `code` is null or
+ * writable.
+ */
+enum ZmidiStatus zmidi_time_code_with_short(const struct ZmidiTimeCode *last,
+                                            const uint8_t *bytes,
+                                            struct ZmidiTimeCode *code);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Writes the 2 bytes of the short form of a time code: the frames, the sign and the final byte
+ * (RP-013 p. 9; REQ-FFI-SX-008). Frames above 29 or subframes above 99 give
+ * [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `code` is null or readable; `bytes` is null or points to 2 writable bytes.
+ */
+enum ZmidiStatus zmidi_time_code_short_bytes(const struct ZmidiTimeCode *code, uint8_t *bytes);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * The MOVE rule from {st} to {ff}: subframes 0; an {ff} value stays as it is (RP-013 p. 32;
+ * REQ-FFI-SX-008).
+ *
+ * # Safety
+ * `code` is null or readable; `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_time_code_to_subframes_form(const struct ZmidiTimeCode *code,
+                                                   struct ZmidiTimeCode *out);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * The MOVE rule from {ff} to {st}: e 0, v 0, d from `video_field1`, n 1; an {st} value stays
+ * as it is (RP-013 p. 32; REQ-FFI-SX-008).
+ *
+ * # Safety
+ * `code` is null or readable; `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_time_code_to_status_form(const struct ZmidiTimeCode *code,
+                                                bool video_field1,
+                                                struct ZmidiTimeCode *out);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Gives the short name (the name plus 20H) of a time code field 01H to 1FH (RP-013 p. 9;
+ * REQ-FFI-SX-008).
+ *
+ * # Safety
+ * `short` is null or writable.
+ */
+enum ZmidiStatus zmidi_mmc_short_name(uint8_t field, uint8_t *short_);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Gives the time code field 01H to 1FH of a short name 21H to 3FH (RP-013 p. 9;
+ * REQ-FFI-SX-008).
+ *
+ * # Safety
+ * `field` is null or writable.
+ */
+enum ZmidiStatus zmidi_mmc_full_name(uint8_t short_, uint8_t *field);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Reads the header of an MMC message (REQ-FFI-SX-008). Another message gives
+ * [`ZmidiStatus::NoPending`]; an empty string gives [`ZmidiStatus::InvalidArgument`]. Read the
+ * string with [`zmidi_mmc_next_command`] or [`zmidi_mmc_next_field`].
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_mmc_read(const uint8_t *bytes,
+                                uintptr_t length,
+                                struct ZmidiMmcMessage *out);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Reads the command at `*offset` of a command string (the bytes at `string_offset` of a
+ * [`ZmidiMmcMessage`]) and moves `*offset` past it (RP-013 p. 5; REQ-FFI-SX-008). The end
+ * gives [`ZmidiStatus::NoPending`]; a string cut short gives [`ZmidiStatus::InvalidArgument`]
+ * and moves `*offset` to the end.
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `offset` is null or writable;
+ * `command` is null or writable.
+ */
+enum ZmidiStatus zmidi_mmc_next_command(const uint8_t *bytes,
+                                        uintptr_t length,
+                                        uintptr_t *offset,
+                                        struct ZmidiMmcCommand *command);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Reads the Information Field at `*offset` of a response string or of the data of WRITE, and
+ * moves `*offset` past it, with the end and error rules of [`zmidi_mmc_next_command`]
+ * (REQ-FFI-SX-008).
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `offset` is null or writable; `field`
+ * is null or writable.
+ */
+enum ZmidiStatus zmidi_mmc_next_field(const uint8_t *bytes,
+                                      uintptr_t length,
+                                      uintptr_t *offset,
+                                      struct ZmidiMmcField *field);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Writes an MMC command message to `device_id` from `count` commands (RP-013 p. 1;
+ * REQ-FFI-SX-008). The offsets of Write and Other point into `data`. A string above 48 bytes,
+ * an empty string, a register outside 08H to 0FH, a LOCATE target in the {st} form or a MOVE
+ * name outside 01H to 1FH give [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `commands` is null or points to `count` readable commands; `data` is null or points to
+ * `data_length` readable bytes; `out` is null or points to `capacity` writable bytes; `length`
+ * is null or writable.
+ */
+enum ZmidiStatus zmidi_mmc_write_commands(uint8_t device_id,
+                                          const struct ZmidiMmcCommand *commands,
+                                          uintptr_t count,
+                                          const uint8_t *data,
+                                          uintptr_t data_length,
+                                          uint8_t *out,
+                                          uintptr_t capacity,
+                                          uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Writes an MMC response message from `device_id` (00H to 7EH, AMB-RP-013-04) with `count`
+ * Information Fields (RP-013 p. 1; REQ-FFI-SX-008). The offsets of Other point into `data`.
+ * SELECTED TIME CODE needs the {st} form and no sign; GP0 needs the {ff} form.
+ *
+ * # Safety
+ * `fields` is null or points to `count` readable fields; `data` is null or points to
+ * `data_length` readable bytes; `out` is null or points to `capacity` writable bytes; `length`
+ * is null or writable.
+ */
+enum ZmidiStatus zmidi_mmc_write_responses(uint8_t device_id,
+                                           const struct ZmidiMmcField *fields,
+                                           uintptr_t count,
+                                           const uint8_t *data,
+                                           uintptr_t data_length,
+                                           uint8_t *out,
+                                           uintptr_t capacity,
+                                           uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MMC_TRANSPORT))
+/**
+ * Writes the name and data pairs of `count` Information Fields, for the data of a WRITE
+ * command, with the rules of [`zmidi_mmc_write_responses`] (REQ-FFI-SX-008).
+ *
+ * # Safety
+ * `fields` is null or points to `count` readable fields; `data` is null or points to
+ * `data_length` readable bytes; `out` is null or points to `capacity` writable bytes; `length`
+ * is null or writable.
+ */
+enum ZmidiStatus zmidi_mmc_write_fields(const struct ZmidiMmcField *fields,
+                                        uintptr_t count,
+                                        const uint8_t *data,
+                                        uintptr_t data_length,
+                                        uint8_t *out,
+                                        uintptr_t capacity,
+                                        uintptr_t *length);
+#endif
 
 #if defined(ZMIDI_UMP)
 /**

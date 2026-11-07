@@ -1889,3 +1889,321 @@ fn ffi_check_has_the_midi1_firmware() {
         "fw_midi1 symbol check"
     );
 }
+
+/// REQ-FFI-SX-001 to REQ-FFI-SX-009, REQ-FFI-MIDI1-016: the C ABI of zmidi-sysex and of the GM
+/// receiver gives the results of the Rust types.
+#[cfg(feature = "midi1")]
+mod sysex {
+    use proptest::prelude::*;
+    use zmidi::midi1::*;
+    use zmidi::status::ZmidiStatus;
+    use zmidi::sysex::*;
+    use zmidi_sysex::{
+        DeviceControl, GeneralMidi, InfoField, InfoFields, InquiryMessage, MmcCommand, MmcMessage,
+        MtcGenerator, MtcReader, MtcTime, Sysex, SysexId, TimeCodeType, TuningMessage, Universal,
+    };
+
+    fn universal(bytes: &[u8]) -> Option<Universal<'_>> {
+        Universal::parse(&Sysex::parse(bytes).ok()?).ok()?
+    }
+
+    /// A Universal message with a header, a Sub-ID#1 of a part and random data.
+    fn message() -> impl Strategy<Value = Vec<u8>> {
+        (
+            any::<bool>(),
+            0u8..0x80,
+            prop::sample::select(vec![0x01u8, 0x04, 0x06, 0x08, 0x09]),
+            proptest::collection::vec(0u8..0x80, 0..24),
+        )
+            .prop_map(|(rt, dev, sub1, data)| {
+                let mut v = vec![0xF0, if rt { 0x7F } else { 0x7E }, dev, sub1];
+                v.extend(data);
+                v.push(0xF7);
+                v
+            })
+    }
+
+    #[test]
+    fn prop_sysex_parse_equals_rust() {
+        proptest!(|(bytes in proptest::collection::vec(prop_oneof![0u8..0x80, Just(0xF0u8), Just(0xF7u8), any::<u8>()], 0..20))| {
+            let mut c = ZmidiSysex { kind: 9, manufacturer: [9; 3], device_id: 0, sub_id1: 0, sub_id2: 0, has_sub_id2: false, data_offset: 0, data_length: 0 };
+            let got = unsafe { zmidi_sysex_parse(bytes.as_ptr(), bytes.len(), &mut c) };
+            let want = Sysex::parse(&bytes).ok().and_then(|s| match s.id {
+                SysexId::Manufacturer(id) => Some((ZmidiSysexClass::Manufacturer as u32, id.to_midi1(), None, s.data)),
+                SysexId::NonCommercial => Some((ZmidiSysexClass::NonCommercial as u32, [0; 3], None, s.data)),
+                _ => Universal::parse(&s).ok().flatten().map(|u| {
+                    let k = if u.real_time { ZmidiSysexClass::RealTime } else { ZmidiSysexClass::NonRealTime };
+                    (k as u32, [0; 3], Some((u.device_id, u.sub_id1, u.sub_id2)), u.data)
+                }),
+            });
+            match want {
+                None => prop_assert_eq!(got, ZmidiStatus::InvalidArgument),
+                Some((kind, m, header, data)) => {
+                    prop_assert_eq!(got, ZmidiStatus::Ok);
+                    prop_assert_eq!((c.kind, c.manufacturer), (kind, m));
+                    if let Some((d, s1, s2)) = header {
+                        prop_assert_eq!((c.device_id, c.sub_id1, c.has_sub_id2.then_some(c.sub_id2)), (d, s1, s2));
+                    }
+                    let at = c.data_offset as usize;
+                    prop_assert_eq!(&bytes[at..at + c.data_length as usize], data);
+                }
+            }
+        });
+    }
+
+    /// The status class of a Rust part reader result (REQ-FFI-SX-002).
+    fn class<T>(r: &Option<Result<Option<T>, zmidi_sysex::SysexError>>) -> ZmidiStatus {
+        match r {
+            Some(Ok(Some(_))) => ZmidiStatus::Ok,
+            Some(Ok(None)) => ZmidiStatus::NoPending,
+            _ => ZmidiStatus::InvalidArgument,
+        }
+    }
+
+    #[test]
+    fn prop_sysex_parts_equal_rust() {
+        proptest!(|(bytes in message())| {
+            let u = universal(&bytes);
+            let (p, n) = (bytes.as_ptr(), bytes.len());
+            let mut out = [0u8; 600];
+            let mut len = 0usize;
+            // Inquiry: the status class, and the responder against zmidi_sysex::respond.
+            let want = u.as_ref().map(InquiryMessage::from_universal);
+            let (mut reply, mut dev) = (false, 0u8);
+            let mut id = ZmidiIdentity { manufacturer: [0x41, 0, 0], family: 1, member: 2, revision: [0, 0, 0, 1] };
+            prop_assert_eq!(unsafe { zmidi_inquiry_read(p, n, &mut reply, &mut dev, &mut id) }, class(&want));
+            let ident = zmidi_sysex::Identity::new(zmidi_ump::ManufacturerId::from_midi1(&[0x41]).unwrap(), 1, 2, [0, 0, 0, 1]).unwrap();
+            let c_id = ZmidiIdentity { manufacturer: [0x41, 0, 0], family: 1, member: 2, revision: [0, 0, 0, 1] };
+            let got = unsafe { zmidi_inquiry_respond(p, n, 0x10, &c_id, out.as_mut_ptr(), out.len(), &mut len) };
+            let mut rust = [0u8; 600];
+            match want {
+                Some(Ok(Some(m))) => match zmidi_sysex::respond(&m, 0x10, &ident, &mut rust) {
+                    Ok(Some(k)) => { prop_assert_eq!(got, ZmidiStatus::Ok); prop_assert_eq!(&out[..len], &rust[..k]); }
+                    _ => prop_assert_eq!(got, ZmidiStatus::NoPending),
+                },
+                ref w => prop_assert_eq!(got, class(w)),
+            }
+            // General MIDI and Device Control: the status class and the values.
+            let want = u.as_ref().map(GeneralMidi::from_universal);
+            let (mut d, mut cmd) = (0u8, 0u8);
+            prop_assert_eq!(unsafe { zmidi_gm_system_read(p, n, &mut d, &mut cmd) }, class(&want));
+            if let Some(Ok(Some(m))) = want {
+                prop_assert_eq!((d, cmd), (m.device_id, m.command.into_bits()));
+            }
+            let want = u.as_ref().map(DeviceControl::from_universal);
+            let mut dc = ZmidiDeviceControl { kind: 9, device_id: 0, value: 0 };
+            prop_assert_eq!(unsafe { zmidi_device_control_read(p, n, &mut dc) }, class(&want));
+            if let Some(Ok(Some(m))) = want {
+                prop_assert_eq!(unsafe { zmidi_device_control_write(&dc, out.as_mut_ptr(), out.len(), &mut len) }, ZmidiStatus::Ok);
+                let k = m.write(&mut rust).unwrap();
+                prop_assert_eq!(&out[..len], &rust[..k]);
+            }
+            // MIDI Tuning: the status class, the kind and the notes.
+            let want = u.as_ref().map(TuningMessage::from_universal);
+            let mut t = core::mem::MaybeUninit::<ZmidiTuning>::zeroed();
+            let mut notes = [ZmidiTuningNote { key: 0, word: ZmidiFrequencyWord { semitone: 0, fraction: 0 } }; 128];
+            let got = unsafe { zmidi_tuning_read(p, n, t.as_mut_ptr(), notes.as_mut_ptr(), notes.len()) };
+            prop_assert_eq!(got, class(&want));
+            if let Some(Ok(Some(TuningMessage::NoteChange { changes, .. }))) = want {
+                let t = unsafe { t.assume_init() };
+                prop_assert_eq!(t.count as usize, changes.len());
+                for (c, (k, w)) in notes.iter().zip(changes) {
+                    prop_assert_eq!((c.key, c.word.semitone, c.word.fraction), (k, w.semitone, w.fraction));
+                }
+            }
+        });
+    }
+
+    fn c_time(t: MtcTime) -> ZmidiMtcTime {
+        ZmidiMtcTime {
+            hours: t.hours,
+            minutes: t.minutes,
+            seconds: t.seconds,
+            frames: t.frames,
+            rate: t.rate.into_bits(),
+        }
+    }
+
+    #[test]
+    fn prop_mtc_equals_rust() {
+        proptest!(|(bytes in proptest::collection::vec(0u8..0x80, 0..60), full_at in 0usize..60, ops in proptest::collection::vec(0u8..5, 0..40), start in 0u32..2_000_000, rate in 0u8..4)| {
+            // The reader: each event and the state after each byte.
+            let mut c = ZmidiMtcReader { _opaque: [0; ZMIDI_MTC_READER_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_mtc_reader_init(&mut c) }, ZmidiStatus::Ok);
+            let mut r = MtcReader::new();
+            let time = MtcTime::from_frame_count(start, TimeCodeType::from_bits(rate));
+            for (i, &b) in bytes.iter().enumerate() {
+                if i == full_at {
+                    prop_assert_eq!(unsafe { zmidi_mtc_reader_full_message(&mut c, &c_time(time)) }, ZmidiStatus::Ok);
+                    r.full_message(&zmidi_sysex::FullMessage { device_id: 0x7F, time });
+                }
+                let mut e = core::mem::MaybeUninit::<ZmidiMtcEvent>::zeroed();
+                prop_assert_eq!(unsafe { zmidi_mtc_reader_receive(&mut c, b, e.as_mut_ptr()) }, ZmidiStatus::Ok);
+                let (e, w) = (unsafe { e.assume_init() }, r.receive(b));
+                prop_assert_eq!((e.piece, e.boundary, e.has_sequence), (w.piece, w.boundary, w.sequence.is_some()));
+                if let Some(s) = w.sequence {
+                    prop_assert_eq!((e.raw, e.current, e.discontinuity), (c_time(s.raw), c_time(s.current), s.discontinuity));
+                }
+                let mut info = core::mem::MaybeUninit::<ZmidiMtcReaderInfo>::zeroed();
+                prop_assert_eq!(unsafe { zmidi_mtc_reader_info(&mut c, info.as_mut_ptr()) }, ZmidiStatus::Ok);
+                let info = unsafe { info.assume_init() };
+                prop_assert_eq!((info.locked, info.running, info.has_time), (r.is_locked(), r.is_running(), r.time().is_some()));
+                prop_assert_eq!(info.time, r.time().map_or(c_time(MtcTime::from_frame_count(0, TimeCodeType::Fps24)), c_time));
+            }
+            // The generator: each byte after random direction, run and locate changes.
+            let mut g = ZmidiMtcGenerator { _opaque: [0; ZMIDI_MTC_GENERATOR_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_mtc_generator_init(&mut g, &c_time(time), false) }, ZmidiStatus::Ok);
+            let mut w = MtcGenerator::new(time, zmidi_sysex::Direction::Forward);
+            for op in ops {
+                match op {
+                    0 => { unsafe { assert_eq!(zmidi_mtc_generator_set_direction(&mut g, true), ZmidiStatus::Ok) }; w.set_direction(zmidi_sysex::Direction::Reverse); }
+                    1 => { unsafe { assert_eq!(zmidi_mtc_generator_set_direction(&mut g, false), ZmidiStatus::Ok) }; w.set_direction(zmidi_sysex::Direction::Forward); }
+                    2 => { unsafe { assert_eq!(zmidi_mtc_generator_set_running(&mut g, false), ZmidiStatus::Ok) }; w.set_running(false); }
+                    3 => { unsafe { assert_eq!(zmidi_mtc_generator_set_running(&mut g, true), ZmidiStatus::Ok) }; w.set_running(true); }
+                    _ => {}
+                }
+                let mut b = 0u8;
+                let got = unsafe { zmidi_mtc_generator_next(&mut g, &mut b) };
+                match w.next_byte() {
+                    Some(x) => { prop_assert_eq!(got, ZmidiStatus::Ok); prop_assert_eq!(b, x); }
+                    None => prop_assert_eq!(got, ZmidiStatus::NoPending),
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn prop_mmc_equals_rust() {
+        proptest!(|(string in proptest::collection::vec(prop_oneof![0u8..0x10, 0x40u8..0x50, 0u8..0x80], 1..30))| {
+            // The command reader: each command kind and the error, at the same positions.
+            let u = Universal { real_time: true, device_id: 0x7F, sub_id1: 0x06, sub_id2: None, data: &string };
+            let Ok(Some(MmcMessage::Commands { commands, .. })) = MmcMessage::from_universal(&u) else { panic!() };
+            let mut at = 0usize;
+            for want in commands {
+                let mut c = core::mem::MaybeUninit::<ZmidiMmcCommand>::zeroed();
+                let got = unsafe { zmidi_mmc_next_command(string.as_ptr(), string.len(), &mut at, c.as_mut_ptr()) };
+                match want {
+                    Err(_) => { prop_assert_eq!(got, ZmidiStatus::InvalidArgument); prop_assert_eq!(at, string.len()); }
+                    Ok(w) => {
+                        prop_assert_eq!(got, ZmidiStatus::Ok);
+                        let c = unsafe { c.assume_init() };
+                        let kind = match w {
+                            MmcCommand::Write(_) => ZmidiMmcCommandKind::Write,
+                            MmcCommand::LocateField { .. } => ZmidiMmcCommandKind::LocateField,
+                            MmcCommand::LocateTarget(_) => ZmidiMmcCommandKind::LocateTarget,
+                            MmcCommand::Move { .. } => ZmidiMmcCommandKind::Move,
+                            MmcCommand::Other { .. } => ZmidiMmcCommandKind::Other,
+                            _ => ZmidiMmcCommandKind::Stop,
+                        };
+                        if kind != ZmidiMmcCommandKind::Stop {
+                            prop_assert_eq!(c.kind, kind as u32);
+                        }
+                        // A command read back writes the same bytes as the Rust writer.
+                        let (mut out, mut len, mut rust) = ([0u8; 64], 0usize, [0u8; 64]);
+                        let got = unsafe { zmidi_mmc_write_commands(0x7F, &c, 1, string.as_ptr(), string.len(), out.as_mut_ptr(), out.len(), &mut len) };
+                        match zmidi_sysex::write_commands(&mut rust, 0x7F, &[w]) {
+                            Ok(k) => { prop_assert_eq!(got, ZmidiStatus::Ok); prop_assert_eq!(&out[..len], &rust[..k]); }
+                            Err(_) => prop_assert_eq!(got, ZmidiStatus::InvalidArgument),
+                        }
+                    }
+                }
+            }
+            let mut c = core::mem::MaybeUninit::<ZmidiMmcCommand>::zeroed();
+            prop_assert_eq!(unsafe { zmidi_mmc_next_command(string.as_ptr(), string.len(), &mut at, c.as_mut_ptr()) }, ZmidiStatus::NoPending);
+            // The Information Field reader.
+            let mut at = 0usize;
+            for want in InfoFields::new(&string) {
+                let mut f = core::mem::MaybeUninit::<ZmidiMmcField>::zeroed();
+                let got = unsafe { zmidi_mmc_next_field(string.as_ptr(), string.len(), &mut at, f.as_mut_ptr()) };
+                match want {
+                    Err(_) => prop_assert_eq!(got, ZmidiStatus::InvalidArgument),
+                    Ok(w) => {
+                        prop_assert_eq!(got, ZmidiStatus::Ok);
+                        let f = unsafe { f.assume_init() };
+                        let kind = match w {
+                            InfoField::TimeCode { .. } => ZmidiMmcFieldKind::TimeCode,
+                            InfoField::Short { .. } => ZmidiMmcFieldKind::Short,
+                            InfoField::Other { .. } => ZmidiMmcFieldKind::Other,
+                        };
+                        prop_assert_eq!(f.kind, kind as u32);
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn prop_gm_receiver_equals_rust() {
+        use zmidi_io::{GmConfig, GmLevel, GmReceiver};
+        proptest!(|(capable in any::<u16>(), mono in any::<bool>(), steps in proptest::collection::vec((0u8..4, 0u8..16, 0u8..0x80, 0u8..0x80), 0..40))| {
+            let mut c = ZmidiGmReceiver { _opaque: [0; ZMIDI_GM_RECEIVER_WORDS] };
+            prop_assert_eq!(unsafe { zmidi_gm_receiver_init(&mut c, &ZmidiGmConfig { rhythm_capable: capable, rhythm_mono: mono }) }, ZmidiStatus::Ok);
+            let mut r = GmReceiver::new(GmConfig::new(capable, mono));
+            for (op, ch, a, b) in steps {
+                let channel = zmidi_ump::Channel::from_bits(ch);
+                match op {
+                    0 => {
+                        let bank = u16::from(a) << 7 | u16::from(b);
+                        prop_assert_eq!(unsafe { zmidi_gm_receiver_program(&mut c, ch, true, bank) }, ZmidiStatus::Ok);
+                        r.program(channel, Some(bank));
+                    }
+                    1 => {
+                        let level = u32::from(a % 3);
+                        prop_assert_eq!(unsafe { zmidi_gm_receiver_reset(&mut c, level) }, ZmidiStatus::Ok);
+                        r.reset([GmLevel::Off, GmLevel::Gm1, GmLevel::Gm2][level as usize]);
+                    }
+                    _ => {
+                        // A Control Change (also a Channel Mode message) or a Note On.
+                        let status = if op == 2 { 0xB0 } else { 0x90 } | ch;
+                        let word = 0x2000_0000 | u32::from(status) << 16 | u32::from(a | (0x78 * u8::from(op == 2 && a & 1 == 0))) << 8 | u32::from(b);
+                        let m = Midi1ChannelVoiceMessageAt::of(word);
+                        let mut act = core::mem::MaybeUninit::<ZmidiModeAction>::zeroed();
+                        prop_assert_eq!(unsafe { zmidi_gm_receiver_receive(&mut c, &m.0, act.as_mut_ptr()) }, ZmidiStatus::Ok);
+                        let want = r.receive(&m.1);
+                        let act = unsafe { act.assume_init() };
+                        let kind = match want {
+                            zmidi_io::ModeAction::Ignore => 0,
+                            zmidi_io::ModeAction::Voice { .. } => 1,
+                            zmidi_io::ModeAction::Global => 2,
+                            zmidi_io::ModeAction::AllNotesOff { .. } => 3,
+                            zmidi_io::ModeAction::AllSoundOff { .. } => 4,
+                            zmidi_io::ModeAction::ResetAllControllers { .. } => 5,
+                            zmidi_io::ModeAction::LocalControl { .. } => 6,
+                            zmidi_io::ModeAction::ModeChange { .. } => 7,
+                        };
+                        prop_assert_eq!(act.kind, kind);
+                    }
+                }
+                let mut info = core::mem::MaybeUninit::<ZmidiGmInfo>::zeroed();
+                prop_assert_eq!(unsafe { zmidi_gm_receiver_info(&mut c, info.as_mut_ptr()) }, ZmidiStatus::Ok);
+                let info = unsafe { info.assume_init() };
+                let mono_mask = (0..16u8).fold(0u16, |m, n| m | u16::from(r.is_mono(zmidi_ump::Channel::from_bits(n))) << n);
+                prop_assert_eq!((info.rhythm_channels, info.mono_channels), (r.rhythm_channels(), mono_mask));
+            }
+        });
+    }
+
+    /// A C message and the Rust message of one MIDI 1.0 Channel Voice word.
+    struct Midi1ChannelVoiceMessageAt(ZmidiMidi1Message, zmidi_ump::Midi1ChannelVoiceMessage);
+
+    impl Midi1ChannelVoiceMessageAt {
+        fn of(w: u32) -> Self {
+            let c = ZmidiMidi1Message {
+                kind: ZmidiMidi1Kind::ChannelVoice as u32,
+                status: (w >> 16) as u8,
+                data1: (w >> 8) as u8 & 0x7F,
+                data2: w as u8 & 0x7F,
+                length: 0,
+            };
+            Self(c, zmidi_ump::Midi1ChannelVoiceMessage::parse(&[w]).unwrap())
+        }
+    }
+
+    #[test]
+    fn sysex_storage_holds_the_rust_types() {
+        use core::mem::size_of;
+        assert!(zmidi_mtc_generator_size() <= size_of::<ZmidiMtcGenerator>());
+        assert!(zmidi_mtc_reader_size() <= size_of::<ZmidiMtcReader>());
+        assert!(zmidi_gm_receiver_size() <= size_of::<ZmidiGmReceiver>());
+    }
+}

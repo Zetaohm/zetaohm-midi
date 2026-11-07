@@ -24,8 +24,8 @@ function fakeAbi(leb: readonly number[]): Uint8Array {
 
 describe("init", () => {
   // Before the other tests: a refused WASM file leaves the package not set up.
-  test("refuses a WASM file of C ABI 0.1 to 0.9 or 1.x", () => {
-    expect(() => initSync(fakeAbi([0x01]))).toThrow(MidiError); // 0.1: below ABI_MINOR 10
+  test("refuses a WASM file of C ABI 0.1 to 0.10 or 1.x", () => {
+    expect(() => initSync(fakeAbi([0x01]))).toThrow(MidiError); // 0.1: below ABI_MINOR 11
     expect(() => initSync(fakeAbi([0x02]))).toThrow(MidiError); // 0.2: no Property Exchange engine
     expect(() => initSync(fakeAbi([0x03]))).toThrow(MidiError); // 0.3: no zmidi_ci_pe_end
     expect(() => initSync(fakeAbi([0x04]))).toThrow(MidiError); // 0.4: no USB descriptor writer
@@ -33,6 +33,7 @@ describe("init", () => {
     expect(() => initSync(fakeAbi([0x07]))).toThrow(MidiError); // 0.7: no MIDI 1.0 parts
     expect(() => initSync(fakeAbi([0x08]))).toThrow(MidiError); // 0.8: no sync receiver
     expect(() => initSync(fakeAbi([0x09]))).toThrow(MidiError); // 0.9: no MPE
+    expect(() => initSync(fakeAbi([0x0a]))).toThrow(MidiError); // 0.10: no GM receiver and sysex parts
     expect(() => initSync(fakeAbi([0x82, 0x80, 0x04]))).toThrow(MidiError); // 1.2: another major
     expect(() => abiVersion()).toThrow(MidiError);
   });

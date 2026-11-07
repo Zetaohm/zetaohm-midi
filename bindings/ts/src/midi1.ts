@@ -261,6 +261,21 @@ const MODE_ACTION = layout([
   ["alternate", "bool"],
 ]);
 
+/** Reads the C mode action at `pa`. */
+function readModeAction(pa: number): ModeAction {
+  const v = view();
+  const channel = v.getUint8(pa + MODE_ACTION.off.channel);
+  const voice = v.getUint8(pa + MODE_ACTION.off.voice);
+  return {
+    kind: MODE_KINDS[v.getUint32(pa + MODE_ACTION.off.kind, true)] ?? "ignore",
+    channel: channel === 0xff ? null : channel,
+    voice: voice === 0xff ? null : voice,
+    on: v.getUint8(pa + MODE_ACTION.off.on) !== 0,
+    changed: v.getUint8(pa + MODE_ACTION.off.changed) !== 0,
+    alternate: v.getUint8(pa + MODE_ACTION.off.alternate) !== 0,
+  };
+}
+
 const MODE_INFO = layout([
   ["mode", "u8"],
   ["requested_mode", "u8"],
@@ -300,17 +315,7 @@ export class ModeState {
     const [pm, pa] = this.#b.carve([MESSAGE.size, MODE_ACTION.size]);
     writeMessage(pm, message);
     check(fn("zmidi_mode_receive")(this.#b.main, pm, pa), "receive");
-    const v = view();
-    const channel = v.getUint8(pa + MODE_ACTION.off.channel);
-    const voice = v.getUint8(pa + MODE_ACTION.off.voice);
-    return {
-      kind: MODE_KINDS[v.getUint32(pa + MODE_ACTION.off.kind, true)] ?? "ignore",
-      channel: channel === 0xff ? null : channel,
-      voice: voice === 0xff ? null : voice,
-      on: v.getUint8(pa + MODE_ACTION.off.on) !== 0,
-      changed: v.getUint8(pa + MODE_ACTION.off.changed) !== 0,
-      alternate: v.getUint8(pa + MODE_ACTION.off.alternate) !== 0,
-    };
+    return readModeAction(pa);
   }
 
   /** The System Reset action: Omni On, Poly and Local On; the Basic Channel and M stay. */
@@ -459,6 +464,14 @@ export class ControllerState {
   /** The Reset All Controllers action of the program (a ModeState action or General MIDI System On). */
   resetAllControllers(): void {
     check(fn("zmidi_controllers_reset")(this.#b.main), "resetAllControllers");
+  }
+
+  /**
+   * The GM reset of this state for `channel` (0 to 15): the GM2 defaults, the Rhythm bank on channel 10
+   * and the Melody bank on the others (RP-024 3.3, 4.9.1).
+   */
+  gmReset(channel: number): void {
+    check(fn("zmidi_gm_reset_controller_state")(this.#b.main, int("channel", channel, 255)), "gmReset");
   }
 
   /** The held 14-bit bank, or null before the first Bank Select. */
@@ -1311,4 +1324,155 @@ export class MpeNoteAllocator {
   free(): void {
     this.#b.release();
   }
+}
+
+// --- General MIDI (RP-024) ---
+
+/** The General MIDI level. */
+export type GmLevel = "off" | "gm1" | "gm2";
+const GM_LEVELS: readonly GmLevel[] = ["off", "gm1", "gm2"];
+
+/** The configuration of a GM receiver. */
+export interface GmReceiverOptions {
+  /** Bit n: the channel with packet value n can be a Rhythm Channel (default channels 10 and 11). */
+  readonly rhythmCapable?: number;
+  /** Mono On with M = 1 sets Mode 4 on a Rhythm Channel too (default false). */
+  readonly rhythmMono?: boolean;
+}
+
+const GM_CONFIG = layout([
+  ["rhythm_capable", "u16"],
+  ["rhythm_mono", "bool"],
+]);
+const GM_INFO = layout([
+  ["level", "u32"],
+  ["rhythm_channels", "u16"],
+  ["mono_channels", "u16"],
+  ["config", GM_CONFIG],
+]);
+
+/**
+ * The General MIDI state of the 16 channels of one input (RP-024 2.4, 2.5, 3.5): the kind of each
+ * channel (melody or rhythm), Mode 3 or 4, and the GM level.
+ */
+export class GmReceiver {
+  readonly #b = new Blocks(this);
+
+  constructor(options: GmReceiverOptions = {}) {
+    const p = this.#b.add(alloc(sizeOf("zmidi_gm_receiver_size")));
+    scoped([GM_CONFIG.size], (c) => {
+      const v = view();
+      v.setUint16(c + GM_CONFIG.off.rhythm_capable, int("rhythmCapable", options.rhythmCapable ?? 0x0600, 0xffff), true);
+      v.setUint8(c + GM_CONFIG.off.rhythm_mono, options.rhythmMono ? 1 : 0);
+      check(fn("zmidi_gm_receiver_init")(p, c), "GmReceiver");
+    });
+  }
+
+  /** The GM reset of a GM1 ("gm1") or GM2 ("gm2") System On, or GM System Off ("off"). */
+  reset(level: GmLevel): void {
+    const n = GM_LEVELS.indexOf(level);
+    if (n < 0) {
+      throw new InvalidValueError("reset: the level is off, gm1 or gm2");
+    }
+    check(fn("zmidi_gm_receiver_reset")(this.#b.main, n), "reset");
+  }
+
+  /** GM System Off: the level "off"; no other state changes. */
+  systemOff(): void {
+    this.reset("off");
+  }
+
+  /** The program selection of `channel` with the bank that its controller state holds (null: no bank). */
+  program(channel: number, bank: number | null): void {
+    const args = [int("channel", channel, 255), bank === null ? 0 : 1, int("bank", bank ?? 0, 0xffff)] as const;
+    check(fn("zmidi_gm_receiver_program")(this.#b.main, ...args), "program");
+  }
+
+  /** The action of one Channel Voice message by the GM2 Channel Mode rules. */
+  receive(message: Midi1Message): ModeAction {
+    const [pm, pa] = this.#b.carve([MESSAGE.size, MODE_ACTION.size]);
+    writeMessage(pm, message);
+    check(fn("zmidi_gm_receiver_receive")(this.#b.main, pm, pa), "receive");
+    return readModeAction(pa);
+  }
+
+  #info(): { level: GmLevel; rhythm: number; mono: number } {
+    return scoped([GM_INFO.size], (i) => {
+      check(fn("zmidi_gm_receiver_info")(this.#b.main, i), "info");
+      const v = view();
+      return {
+        level: GM_LEVELS[v.getUint32(i + GM_INFO.off.level, true)] ?? "off",
+        rhythm: v.getUint16(i + GM_INFO.off.rhythm_channels, true),
+        mono: v.getUint16(i + GM_INFO.off.mono_channels, true),
+      };
+    });
+  }
+
+  /** "melody" or "rhythm". */
+  kind(channel: number): "melody" | "rhythm" {
+    return (this.#info().rhythm >> int("channel", channel, 15)) & 1 ? "rhythm" : "melody";
+  }
+
+  /** True when `channel` is in Mode 4 (Omni Off, Mono), false in Mode 3. */
+  isMono(channel: number): boolean {
+    return ((this.#info().mono >> int("channel", channel, 15)) & 1) !== 0;
+  }
+
+  /** The Rhythm Channels: bit n is the channel with packet value n. */
+  get rhythmChannels(): number {
+    return this.#info().rhythm;
+  }
+
+  /** The GM level. */
+  get level(): GmLevel {
+    return this.#info().level;
+  }
+
+  /** Frees the WASM memory of the receiver now. */
+  free(): void {
+    this.#b.release();
+  }
+}
+
+/** The GM2 default of controller 0 to 127, or null (RP-024 3.3). */
+export function gm2ControllerDefault(controller: number): number | null {
+  return scoped([1, 1], (has, value) => {
+    check(fn("zmidi_gm2_controller_default")(int("controller", controller, 255), has, value), "gm2ControllerDefault");
+    const v = view();
+    return v.getUint8(has) !== 0 ? v.getUint8(value) : null;
+  });
+}
+
+/** True when GM2 recommends that a Rhythm Channel does not respond to `controller` (RP-024 3.3). */
+export function rhythmIgnoresController(controller: number): boolean {
+  return scoped([1], (r) => {
+    check(fn("zmidi_gm_rhythm_ignores_controller")(int("controller", controller, 255), r), "rhythmIgnoresController");
+    return view().getUint8(r) !== 0;
+  });
+}
+
+/** True when GM2 recommends that a Rhythm Channel does not respond to `parameter` (RP-024 3.4). */
+export function rhythmIgnoresParameter(parameter: Parameter): boolean {
+  return scoped([PARAMETER.size, 1], (pp, r) => {
+    writeParameter(pp, parameter);
+    check(fn("zmidi_gm_rhythm_ignores_parameter")(pp, r), "rhythmIgnoresParameter");
+    return view().getUint8(r) !== 0;
+  });
+}
+
+/** True when GM2 recommends that a Rhythm Channel does not respond to `message` (RP-024 3.3, 3.6, 3.7). */
+export function rhythmIgnoresMessage(message: Midi1Message): boolean {
+  return scoped([MESSAGE.size, 1], (pm, r) => {
+    writeMessage(pm, message);
+    check(fn("zmidi_gm_rhythm_ignores_message")(pm, r), "rhythmIgnoresMessage");
+    return view().getUint8(r) !== 0;
+  });
+}
+
+/** The Modulation Depth Range of a 14-bit RPN 00H 05H value in hundredths of a cent (RP-024 3.4.4). */
+export function modulationDepthRange(value: number): number {
+  return scoped([4], (p) => {
+    check(fn("zmidi_modulation_depth_range")(int("value", value, 0xffff), p), "modulationDepthRange");
+    return view().getUint32(p, true);
+  });
 }

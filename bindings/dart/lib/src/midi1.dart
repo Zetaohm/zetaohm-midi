@@ -265,6 +265,15 @@ final class ModeAction {
       'alternate: $alternate)';
 }
 
+ModeAction _modeAction((int, int, int, bool, bool, bool) a) => ModeAction._(
+  ModeActionKind.values[a.$1],
+  a.$2 == 0xFF ? null : a.$2,
+  a.$3 == 0xFF ? null : a.$3,
+  a.$4,
+  a.$5,
+  a.$6,
+);
+
 /// The MIDI 1.0 receiver mode state of one instrument (Modes 1 to 4, M1 pp. 20 to 26).
 final class ModeState {
   /// A mode state in Mode 1 with Local Control on. [implemented] lists the mode numbers that the
@@ -301,15 +310,7 @@ final class ModeState {
   /// Takes one Channel Voice message; gives its action.
   ModeAction receive(Midi1Message message) {
     checkFreed(_freed, this);
-    final a = _b.receive(message._raw);
-    return ModeAction._(
-      ModeActionKind.values[a.$1],
-      a.$2 == 0xFF ? null : a.$2,
-      a.$3 == 0xFF ? null : a.$3,
-      a.$4,
-      a.$5,
-      a.$6,
-    );
+    return _modeAction(_b.receive(message._raw));
   }
 
   /// The System Reset action: Omni On, Poly and Local On; the Basic Channel and M stay.
@@ -468,6 +469,13 @@ final class ControllerState {
   void resetAllControllers() {
     checkFreed(_freed, this);
     _b.reset();
+  }
+
+  /// The GM reset of this state for [channel] (0 to 15): the GM2 defaults, the Rhythm bank on
+  /// channel 10 and the Melody bank on the others (RP-024 3.3, 4.9.1).
+  void gmReset(int channel) {
+    checkFreed(_freed, this);
+    _b.gmReset(checkInt('channel', channel, 15));
   }
 
   /// The held 14-bit bank, or null before the first Bank Select.
@@ -1405,3 +1413,126 @@ final class MpeNoteAllocator {
     }
   }
 }
+
+// --- General MIDI (RP-024) ---
+
+/// The General MIDI level (the order of ZmidiGmLevel).
+enum GmLevel {
+  /// GM System Off.
+  off,
+
+  /// General MIDI Level 1.
+  gm1,
+
+  /// General MIDI 2.
+  gm2,
+}
+
+/// The kind of a channel of a GM receiver.
+enum GmChannelKind {
+  /// A Melody Channel.
+  melody,
+
+  /// A Rhythm Channel.
+  rhythm,
+}
+
+/// The default Rhythm Channel set of a GM receiver: channels 10 and 11 (bits 9 and 10).
+const gmRhythmCapableDefault = 0x0600;
+
+/// The General MIDI state of the 16 channels of one input (RP-024 2.4, 2.5, 3.5): the kind of each
+/// channel (melody or rhythm), Mode 3 or 4, and the GM level.
+final class GmReceiver {
+  /// A receiver at the GM2 level. Bit n of [rhythmCapable] is set when the channel with packet
+  /// value n can be a Rhythm Channel; with [rhythmMono], Mono On with M = 1 sets Mode 4 on a
+  /// Rhythm Channel too.
+  GmReceiver({
+    int rhythmCapable = gmRhythmCapableDefault,
+    bool rhythmMono = false,
+  }) : _b = be.GmCore(
+         checkInt('rhythmCapable', rhythmCapable, 0xFFFF),
+         rhythmMono,
+       );
+
+  final be.GmCore _b;
+  bool _freed = false;
+
+  /// The GM reset of a GM1 or GM2 System On, or GM System Off ([GmLevel.off]).
+  void reset(GmLevel level) {
+    checkFreed(_freed, this);
+    _b.reset(level.index);
+  }
+
+  /// GM System Off: the level off; no other state changes.
+  void systemOff() => reset(GmLevel.off);
+
+  /// The program selection of [channel] with the bank that its controller state holds (null: no
+  /// bank).
+  void program(int channel, int? bank) {
+    checkFreed(_freed, this);
+    _b.program(
+      checkInt('channel', channel, 15),
+      bank == null ? null : checkInt('bank', bank, 0xFFFF),
+    );
+  }
+
+  /// The action of one Channel Voice message by the GM2 Channel Mode rules.
+  ModeAction receive(Midi1Message message) {
+    checkFreed(_freed, this);
+    return _modeAction(_b.receive(message._raw));
+  }
+
+  (int, int, int) get _info {
+    checkFreed(_freed, this);
+    return _b.info();
+  }
+
+  /// The kind of [channel] (0 to 15).
+  GmChannelKind kind(int channel) =>
+      (_info.$2 >> checkInt('channel', channel, 15)) & 1 != 0
+      ? GmChannelKind.rhythm
+      : GmChannelKind.melody;
+
+  /// True when [channel] is in Mode 4 (Omni Off, Mono), false in Mode 3.
+  bool isMono(int channel) =>
+      (_info.$3 >> checkInt('channel', channel, 15)) & 1 != 0;
+
+  /// The Rhythm Channels: bit n is the channel with packet value n.
+  int get rhythmChannels => _info.$2;
+
+  /// The GM level.
+  GmLevel get level => GmLevel.values[_info.$1];
+
+  /// Frees the memory of the receiver now.
+  void free() {
+    if (!_freed) {
+      _freed = true;
+      _b.free();
+    }
+  }
+}
+
+/// The GM2 default of [controller] (0 to 127), or null (RP-024 3.3).
+int? gm2ControllerDefault(int controller) =>
+    be.gm2ControllerDefault(checkInt('controller', controller, 255));
+
+/// True when GM2 recommends that a Rhythm Channel does not respond to [controller] (RP-024 3.3).
+bool rhythmIgnoresController(int controller) =>
+    be.rhythmIgnoresController(checkInt('controller', controller, 255));
+
+/// True when GM2 recommends that a Rhythm Channel does not respond to [parameter] (RP-024 3.4).
+bool rhythmIgnoresParameter(Parameter parameter) => be.rhythmIgnoresParameter(
+  parameter.registered,
+  parameter.msb,
+  parameter.lsb,
+);
+
+/// True when GM2 recommends that a Rhythm Channel does not respond to [message] (RP-024 3.3, 3.6,
+/// 3.7).
+bool rhythmIgnoresMessage(Midi1Message message) =>
+    be.rhythmIgnoresMessage(message._raw);
+
+/// The Modulation Depth Range of a 14-bit RPN 00H 05H [value] in hundredths of a cent (RP-024
+/// 3.4.4).
+int modulationDepthRange(int value) =>
+    be.modulationDepthRange(checkInt('value', value, 0xFFFF));

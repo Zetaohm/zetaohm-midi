@@ -173,6 +173,14 @@ fn c_midi1() {
     run_c_defs("midi1", "midi1-on-midi1-only", midi1_staticlib(), &[]);
 }
 
+/// REQ-FFI-SX-010: the sysex parts through the header, with the vectors of the zmidi-sysex tests, on
+/// the staticlib with all parts and on the MIDI 1.0-only staticlib.
+#[test]
+fn c_sysex() {
+    run_c("sysex");
+    run_c_defs("sysex", "sysex-on-midi1-only", midi1_staticlib(), &[]);
+}
+
 /// REQ-FFI-ABI-004, REQ-FFI-ABI-006: the MIDI 1.0-only build: ZMIDI_MIDI1, the MIDI 1.0 Protocol
 /// only, the smaller reader storage.
 #[test]
@@ -260,6 +268,13 @@ fn header_compiles_as_c99_for_each_selection() {
         "ZMIDI_SYNC",
         "ZMIDI_ACTIVE_SENSING",
         "ZMIDI_MPE",
+        "ZMIDI_GM",
+        "ZMIDI_SYSEX",
+        "ZMIDI_INQUIRY",
+        "ZMIDI_DEVICE_CONTROL",
+        "ZMIDI_TUNING",
+        "ZMIDI_MTC",
+        "ZMIDI_MMC_TRANSPORT",
     ] {
         assert!(c99_compiles(&format!("h-{one}.c"), src, &[one]), "{one}");
     }

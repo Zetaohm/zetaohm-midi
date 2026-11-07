@@ -441,4 +441,53 @@ void main() {
     final tooLong = Midi1Reader(sysexCapacity: 0).feed([0xF0, 0xF7]).single;
     expect(() => Midi1Writer().write(tooLong), invalid);
   });
+
+  test('the GM receiver: RP-024 rules', () {
+    // 2.4: channel 10 is a Rhythm Channel at the start; a bank MSB 78H makes channel 11 one too.
+    final gm = GmReceiver();
+    expect(
+      [gm.level, gm.rhythmChannels, gm.kind(9), gm.kind(0)],
+      [GmLevel.gm2, 0x0200, GmChannelKind.rhythm, GmChannelKind.melody],
+    );
+    gm.program(10, 0x78 << 7);
+    expect([gm.kind(10), gm.rhythmChannels], [GmChannelKind.rhythm, 0x0600]);
+    // A program without a bank keeps the kind.
+    gm.program(10, null);
+    expect(gm.kind(10), GmChannelKind.rhythm);
+    // 3.5.6: Mono On with M = 1 gives Mode 4 on a Melody Channel, All Notes Off on a Rhythm
+    // Channel.
+    expect(gm.receive(cc(0x7E, 0x01)).kind, ModeActionKind.modeChange);
+    expect(gm.isMono(0), true);
+    expect(
+      gm.receive(Midi1Message(0xB9, 0x7E, 0x01)).kind,
+      ModeActionKind.allNotesOff,
+    );
+    // 4.9.2, 4.9.3: GM1 System On resets the channels; GM System Off gives the level off.
+    gm.reset(GmLevel.gm1);
+    expect(
+      [gm.level, gm.rhythmChannels, gm.isMono(0)],
+      [GmLevel.gm1, 0x0200, false],
+    );
+    gm.systemOff();
+    expect(gm.level, GmLevel.off);
+    // 3.3: the GM reset of a controller state holds the Rhythm bank on channel 10.
+    final s = ControllerState();
+    s.gmReset(9);
+    expect(s.bank, 0x78 << 7);
+    expect([gm2ControllerDefault(7), gm2ControllerDefault(120)], [100, null]);
+    expect(
+      [rhythmIgnoresController(1), rhythmIgnoresController(7)],
+      [true, false],
+    );
+    expect(rhythmIgnoresParameter(Parameter(0, 0)), true);
+    expect(rhythmIgnoresMessage(Midi1Message(0xE9, 0x00, 0x40)), true);
+    // 3.4.4: the GM2 default 00H 40H is 50 cents.
+    expect(modulationDepthRange(0x40), 5000);
+    final invalid = throwsA(isA<InvalidValueException>());
+    expect(() => modulationDepthRange(0x4000), invalid);
+    expect(() => gm.kind(16), invalid);
+    gm.free();
+    s.free();
+    expect(() => gm.level, throwsA(isA<RejectedException>()));
+  });
 }

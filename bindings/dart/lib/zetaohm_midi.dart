@@ -1,5 +1,6 @@
 /// MIDI 2.0 for Dart: UMP, MIDI-CI with Property Exchange, Network MIDI 2.0, BLE-MIDI, USB-MIDI,
-/// MIDI Clip Files and the MIDI 1.0 receiver states, through the zetaohm-midi C ABI (DEC-019): dart:ffi on the native
+/// MIDI Clip Files, the MIDI 1.0 receiver states and Universal System Exclusive with MIDI Time Code
+/// and MIDI Machine Control, through the zetaohm-midi C ABI (DEC-019): dart:ffi on the native
 /// platforms, the WASM build on the web (call [initWeb] first there).
 library;
 
@@ -13,5 +14,6 @@ export 'src/io.dart';
 export 'src/midi1.dart';
 export 'src/net.dart' hide netAuthSharedSecret, netAuthUser, newNetEvent;
 export 'src/pe.dart' hide PeHeader, newPeEvent, newPeSubscription;
+export 'src/sysex.dart';
 export 'src/ump.dart';
 export 'src/usb.dart';

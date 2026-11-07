@@ -1,6 +1,6 @@
-/* REQ-FFI-MIDI1-008: the messages, channel-mode, controllers, parameters, sync and active-sensing parts
- * through the header, with vectors from M1 v4.2.1, RP-015 and RP-018. The file needs only these parts
- * (ZMIDI_MIDI1). */
+/* REQ-FFI-MIDI1-008, REQ-FFI-MIDI1-016: the messages, channel-mode, controllers, parameters, sync,
+ * active-sensing, mpe and gm parts through the header, with vectors from M1 v4.2.1, RP-015, RP-018 and
+ * RP-024. The file needs only these parts (ZMIDI_MIDI1). */
 #ifndef ZMIDI_MIDI1
 #define ZMIDI_MIDI1
 #endif
@@ -417,6 +417,55 @@ static void test_storage(void) {
   CHECK(zmidi_abi_version() == (ZMIDI_ABI_MAJOR << 16 | ZMIDI_ABI_MINOR) && ZMIDI_ABI_MINOR >= 10);
 }
 
+static void test_gm(void) {
+  /* RP-024 2.4, 2.5, 3.5: channel 10 a Rhythm Channel at the start, the bank of a program
+   * selection, Mono On with M = 1 on a Melody and on a Rhythm Channel. */
+  ZmidiGmReceiver gm;
+  ZmidiGmConfig config = {ZMIDI_GM_RHYTHM_CAPABLE_DEFAULT, false};
+  ZmidiGmInfo info;
+  ZmidiModeAction a;
+  ZmidiMidi1Message m;
+  ZmidiControllerState cs;
+  ZmidiParameter rpn = {true, 0, 0};
+  bool has = false, ignores = false;
+  uint16_t bank = 0;
+  uint8_t value = 0;
+  uint32_t hundredths = 0;
+  CHECK(sizeof(ZmidiGmReceiver) >= zmidi_gm_receiver_size());
+  CHECK(zmidi_gm_receiver_init(&gm, &config) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_gm_receiver_info(&gm, &info) == ZMIDI_STATUS_OK);
+  CHECK(info.level == ZMIDI_GM_LEVEL_GM2 && info.rhythm_channels == 0x0200 && info.mono_channels == 0);
+  CHECK(zmidi_gm_receiver_program(&gm, 10, true, 0x78 << 7) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_gm_receiver_program(&gm, 16, true, 0) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  m = cv(0xB0, 0x7E, 0x01);
+  CHECK(zmidi_gm_receiver_receive(&gm, &m, &a) == ZMIDI_STATUS_OK);
+  CHECK(a.kind == ZMIDI_MODE_ACTION_KIND_MODE_CHANGE && a.changed);
+  m = cv(0xB9, 0x7E, 0x01);
+  CHECK(zmidi_gm_receiver_receive(&gm, &m, &a) == ZMIDI_STATUS_OK);
+  CHECK(a.kind == ZMIDI_MODE_ACTION_KIND_ALL_NOTES_OFF && a.channel == 9);
+  CHECK(zmidi_gm_receiver_info(&gm, &info) == ZMIDI_STATUS_OK);
+  CHECK(info.rhythm_channels == 0x0600 && info.mono_channels == 0x0001);
+  /* RP-024 4.9.2: GM1 System On resets the channels; 4.9.3: GM System Off. */
+  CHECK(zmidi_gm_receiver_reset(&gm, ZMIDI_GM_LEVEL_GM1) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_gm_receiver_info(&gm, &info) == ZMIDI_STATUS_OK);
+  CHECK(info.level == ZMIDI_GM_LEVEL_GM1 && info.rhythm_channels == 0x0200 && info.mono_channels == 0);
+  CHECK(zmidi_gm_receiver_reset(&gm, ZMIDI_GM_LEVEL_OFF) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_gm_receiver_reset(&gm, 3) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  /* RP-024 3.3: the GM reset of a controller state holds the Rhythm bank on channel 10. */
+  CHECK(zmidi_controllers_init(&cs) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_gm_reset_controller_state(&cs, 9) == ZMIDI_STATUS_OK);
+  CHECK(zmidi_controllers_bank(&cs, &has, &bank) == ZMIDI_STATUS_OK && has && bank == 0x78 << 7);
+  CHECK(zmidi_gm2_controller_default(7, &has, &value) == ZMIDI_STATUS_OK && has && value == 100);
+  CHECK(zmidi_gm2_controller_default(120, &has, &value) == ZMIDI_STATUS_OK && !has);
+  CHECK(zmidi_gm_rhythm_ignores_controller(1, &ignores) == ZMIDI_STATUS_OK && ignores);
+  CHECK(zmidi_gm_rhythm_ignores_controller(7, &ignores) == ZMIDI_STATUS_OK && !ignores);
+  CHECK(zmidi_gm_rhythm_ignores_parameter(&rpn, &ignores) == ZMIDI_STATUS_OK && ignores);
+  m = cv(0xE9, 0x00, 0x40);
+  CHECK(zmidi_gm_rhythm_ignores_message(&m, &ignores) == ZMIDI_STATUS_OK && ignores);
+  /* RP-024 3.4.4: the GM2 default 00H 40H is 50 cents. */
+  CHECK(zmidi_modulation_depth_range(0x40, &hundredths) == ZMIDI_STATUS_OK && hundredths == 5000);
+}
+
 int main(void) {
   test_reader_and_writer();
   test_mode();
@@ -425,6 +474,7 @@ int main(void) {
   test_sync();
   test_active_sensing();
   test_mpe();
+  test_gm();
   test_storage();
   if (failures != 0) {
     printf("midi1: %d failures\n", failures);

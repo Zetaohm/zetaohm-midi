@@ -28,6 +28,7 @@ zmidi-file = { path = "../zmidi-file", version = "0.1.0-alpha.1", default-featur
 zmidi-net = { path = "../zmidi-net", version = "0.1.0-alpha.1", default-features = false, optional = true }
 zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1", default-features = false, optional = true }
 zmidi-io = { path = "../zmidi-io", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-sysex = { path = "../zmidi-sysex", version = "0.1.0-alpha.1", default-features = false, optional = true }
 
 [features]
 # DEC-002, DEC-019: the C ABI needs no alloc. The parts of the C ABI are opt-in features.
@@ -77,8 +78,19 @@ parameters = ["dep:zmidi-io", "dep:zmidi-ump", "zmidi-io/parameters"]
 sync = ["dep:zmidi-io", "dep:zmidi-ump", "zmidi-io/sync"]
 active-sensing = ["dep:zmidi-io", "zmidi-io/active-sensing"]
 mpe = ["parameters", "zmidi-io/mpe"]
+# The General MIDI receiver (module Midi1, zmidi-io gm) and the General MIDI System messages
+# (module Sysex, zmidi-sysex gm): one feature, as a GM receiver needs GM System On (DEC-022).
+gm = ["channel-mode", "controllers", "parameters", "zmidi-io/gm", "sysex", "zmidi-sysex/gm"]
+# The Universal System Exclusive base of module Sysex (zmidi-sysex, DEC-022): the reader, the
+# Device ID test and the raw writers. Each part below turns it on.
+sysex = ["dep:zmidi-sysex", "dep:zmidi-ump"]
+inquiry = ["sysex", "zmidi-sysex/inquiry"]
+device-control = ["sysex", "zmidi-sysex/device-control"]
+tuning = ["sysex", "zmidi-sysex/tuning"]
+mtc = ["sysex", "zmidi-sysex/mtc"]
+mmc-transport = ["mtc", "zmidi-sysex/mmc-transport"]
 # All MIDI 1.0 parts, with no MIDI 2.0 code (M7 of DEC-022, REQ-FFI-ABI-004).
-midi1 = ["io-midi1", "ble-midi1", "usb-midi1", "messages", "channel-mode", "controllers", "parameters", "sync", "active-sensing", "mpe"]
+midi1 = ["io-midi1", "ble-midi1", "usb-midi1", "messages", "channel-mode", "controllers", "parameters", "sync", "active-sensing", "mpe", "gm", "inquiry", "device-control", "tuning", "mtc", "mmc-transport"]
 # A `#[panic_handler]` for bare-metal (`target_os = "none"`) and WASM builds of the staticlib
 # (DEC-019). It has no effect on other targets.
 panic-handler = []

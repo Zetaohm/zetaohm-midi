@@ -1472,3 +1472,138 @@ impl MpeNoteAllocator {
         self.0.reset();
     }
 }
+
+/// The General MIDI state of the 16 channels of one MIDI 1.0 input (zmidi-io GmReceiver, RP-024
+/// 2.4, 2.5, 3.5): the kind of each channel, Mode 3 or 4, and the GM level.
+#[pyclass(module = "zetaohm_midi._native")]
+pub struct GmReceiver(zmidi_io::GmReceiver);
+
+/// The GM level of a name: "off", "gm1" or "gm2".
+fn gm_level(level: &str) -> PyResult<zmidi_io::GmLevel> {
+    match level {
+        "off" => Ok(zmidi_io::GmLevel::Off),
+        "gm1" => Ok(zmidi_io::GmLevel::Gm1),
+        "gm2" => Ok(zmidi_io::GmLevel::Gm2),
+        _ => Err(invalid("level must be off, gm1 or gm2")),
+    }
+}
+
+#[pymethods]
+impl GmReceiver {
+    /// A receiver at the start: channel 10 a Rhythm Channel, each channel in Mode 3, level gm2.
+    /// `rhythm_capable`: bit n for the channel with packet value n that can be a Rhythm Channel
+    /// (default channels 10 and 11); `rhythm_mono`: Mono On with M = 1 sets Mode 4 on a Rhythm
+    /// Channel too.
+    #[new]
+    #[pyo3(signature = (rhythm_capable=0x0600, rhythm_mono=false))]
+    fn new(rhythm_capable: u16, rhythm_mono: bool) -> Self {
+        Self(zmidi_io::GmReceiver::new(zmidi_io::GmConfig::new(
+            rhythm_capable,
+            rhythm_mono,
+        )))
+    }
+
+    /// The GM reset of a GM1 ("gm1") or GM2 ("gm2") System On, or GM System Off ("off").
+    fn reset(&mut self, level: &str) -> PyResult<()> {
+        self.0.reset(gm_level(level)?);
+        Ok(())
+    }
+
+    /// GM System Off: the level "off"; no other state changes.
+    fn system_off(&mut self) {
+        self.0.system_off();
+    }
+
+    /// The program selection of `channel` with the bank that its controller state holds (None
+    /// for no bank): bank MSB 78H gives a Rhythm Channel when permitted, 79H a Melody Channel.
+    #[pyo3(signature = (channel, bank=None))]
+    fn program(&mut self, channel: u8, bank: Option<u16>) -> PyResult<()> {
+        if bank.is_some_and(|b| b > 0x3FFF) {
+            return Err(invalid("bank must be 0 to 16383"));
+        }
+        self.0.program(self::channel(channel)?, bank);
+        Ok(())
+    }
+
+    /// The action of one Channel Voice message by the GM2 Channel Mode rules.
+    fn receive(&mut self, message: &Midi1Message) -> PyResult<ModeAction> {
+        Ok(ModeAction::of(self.0.receive(&message.to_channel_voice()?)))
+    }
+
+    /// "melody" or "rhythm".
+    fn kind(&self, channel: u8) -> PyResult<&'static str> {
+        Ok(match self.0.kind(self::channel(channel)?) {
+            zmidi_io::ChannelKind::Melody => "melody",
+            zmidi_io::ChannelKind::Rhythm => "rhythm",
+        })
+    }
+
+    /// True when `channel` is in Mode 4 (Omni Off, Mono), false in Mode 3.
+    fn is_mono(&self, channel: u8) -> PyResult<bool> {
+        Ok(self.0.is_mono(self::channel(channel)?))
+    }
+
+    /// The Rhythm Channels: bit n is the channel with packet value n.
+    #[getter]
+    fn rhythm_channels(&self) -> u16 {
+        self.0.rhythm_channels()
+    }
+
+    /// "off", "gm1" or "gm2".
+    #[getter]
+    fn level(&self) -> &'static str {
+        match self.0.level() {
+            zmidi_io::GmLevel::Off => "off",
+            zmidi_io::GmLevel::Gm1 => "gm1",
+            zmidi_io::GmLevel::Gm2 => "gm2",
+        }
+    }
+}
+
+/// Sets `state`, the controller state of `channel`, for a GM reset: the GM2 defaults, the Rhythm
+/// bank on channel 10 and the Melody bank on the others (RP-024 3.3, 4.9.1).
+#[pyfunction]
+pub fn gm_reset_controller_state(state: &mut ControllerState, channel: u8) -> PyResult<()> {
+    zmidi_io::gm_reset_controller_state(&mut state.0, self::channel(channel)?);
+    Ok(())
+}
+
+/// The GM2 default of controller 0 to 127, or None (RP-024 3.3).
+#[pyfunction]
+pub fn gm2_controller_default(controller: u8) -> PyResult<Option<u8>> {
+    if controller > 0x7F {
+        return Err(invalid("controller must be 0 to 127"));
+    }
+    Ok(zmidi_io::gm2_controller_default(controller))
+}
+
+/// True when GM2 recommends that a Rhythm Channel does not respond to `controller` (RP-024 3.3).
+#[pyfunction]
+pub fn rhythm_ignores_controller(controller: u8) -> bool {
+    zmidi_io::rhythm_ignores_controller(controller)
+}
+
+/// True when GM2 recommends that a Rhythm Channel does not respond to `parameter` (RP-024 3.4).
+#[pyfunction]
+pub fn rhythm_ignores_parameter(parameter: &Parameter) -> bool {
+    zmidi_io::rhythm_ignores_parameter(parameter.rust())
+}
+
+/// True when GM2 recommends that a Rhythm Channel does not respond to `message`: Pitch Bend,
+/// Channel Pressure and the controllers of `rhythm_ignores_controller` (RP-024 3.3, 3.6, 3.7).
+#[pyfunction]
+pub fn rhythm_ignores_message(message: &Midi1Message) -> PyResult<bool> {
+    Ok(zmidi_io::rhythm_ignores_message(
+        &message.to_channel_voice()?,
+    ))
+}
+
+/// The Modulation Depth Range of a 14-bit RPN 00H 05H value in hundredths of a cent (RP-024
+/// 3.4.4): 00H 40H gives 5000.
+#[pyfunction]
+pub fn modulation_depth_range(value: u16) -> PyResult<u32> {
+    if value > 0x3FFF {
+        return Err(invalid("value must be 0 to 16383"));
+    }
+    Ok(zmidi_ump::controller::modulation_depth_range(value))
+}
