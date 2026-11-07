@@ -11,13 +11,14 @@ module:
 | Module | Crate | What it does |
 |---|---|---|
 | `zmidi::ump` | [`zmidi-ump`](../zmidi-ump) | Universal MIDI Packet messages |
-| `zmidi::io` | [`zmidi-io`](../zmidi-io) | MIDI 1.0 byte stream, UMP Endpoint, Jitter Reduction |
+| `zmidi::io` | [`zmidi-io`](../zmidi-io) | MIDI 1.0 byte stream and receiver states (modes, controllers, RPN and NRPN, sync, MPE, General MIDI), UMP Endpoint, Jitter Reduction |
 | `zmidi::ci` | [`zmidi-ci`](../zmidi-ci) | MIDI Capability Inquiry |
 | `zmidi::ci_pe` | [`zmidi-ci-pe`](../zmidi-ci-pe) | MIDI-CI Property Exchange |
-| `zmidi::file` | [`zmidi-file`](../zmidi-file) | MIDI Clip File |
+| `zmidi::file` | [`zmidi-file`](../zmidi-file) | MIDI Clip File and Standard MIDI Files |
 | `zmidi::net` | [`zmidi-net`](../zmidi-net) | Network MIDI 2.0 (UDP) |
 | `zmidi::usb` | [`zmidi-usb`](../zmidi-usb) | USB-MIDI 2.0 and 1.0 |
 | `zmidi::ble` | [`zmidi-ble`](../zmidi-ble) | BLE-MIDI |
+| `zmidi::sysex` | [`zmidi-sysex`](../zmidi-sysex) | Universal System Exclusive, MIDI Time Code, MIDI Machine Control (transport) |
 
 For the smallest firmware, turn off the default features (`default-features = false`) and select
 the parts, or depend on the individual crates and select their features.
@@ -46,12 +47,12 @@ fn main() -> Result<(), Box<dyn core::error::Error>> {
 | Feature | Default | Description |
 |---|---|---|
 | `full` | yes | `midi1` and `midi2`: all the parts below that are on by default. |
-| `midi1` | via `full` | Every MIDI 1.0 part with no MIDI 2.0 code: `ump-midi1`, `io-midi1`, `file-midi1`, `ble-midi1`. Use `default-features = false, features = ["midi1"]` for MIDI 1.0-only firmware. |
-| `midi2` | via `full` | Each part with its MIDI 2.0 functions: `ump`, `io`, `ci`, `ci-pe`, `file`, `net`, `usb`, `ble`. |
+| `midi1` | via `full` | Every MIDI 1.0 part with no MIDI 2.0 code: `ump-midi1`, `io-midi1`, `file-midi1`, `ble-midi1`, `usb-midi1`, `sysex`. Use `default-features = false, features = ["midi1"]` for MIDI 1.0-only firmware. |
+| `midi2` | via `full` | Each part with its MIDI 2.0 functions: `ump`, `io`, `ci`, `ci-pe`, `file`, `net`, `usb`, `ble`, and `sysex`. |
 | `ump` | yes | All UMP message families (`zmidi-ump/full`). The `ump` module is always present. |
 | `ump-midi1` | yes | The MIDI 1.0 message families only (System, MIDI 1.0 Channel Voice, SysEx7). |
-| `io`, `ci`, `ci-pe`, `file`, `net`, `usb`, `ble` | yes | The module of the same name, with the default features of its crate. |
-| `io-midi1`, `file-midi1`, `ble-midi1` | yes | The module of the same name with no MIDI 2.0 code: no MIDI 2.0 Protocol in `io` and `ble`, no MIDI Clip File in `file`. |
+| `io`, `ci`, `ci-pe`, `file`, `net`, `usb`, `ble`, `sysex` | yes | The module of the same name, with the default features of its crate. |
+| `io-midi1`, `file-midi1`, `ble-midi1`, `usb-midi1` | yes | The module of the same name with no MIDI 2.0 code: no MIDI 2.0 Protocol in `io` and `ble`, no MIDI Clip File in `file`, no USB MIDI 2.0 setting in `usb`. |
 | `auth` | no | Network MIDI 2.0 authentication (`zmidi-net/auth`). |
 | `zlib` | no | The `zlib+Mcoded7` Property Exchange encoding (`zmidi-ci-pe/zlib`). |
 

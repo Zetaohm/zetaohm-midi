@@ -2,7 +2,7 @@
 name = "zmidi"
 version = "0.1.0-alpha.1"
 edition = "2021"
-description = "MIDI 2.0 and MIDI 1.0: UMP, MIDI-CI, Property Exchange, MIDI Clip File, Network MIDI 2.0, USB-MIDI and BLE-MIDI; no_std, no alloc, sans-IO"
+description = "MIDI 2.0 and MIDI 1.0: UMP, MIDI-CI, Property Exchange, MIDI Clip File, Network MIDI 2.0, USB-MIDI, BLE-MIDI, Universal SysEx, MTC and MMC; no_std, no alloc, sans-IO"
 license = "MIT"
 rust-version.workspace = true
 repository.workspace = true
@@ -23,6 +23,7 @@ zmidi-file = { path = "../zmidi-file", version = "0.1.0-alpha.1", default-featur
 zmidi-net = { path = "../zmidi-net", version = "0.1.0-alpha.1", default-features = false, optional = true }
 zmidi-usb = { path = "../zmidi-usb", version = "0.1.0-alpha.1", default-features = false, optional = true }
 zmidi-ble = { path = "../zmidi-ble", version = "0.1.0-alpha.1", default-features = false, optional = true }
+zmidi-sysex = { path = "../zmidi-sysex", version = "0.1.0-alpha.1", default-features = false, optional = true }
 
 [features]
 default = ["full"]
@@ -30,14 +31,15 @@ full = ["midi1", "midi2"]
 # Group features (DEC-022). `midi1`: every MIDI 1.0 part with no MIDI 2.0 code; build with
 # `default-features = false, features = ["midi1"]` for MIDI 1.0-only firmware. `midi2`: each part with
 # its MIDI 2.0 functions (the MIDI 1.0 parts too, with the MIDI 2.0 Protocol in them).
-midi1 = ["ump-midi1", "io-midi1", "file-midi1", "ble-midi1", "usb-midi1"]
-midi2 = ["ump", "io", "ci", "ci-pe", "file", "net", "usb", "ble"]
+midi1 = ["ump-midi1", "io-midi1", "file-midi1", "ble-midi1", "usb-midi1", "sysex"]
+midi2 = ["ump", "io", "ci", "ci-pe", "file", "net", "usb", "ble", "sysex"]
 # Each part, with the default features of its crate. A `-midi1` part is the same crate with no MIDI 2.0
 # code: the MIDI 1.0 message families of zmidi-ump, zmidi-io with no MIDI 2.0 Protocol, zmidi-file with
-# no Clip File, zmidi-ble with no MIDI 2.0 Protocol, zmidi-usb with no USB MIDI 2.0 setting.
+# no Clip File, zmidi-ble with no MIDI 2.0 Protocol, zmidi-usb with no USB MIDI 2.0 setting. `sysex` has no
+# MIDI 2.0 code, so it is in both groups.
 ump-midi1 = ["zmidi-ump/system-common", "zmidi-ump/channel-voice1", "zmidi-ump/sysex7"]
 ump = ["ump-midi1", "zmidi-ump/full"]
-io-midi1 = ["dep:zmidi-io", "zmidi-io/messages", "zmidi-io/channel-mode", "zmidi-io/controllers", "zmidi-io/parameters", "zmidi-io/sync", "zmidi-io/active-sensing", "zmidi-io/mpe"]
+io-midi1 = ["dep:zmidi-io", "zmidi-io/messages", "zmidi-io/channel-mode", "zmidi-io/controllers", "zmidi-io/parameters", "zmidi-io/sync", "zmidi-io/active-sensing", "zmidi-io/mpe", "zmidi-io/gm"]
 io = ["io-midi1", "zmidi-io/full"]
 ci = ["dep:zmidi-ci", "zmidi-ci/full"]
 ci-pe = ["dep:zmidi-ci-pe", "zmidi-ci-pe/initiator"]
@@ -48,6 +50,7 @@ usb-midi1 = ["dep:zmidi-usb", "zmidi-usb/alt0"]
 usb = ["usb-midi1", "zmidi-usb/alt1"]
 ble-midi1 = ["dep:zmidi-ble"]
 ble = ["ble-midi1", "zmidi-ble/midi2-protocol"]
+sysex = ["dep:zmidi-sysex", "zmidi-sysex/full"]
 # "zlib+Mcoded7" Property Data (zmidi-ci-pe, DEC-PE-004); off by default.
 zlib = ["ci-pe", "zmidi-ci-pe/zlib"]
 # Network MIDI 2.0 authentication (zmidi-net, DEC-013); off by default.

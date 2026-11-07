@@ -17,6 +17,8 @@ pub use zmidi_file as file;
 pub use zmidi_io as io;
 #[cfg(feature = "net")]
 pub use zmidi_net as net;
+#[cfg(feature = "sysex")]
+pub use zmidi_sysex as sysex;
 pub use zmidi_ump as ump;
 #[cfg(feature = "usb-midi1")]
 pub use zmidi_usb as usb;
