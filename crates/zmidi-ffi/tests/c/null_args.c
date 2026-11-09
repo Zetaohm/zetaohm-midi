@@ -1639,6 +1639,34 @@ int main(void) {
   snapshot();
   check(zmidi_coarse_tuning_semitones((uint8_t)1, NULL), "zmidi_coarse_tuning_semitones: semitones");
 #endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+  snapshot();
+  check(zmidi_bar_marker_read(NULL, (uintptr_t)1, (uint8_t *)(void *)mem[0], (int16_t *)(void *)mem[1]), "zmidi_bar_marker_read: bytes");
+  snapshot();
+  check(zmidi_bar_marker_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL, (int16_t *)(void *)mem[1]), "zmidi_bar_marker_read: device_id");
+  snapshot();
+  check(zmidi_bar_marker_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], NULL), "zmidi_bar_marker_read: bar");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+  snapshot();
+  check(zmidi_bar_marker_write((uint8_t)1, (int16_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[0]), "zmidi_bar_marker_write: out");
+  snapshot();
+  check(zmidi_bar_marker_write((uint8_t)1, (int16_t)1, (uint8_t *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_bar_marker_write: length");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+  snapshot();
+  check(zmidi_time_signature_read(NULL, (uintptr_t)1, (struct ZmidiTimeSignature *)(void *)mem[0]), "zmidi_time_signature_read: bytes");
+  snapshot();
+  check(zmidi_time_signature_read((const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL), "zmidi_time_signature_read: out");
+#endif
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+  snapshot();
+  check(zmidi_time_signature_write((uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, (uint8_t)1, (uint8_t)1, NULL, (uintptr_t)1, (uint8_t *)(void *)mem[0], (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_time_signature_write: additional");
+  snapshot();
+  check(zmidi_time_signature_write((uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, (uint8_t)1, (uint8_t)1, (const uint8_t *)(void *)mem[0], (uintptr_t)1, NULL, (uintptr_t)1, (uintptr_t *)(void *)mem[1]), "zmidi_time_signature_write: out");
+  snapshot();
+  check(zmidi_time_signature_write((uint8_t)1, (bool)1, (uint8_t)1, (uint8_t)1, (uint8_t)1, (uint8_t)1, (const uint8_t *)(void *)mem[0], (uintptr_t)1, (uint8_t *)(void *)mem[1], (uintptr_t)1, NULL), "zmidi_time_signature_write: length");
+#endif
 #if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
   snapshot();
   check(zmidi_tuning_read(NULL, (uintptr_t)1, (struct ZmidiTuning *)(void *)mem[0], (struct ZmidiTuningNote *)(void *)mem[1], (uintptr_t)1), "zmidi_tuning_read: bytes");
