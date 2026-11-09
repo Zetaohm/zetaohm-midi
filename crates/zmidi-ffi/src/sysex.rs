@@ -2,7 +2,8 @@
 //! writers (feature `sysex`, REQ-FFI-SX-001), Device Inquiry (`inquiry`, REQ-FFI-SX-003), the
 //! General MIDI System messages (`gm`, REQ-FFI-SX-004), Device Control (`device-control`,
 //! REQ-FFI-SX-005), MIDI Tuning (`tuning`, REQ-FFI-SX-006), MIDI Time Code (`mtc`,
-//! REQ-FFI-SX-007) and the MIDI Machine Control transport tier (`mmc-transport`, REQ-FFI-SX-008).
+//! REQ-FFI-SX-007), the MIDI Machine Control transport tier (`mmc-transport`, REQ-FFI-SX-008)
+//! and Notation Information (`notation`, REQ-FFI-SX-011).
 //!
 //! - Every reader of a part takes one whole message, with or without F0H and F7H. It gives
 //!   [`ZmidiStatus::NoPending`] for a message of another part and [`ZmidiStatus::InvalidArgument`]
@@ -18,6 +19,8 @@
 #[cfg(feature = "mtc")]
 use core::mem::{align_of, size_of};
 
+#[cfg(feature = "notation")]
+use zmidi_sysex::{Bar, BarMarker, TimeSignature};
 #[cfg(feature = "device-control")]
 use zmidi_sysex::{DeviceControl, DeviceControlValue};
 #[cfg(feature = "mtc")]
@@ -117,7 +120,8 @@ unsafe fn write_into(
     feature = "gm",
     feature = "device-control",
     feature = "tuning",
-    feature = "mtc"
+    feature = "mtc",
+    feature = "notation"
 ))]
 unsafe fn universal<'a>(bytes: *const u8, length: usize) -> Result<Universal<'a>, ZmidiStatus> {
     // SAFETY: caller contract above.
@@ -136,7 +140,8 @@ unsafe fn universal<'a>(bytes: *const u8, length: usize) -> Result<Universal<'a>
     feature = "gm",
     feature = "device-control",
     feature = "tuning",
-    feature = "mtc"
+    feature = "mtc",
+    feature = "notation"
 ))]
 fn part<T>(result: Result<Option<T>, SysexError>) -> Result<T, ZmidiStatus> {
     match result {
@@ -723,6 +728,173 @@ pub unsafe extern "C" fn zmidi_coarse_tuning_semitones(msb: u8, semitones: *mut 
     // SAFETY: caller contract above.
     unsafe { *semitones = zmidi_sysex::coarse_tuning_semitones(msb) };
     ZmidiStatus::Ok
+}
+
+/// The Bar Marker value Not Running, -8192 (00H 40H; REQ-FFI-SX-011).
+#[cfg(feature = "notation")]
+pub const ZMIDI_BAR_NOT_RUNNING: i16 = -8192;
+/// The Bar Marker value Running with an unknown bar number, 8191 (7FH 3FH; REQ-FFI-SX-011).
+#[cfg(feature = "notation")]
+pub const ZMIDI_BAR_UNKNOWN: i16 = 8191;
+
+/// Reads a Bar Marker: the Device ID and the signed bar number, -8192 to 8191
+/// (REQ-FFI-SX-011).
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `device_id` and `bar` are null or
+/// writable.
+#[cfg(feature = "notation")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_bar_marker_read(
+    bytes: *const u8,
+    length: usize,
+    device_id: *mut u8,
+    bar: *mut i16,
+) -> ZmidiStatus {
+    if device_id.is_null() || bar.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: caller contract above.
+    match unsafe { universal(bytes, length) }.and_then(|u| part(BarMarker::from_universal(&u))) {
+        Ok(m) => {
+            // SAFETY: caller contract above.
+            unsafe {
+                *device_id = m.device_id;
+                *bar = m.bar.value();
+            }
+            ZmidiStatus::Ok
+        }
+        Err(s) => s,
+    }
+}
+
+/// Writes a Bar Marker (REQ-FFI-SX-011). A bar number outside -8192 to 8191 gives
+/// [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+#[cfg(feature = "notation")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_bar_marker_write(
+    device_id: u8,
+    bar: i16,
+    out: *mut u8,
+    capacity: usize,
+    length: *mut usize,
+) -> ZmidiStatus {
+    let Some(bar) = Bar::from_value(bar) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    // SAFETY: caller contract above.
+    unsafe {
+        write_into(out, capacity, length, |o| {
+            BarMarker { device_id, bar }.write(o)
+        })
+    }
+}
+
+/// One Time Signature message as flat values (REQ-FFI-SX-011).
+#[cfg(feature = "notation")]
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ZmidiTimeSignature {
+    /// The Device ID; 7FH addresses all devices.
+    pub device_id: u8,
+    /// False for Immediate (02H), true for Delayed (42H).
+    pub delayed: bool,
+    /// `nn`: the numerator.
+    pub numerator: u8,
+    /// `dd`: the denominator as a negative power of 2 (2 = quarter note).
+    pub denominator_power: u8,
+    /// `cc`: MIDI clocks in a metronome click.
+    pub clocks_per_click: u8,
+    /// `bb`: notated 32nd notes in a MIDI quarter note.
+    pub thirty_seconds_per_quarter: u8,
+    /// The offset in the input of the additional `nn dd` pairs.
+    pub additional_offset: u32,
+    /// The length of the additional pairs in bytes, an even number.
+    pub additional_length: u32,
+}
+
+/// Reads a Time Signature, Immediate or Delayed (REQ-FFI-SX-011).
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `out` is null or writable.
+#[cfg(feature = "notation")]
+#[no_mangle]
+pub unsafe extern "C" fn zmidi_time_signature_read(
+    bytes: *const u8,
+    length: usize,
+    out: *mut ZmidiTimeSignature,
+) -> ZmidiStatus {
+    if out.is_null() {
+        return ZmidiStatus::InvalidArgument;
+    }
+    // SAFETY: caller contract above.
+    let Some(b) = (unsafe { input(bytes, length) }) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    // SAFETY: caller contract above.
+    let m = match unsafe { universal(bytes, length) }
+        .and_then(|u| part(TimeSignature::from_universal(&u)))
+    {
+        Ok(m) => m,
+        Err(s) => return s,
+    };
+    // SAFETY: caller contract above.
+    unsafe {
+        *out = ZmidiTimeSignature {
+            device_id: m.device_id,
+            delayed: m.delayed,
+            numerator: m.numerator,
+            denominator_power: m.denominator_power,
+            clocks_per_click: m.clocks_per_click,
+            thirty_seconds_per_quarter: m.thirty_seconds_per_quarter,
+            additional_offset: offset(b, m.additional),
+            additional_length: m.additional.len() as u32,
+        }
+    };
+    ZmidiStatus::Ok
+}
+
+/// Writes a Time Signature with `additional_length` bytes of additional `nn dd` pairs; ln is 4 +
+/// the additional length (REQ-FFI-SX-011). An odd length, more than 61 pairs or a value above 7FH
+/// gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `additional` is null or points to `additional_length` readable bytes; `out` is null or points
+/// to `capacity` writable bytes; `length` is null or writable.
+#[cfg(feature = "notation")]
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn zmidi_time_signature_write(
+    device_id: u8,
+    delayed: bool,
+    numerator: u8,
+    denominator_power: u8,
+    clocks_per_click: u8,
+    thirty_seconds_per_quarter: u8,
+    additional: *const u8,
+    additional_length: usize,
+    out: *mut u8,
+    capacity: usize,
+    length: *mut usize,
+) -> ZmidiStatus {
+    // SAFETY: caller contract above.
+    let Some(additional) = (unsafe { input(additional, additional_length) }) else {
+        return ZmidiStatus::InvalidArgument;
+    };
+    let m = TimeSignature {
+        device_id,
+        delayed,
+        numerator,
+        denominator_power,
+        clocks_per_click,
+        thirty_seconds_per_quarter,
+        additional,
+    };
+    // SAFETY: caller contract above.
+    unsafe { write_into(out, capacity, length, |o| m.write(o)) }
 }
 
 /// A MIDI Tuning frequency word: the semitone and the 14-bit fraction (REQ-FFI-SX-006).

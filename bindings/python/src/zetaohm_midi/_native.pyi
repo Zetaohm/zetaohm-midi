@@ -5,9 +5,12 @@ from typing import Callable, ClassVar, final
 from typing_extensions import TypeAlias
 
 __all__ = [
+    "BAR_NOT_RUNNING",
+    "BAR_UNKNOWN",
     "PITCH_UNITS_PER_SEMITONE",
     "ActiveSensingMonitor",
     "ActiveSensingSender",
+    "BarMarker",
     "BleReader",
     "BleWriter",
     "BytesToUmp",
@@ -54,6 +57,7 @@ __all__ = [
     "SyncReceiver",
     "SysexInfo",
     "TimeCode",
+    "TimeSignature",
     "TuningMessage",
     "Ump",
     "UmpToBytes",
@@ -103,6 +107,7 @@ __all__ = [
     "parse_sysex",
     "pitch_bend_value",
     "pitch_offset",
+    "read_bar_marker",
     "read_clip",
     "read_device_control",
     "read_gm_system",
@@ -111,6 +116,7 @@ __all__ = [
     "read_mmc_fields",
     "read_mtc_full",
     "read_mtc_user_bits",
+    "read_time_signature",
     "read_tuning",
     "reset_value",
     "respond_identity",
@@ -386,6 +392,8 @@ class ActiveSensingSender:
     @property
     def interval_us(self) -> int: ...
 
+BAR_NOT_RUNNING: int
+BAR_UNKNOWN: int
 PITCH_UNITS_PER_SEMITONE: int
 
 @final
@@ -1126,6 +1134,48 @@ class DeviceControl:
 def read_device_control(data: bytes) -> DeviceControl | None: ...
 def fine_tuning_offset(value: int) -> int: ...
 def coarse_tuning_semitones(msb: int) -> int: ...
+
+@final
+class BarMarker:
+    def __new__(cls, device_id: int, bar: int) -> BarMarker: ...
+    @property
+    def device_id(self) -> int: ...
+    @property
+    def bar(self) -> int: ...
+    def to_bytes(self) -> bytes: ...
+
+def read_bar_marker(data: bytes) -> BarMarker | None: ...
+@final
+class TimeSignature:
+    def __new__(
+        cls,
+        device_id: int,
+        numerator: int,
+        denominator_power: int,
+        clocks_per_click: int,
+        thirty_seconds_per_quarter: int,
+        additional: bytes = ...,
+        delayed: bool = False,
+    ) -> TimeSignature: ...
+    @property
+    def device_id(self) -> int: ...
+    @property
+    def delayed(self) -> bool: ...
+    @property
+    def numerator(self) -> int: ...
+    @property
+    def denominator_power(self) -> int: ...
+    @property
+    def clocks_per_click(self) -> int: ...
+    @property
+    def thirty_seconds_per_quarter(self) -> int: ...
+    @property
+    def additional(self) -> bytes: ...
+    @property
+    def pairs(self) -> list[tuple[int, int]]: ...
+    def to_bytes(self) -> bytes: ...
+
+def read_time_signature(data: bytes) -> TimeSignature | None: ...
 
 @final
 class TuningMessage:

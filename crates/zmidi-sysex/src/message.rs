@@ -23,6 +23,8 @@ use crate::inquiry::InquiryMessage;
 use crate::mmc::MmcMessage;
 #[cfg(feature = "mtc")]
 use crate::mtc::{FullMessage, UserBits};
+#[cfg(feature = "notation")]
+use crate::notation::{BarMarker, TimeSignature};
 #[cfg(feature = "tuning")]
 use crate::tuning::TuningMessage;
 use crate::universal::{Sysex, SysexError, SysexId, Universal};
@@ -51,6 +53,12 @@ pub enum Message<'a> {
     /// An MMC command or response message (feature `mmc-transport`).
     #[cfg(feature = "mmc-transport")]
     Mmc(MmcMessage<'a>),
+    /// The Bar Marker (feature `notation`).
+    #[cfg(feature = "notation")]
+    BarMarker(BarMarker),
+    /// The Time Signature, Immediate or Delayed (feature `notation`).
+    #[cfg(feature = "notation")]
+    TimeSignature(TimeSignature<'a>),
     /// Any other Universal message: the raw header and bytes.
     Universal(Universal<'a>),
     /// A manufacturer message: its ID and the bytes after it.
@@ -106,6 +114,14 @@ impl<'a> Message<'a> {
         if let Some(m) = MmcMessage::from_universal(&u)? {
             return Ok(Self::Mmc(m));
         }
+        #[cfg(feature = "notation")]
+        if let Some(m) = BarMarker::from_universal(&u)? {
+            return Ok(Self::BarMarker(m));
+        }
+        #[cfg(feature = "notation")]
+        if let Some(m) = TimeSignature::from_universal(&u)? {
+            return Ok(Self::TimeSignature(m));
+        }
         Ok(Self::Universal(u))
     }
 }
@@ -143,6 +159,13 @@ mod tests {
             Some(0x01)
         );
         assert_eq!(raw(&[0x7E, 0x7F, 0x0B, 0x01, 0x00]).sub_id2, None);
+        // MIDI Show Control (Real Time 02H, M1/MSC/01): no Sub-ID#2; the MSC data (command
+        // format, command, data) follows Sub-ID#1.
+        let u = raw(&[0xF0, 0x7F, 0x01, 0x02, 0x01, 0x01, 0x31, 0xF7]);
+        assert_eq!((u.real_time, u.sub_id1, u.sub_id2), (true, 0x02, None));
+        assert_eq!(u.data, &[0x01, 0x01, 0x31]);
+        #[cfg(not(feature = "notation"))]
+        assert_eq!(raw(&[0x7F, 0x7F, 0x03, 0x01, 0, 0]).sub_id2, Some(0x01));
         // Manufacturer and Non-Commercial messages.
         assert_eq!(
             Message::parse(&[0xF0, 0x43, 0x10, 0x4C, 0xF7]),
@@ -198,6 +221,16 @@ mod tests {
                 device_id: 0x7F,
                 ..
             }))
+        ));
+        #[cfg(feature = "notation")]
+        assert!(matches!(
+            Message::parse(&[0x7F, 0x7F, 0x03, 0x01, 0x7F, 0x3F]),
+            Ok(Message::BarMarker(_))
+        ));
+        #[cfg(feature = "notation")]
+        assert!(matches!(
+            Message::parse(&[0x7F, 0x7F, 0x03, 0x42, 4, 4, 2, 24, 8]),
+            Ok(Message::TimeSignature(_))
         ));
         // A part reader error goes to the caller.
         #[cfg(feature = "inquiry")]

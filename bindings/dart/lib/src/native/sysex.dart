@@ -38,6 +38,10 @@ typedef RawCommand = (int, int, int, int, RawTimeCode?, Uint8List, Uint8List);
 /// (kind, field, code, name, data).
 typedef RawField = (int, int, RawTimeCode?, Uint8List, Uint8List);
 
+/// (Device ID, delayed, numerator, denominator power, clocks per click, 32nd notes per quarter note,
+/// additional pairs).
+typedef RawTimeSignature = (int, bool, int, int, int, int, Uint8List);
+
 /// The size of a writer output: every message of the parts fits.
 const _out = 600;
 
@@ -1023,3 +1027,70 @@ Uint8List mmcFields(List<RawField> fields) {
     (pi, n, pd, dl, o, l) => zmidi_mmc_write_fields(pi, n, pd, dl, o, _out, l),
   );
 }
+
+// --- Notation ---
+
+/// (Device ID, bar number), or null.
+(int, int)? readBarMarker(Uint8List data) => using((arena) {
+  final p = bytesIn(arena, data);
+  final dev = arena<Uint8>();
+  final bar = arena<Int16>();
+  return _read(
+    'readBarMarker',
+    zmidi_bar_marker_read(p, data.length, dev, bar),
+    () => (dev.value, bar.value),
+  );
+});
+
+/// The bytes of a Bar Marker.
+Uint8List barMarkerBytes(int deviceId, int bar) => using(
+  (arena) => _written(
+    arena,
+    'barMarkerBytes',
+    (o, l) => zmidi_bar_marker_write(deviceId, bar, o, _out, l),
+  ),
+);
+
+/// The fields of a Time Signature, or null.
+RawTimeSignature? readTimeSignature(Uint8List data) => using((arena) {
+  final p = bytesIn(arena, data);
+  final t = arena<ZmidiTimeSignature>();
+  return _read(
+    'readTimeSignature',
+    zmidi_time_signature_read(p, data.length, t),
+    () {
+      final r = t.ref;
+      return (
+        r.device_id,
+        r.delayed,
+        r.numerator,
+        r.denominator_power,
+        r.clocks_per_click,
+        r.thirty_seconds_per_quarter,
+        _part(data, r.additional_offset, r.additional_length),
+      );
+    },
+  );
+});
+
+/// The bytes of a Time Signature.
+Uint8List timeSignatureBytes(RawTimeSignature t) => using((arena) {
+  final pa = bytesIn(arena, t.$7);
+  return _written(
+    arena,
+    'timeSignatureBytes',
+    (o, l) => zmidi_time_signature_write(
+      t.$1,
+      t.$2,
+      t.$3,
+      t.$4,
+      t.$5,
+      t.$6,
+      pa,
+      t.$7.length,
+      o,
+      _out,
+      l,
+    ),
+  );
+});

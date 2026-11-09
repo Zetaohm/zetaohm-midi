@@ -1,10 +1,10 @@
-// Universal System Exclusive, MIDI Time Code and the MIDI Machine Control transport tier (zmidi-sysex
-// through the C ABI, module Sysex of zmidi-ffi): M1 v4.2.1, RP-024, CA-025, MIDI Tuning, RP-004,
-// RP-013. A reader takes one whole message, with or without F0H and F7H, and gives null for a message
+// Universal System Exclusive, MIDI Time Code, the MIDI Machine Control transport tier and Notation
+// Information (zmidi-sysex through the C ABI, module Sysex of zmidi-ffi): M1 v4.2.1, RP-024, CA-025,
+// MIDI Tuning, RP-004, RP-013. A reader takes one whole message, with or without F0H and F7H, and gives null for a message
 // of another part; a bad message of its part throws MalformedError. A writer gives the bytes of the
 // whole message; a value out of range throws InvalidValueError.
 
-import { MalformedError } from "./errors.js";
+import { InvalidValueError, MalformedError } from "./errors.js";
 import { Blocks, Status, alloc, check, fn, int, layout, readBytes, scoped, sizeOf, view, writeBytes } from "./wasm.js";
 
 /** The size of a writer output: every message of the parts fits. */
@@ -1301,5 +1301,116 @@ export function mmcResponses(deviceId: number, fields: readonly MmcField[]): Uin
 export function mmcFields(fields: readonly MmcField[]): Uint8Array {
   return writeItems(fields, MMC_FIELD.size, "mmcFields", putField, (pi, n, pd, dl, out, len) =>
     fn("zmidi_mmc_write_fields")(pi, n, pd, dl, out, OUT, len),
+  );
+}
+
+// --- notation ---
+
+/** The Bar Marker bar number Not Running, -8192 (M1 Notation Information). */
+export const BAR_NOT_RUNNING = -8192;
+/** The Bar Marker bar number Running with an unknown bar number, 8191. */
+export const BAR_UNKNOWN = 8191;
+
+/** One Bar Marker message: the signed bar number, -8192 to 8191; -8191 to 0 are count-in bars. */
+export interface BarMarker {
+  readonly deviceId: number;
+  readonly bar: number;
+}
+
+/** Reads a Bar Marker, or gives null. */
+export function readBarMarker(data: Uint8Array): BarMarker | null {
+  return scoped([1, 2], (dev, bar) =>
+    read(
+      data,
+      "readBarMarker",
+      (p, n) => fn("zmidi_bar_marker_read")(p, n, dev, bar),
+      () => ({ deviceId: u8(dev), bar: view().getInt16(bar, true) }),
+    ),
+  );
+}
+
+/** The bytes of a Bar Marker. */
+export function barMarkerBytes(marker: BarMarker): Uint8Array {
+  const { bar } = marker;
+  if (!Number.isInteger(bar) || bar < BAR_NOT_RUNNING || bar > BAR_UNKNOWN) {
+    throw new InvalidValueError(`bar must be an integer from -8192 to 8191, not ${bar}`);
+  }
+  return written("barMarkerBytes", (out, len) =>
+    fn("zmidi_bar_marker_write")(int("deviceId", marker.deviceId, 255), bar, out, OUT, len),
+  );
+}
+
+/**
+ * One Time Signature message. `delayed` is the Delayed form (42H), which takes effect at the next Bar
+ * Marker; `denominatorPower` is a negative power of 2 (2 = quarter note); `additional` holds the
+ * numerator and denominator-power pairs of a compound time signature, at most 61 pairs.
+ */
+export interface TimeSignature {
+  readonly deviceId: number;
+  readonly delayed: boolean;
+  readonly numerator: number;
+  readonly denominatorPower: number;
+  readonly clocksPerClick: number;
+  readonly thirtySecondsPerQuarter: number;
+  readonly additional: Uint8Array;
+}
+
+const TIME_SIGNATURE = layout([
+  ["device_id", "u8"],
+  ["delayed", "bool"],
+  ["numerator", "u8"],
+  ["denominator_power", "u8"],
+  ["clocks_per_click", "u8"],
+  ["thirty_seconds_per_quarter", "u8"],
+  ["additional_offset", "u32"],
+  ["additional_length", "u32"],
+]);
+
+/** Reads a Time Signature, Immediate or Delayed, or gives null. */
+export function readTimeSignature(data: Uint8Array): TimeSignature | null {
+  return scoped([TIME_SIGNATURE.size], (t) =>
+    read(
+      data,
+      "readTimeSignature",
+      (p, n) => fn("zmidi_time_signature_read")(p, n, t),
+      () => {
+        const v = view();
+        const o = (k: string): number => t + (TIME_SIGNATURE.off[k] ?? 0);
+        const at = v.getUint32(o("additional_offset"), true);
+        return {
+          deviceId: u8(o("device_id")),
+          delayed: bool(o("delayed")),
+          numerator: u8(o("numerator")),
+          denominatorPower: u8(o("denominator_power")),
+          clocksPerClick: u8(o("clocks_per_click")),
+          thirtySecondsPerQuarter: u8(o("thirty_seconds_per_quarter")),
+          additional: data.slice(at, at + v.getUint32(o("additional_length"), true)),
+        };
+      },
+    ),
+  );
+}
+
+/** The additional pairs of a Time Signature, `[numerator, denominatorPower]`. */
+export function timeSignaturePairs(signature: TimeSignature): [number, number][] {
+  const a = signature.additional;
+  return Array.from({ length: a.length >> 1 }, (_, i) => [a[2 * i] ?? 0, a[2 * i + 1] ?? 0]);
+}
+
+/** The bytes of a Time Signature. */
+export function timeSignatureBytes(signature: TimeSignature): Uint8Array {
+  const s = signature;
+  const args = [
+    int("deviceId", s.deviceId, 255),
+    s.delayed ? 1 : 0,
+    int("numerator", s.numerator, 255),
+    int("denominatorPower", s.denominatorPower, 255),
+    int("clocksPerClick", s.clocksPerClick, 255),
+    int("thirtySecondsPerQuarter", s.thirtySecondsPerQuarter, 255),
+  ] as const;
+  return withBytes(s.additional, (pa) =>
+    written("timeSignatureBytes", (out, len) =>
+      fn("zmidi_time_signature_write")(...args, pa, s.additional.length, out, OUT, len),
+    ),
   );
 }

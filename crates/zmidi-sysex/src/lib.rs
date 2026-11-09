@@ -1,7 +1,7 @@
 //! MIDI 1.0 Universal System Exclusive messages (DEC-022): the header, the Manufacturer ID and
 //! Device ID rules, and the parts Device Inquiry (`inquiry`), General MIDI (`gm`), Device Control
-//! (`device-control`), MIDI Tuning (`tuning`), MIDI Time Code (`mtc`) and the MIDI Machine Control
-//! transport (`mmc-transport`).
+//! (`device-control`), MIDI Tuning (`tuning`), MIDI Time Code (`mtc`), the MIDI Machine Control
+//! transport (`mmc-transport`) and Notation Information (`notation`).
 //!
 //! The input is one complete System Exclusive message as bytes, with or without F0H and F7H, so
 //! the crate works for DIN bytes, USB-MIDI 1.0, BLE-MIDI and UMP System Exclusive (7-bit) data.
@@ -60,6 +60,11 @@ pub use mmc::{
     MAX_STRING,
 };
 
+#[cfg(feature = "notation")]
+pub mod notation;
+#[cfg(feature = "notation")]
+pub use notation::{Bar, BarMarker, TimeSignature};
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -68,7 +73,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("inquiry = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\", \"notation\"]"),
             "{manifest}"
         );
         assert!(manifest.contains("default = [\"full\"]"), "{manifest}");
@@ -80,7 +85,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("gm = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\", \"notation\"]"),
             "{manifest}"
         );
     }
@@ -91,7 +96,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("device-control = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\", \"notation\"]"),
             "{manifest}"
         );
     }
@@ -102,7 +107,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("tuning = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\", \"notation\"]"),
             "{manifest}"
         );
     }
@@ -113,7 +118,7 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("mtc = []"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\", \"notation\"]"),
             "{manifest}"
         );
     }
@@ -124,7 +129,18 @@ mod tests {
         let manifest = include_str!("../Cargo.toml");
         assert!(manifest.contains("mmc-transport = [\"mtc\"]"), "{manifest}");
         assert!(
-            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\"]"),
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\", \"notation\"]"),
+            "{manifest}"
+        );
+    }
+
+    #[test]
+    fn notation_is_in_the_default_features() {
+        // REQ-NOT-004: the Notation Information messages are on by default.
+        let manifest = include_str!("../Cargo.toml");
+        assert!(manifest.contains("notation = []"), "{manifest}");
+        assert!(
+            manifest.contains("full = [\"inquiry\", \"gm\", \"device-control\", \"tuning\", \"mtc\", \"mmc-transport\", \"notation\"]"),
             "{manifest}"
         );
     }

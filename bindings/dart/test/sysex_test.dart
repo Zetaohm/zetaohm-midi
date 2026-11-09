@@ -1,5 +1,5 @@
-// Universal System Exclusive, MIDI Time Code and MMC (REQ-DART-SX-*): M1 v4.2.1, RP-024, CA-025,
-// MIDI Tuning, RP-004, RP-013.
+// Universal System Exclusive, MIDI Time Code, MMC and Notation (REQ-DART-SX-*): M1 v4.2.1, RP-024,
+// CA-025, MIDI Tuning, RP-004, RP-013.
 import 'dart:convert';
 
 import 'package:test/test.dart';
@@ -305,5 +305,62 @@ void main() {
       invalid,
     );
     expect(readMmcFields(mmcFields([f])).map((x) => x.field), [0x01]);
+  });
+
+  test('Notation Information: M1 examples', () {
+    // M1 p. 54: 7FH 3FH is the running state with no known bar number; 01H 40H is the first count-in bar.
+    final unknown = [0xF0, 0x7F, 0x7F, 0x03, 0x01, 0x7F, 0x3F, 0xF7];
+    expect(readBarMarker(unknown), BarMarker(0x7F, barUnknown));
+    expect(barMarkerBytes(BarMarker(0x7F, 8191)), unknown);
+    expect(barMarkerBytes(BarMarker(0x7F, -8191)).sublist(5, 7), [0x01, 0x40]);
+    expect(barMarkerBytes(BarMarker(0, barNotRunning)).sublist(5, 7), [
+      0x00,
+      0x40,
+    ]);
+    expect(() => BarMarker(0x7F, 8192), invalid);
+    // M1 p. 55: 3/8 + 2/8 in one bar, Delayed: ln nn dd cc bb nn dd.
+    final compound = [
+      0xF0, 0x7F, 0x10, 0x03, 0x42, 0x06, 0x03, 0x03, 0x0C, 0x08, 0x02, //
+      0x03, 0xF7,
+    ];
+    final sig = TimeSignature(
+      0x10,
+      3,
+      3,
+      12,
+      8,
+      additional: [2, 3],
+      delayed: true,
+    );
+    expect(readTimeSignature(compound), sig);
+    expect(sig.pairs, [(2, 3)]);
+    expect(timeSignatureBytes(sig), compound);
+    expect(timeSignatureBytes(TimeSignature(0x7F, 4, 2, 24, 8)), [
+      0xF0, 0x7F, 0x7F, 0x03, 0x02, 0x04, 0x04, 0x02, 0x18, 0x08, 0xF7, //
+    ]);
+    expect(readBarMarker(compound), isNull);
+    expect(readTimeSignature(unknown), isNull);
+    expect(
+      () =>
+          timeSignatureBytes(TimeSignature(0x7F, 4, 2, 24, 8, additional: [2])),
+      invalid,
+    );
+    expect(
+      () => readTimeSignature([
+        0xF0,
+        0x7F,
+        0x7F,
+        0x03,
+        0x02,
+        0x05,
+        4,
+        2,
+        24,
+        8,
+        2,
+        0xF7,
+      ]),
+      malformed,
+    );
   });
 }

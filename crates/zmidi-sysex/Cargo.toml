@@ -2,7 +2,7 @@
 name = "zmidi-sysex"
 version = "0.1.0-alpha.1"
 edition = "2021"
-description = "MIDI 1.0 Universal System Exclusive messages: header, Device Inquiry, General MIDI, Device Control, MIDI Tuning, MIDI Time Code and MIDI Machine Control transport, no_std and no alloc"
+description = "MIDI 1.0 Universal System Exclusive messages: header, Device Inquiry, General MIDI, Device Control, MIDI Tuning, MIDI Time Code, MIDI Machine Control transport and Notation Information, no_std and no alloc"
 license = "MIT"
 rust-version.workspace = true
 repository.workspace = true
@@ -24,7 +24,7 @@ thiserror = { version = "2", default-features = false }
 [features]
 # DEC-017: one feature for each part; the base (header, IDs, Device ID, dispatch) is always built (DEC-022).
 default = ["full"]
-full = ["inquiry", "gm", "device-control", "tuning", "mtc", "mmc-transport"]
+full = ["inquiry", "gm", "device-control", "tuning", "mtc", "mmc-transport", "notation"]
 # Identity Request and Identity Reply (M1 General Information).
 inquiry = []
 # General MIDI System On and Off, GM2 System On (M1, RP-003, RP-024).
@@ -37,6 +37,8 @@ tuning = []
 mtc = []
 # MIDI Machine Control: the transport commands and responses of RP-013 (mmc-transport, DEC-022).
 mmc-transport = ["mtc"]
+# Bar Marker and Time Signature, Immediate and Delayed (M1 Notation Information).
+notation = []
 
 [dev-dependencies]
 proptest = "1"

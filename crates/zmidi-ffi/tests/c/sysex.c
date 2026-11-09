@@ -1,6 +1,7 @@
 /* REQ-FFI-SX-010: the sysex parts through the header, with the vectors of the zmidi-sysex tests: M1
  * v4.2.1 (Identity Reply, MIDI Tuning), RP-024 (GM2 System On), CA-025 (Master Volume), RP-004 (the
- * Quarter Frame example of p. 4, the Full Message), RP-013 (Example 2A, LOCATE [TARGET]). The file
+ * Quarter Frame example of p. 4, the Full Message), RP-013 (Example 2A, LOCATE [TARGET]), M1
+ * Notation Information (the Bar Marker values of p. 54, a Time Signature of p. 55). The file
  * needs only these parts (ZMIDI_MIDI1). */
 #ifndef ZMIDI_MIDI1
 #define ZMIDI_MIDI1
@@ -89,6 +90,36 @@ static void test_inquiry_gm_device_control(void) {
   CHECK(zmidi_fine_tuning_offset(0, &fine) == ZMIDI_STATUS_OK && fine == -8192);
   CHECK(zmidi_coarse_tuning_semitones(0x40, &coarse) == ZMIDI_STATUS_OK && coarse == 0);
   CHECK(zmidi_coarse_tuning_semitones(0x80, &coarse) == ZMIDI_STATUS_INVALID_ARGUMENT);
+}
+
+static void test_notation(void) {
+  /* M1 p. 54: 7FH 3FH is the running state with no known bar number; 01H 40H is the first count-in bar. */
+  static const uint8_t unknown[] = {0xF0, 0x7F, 0x7F, 0x03, 0x01, 0x7F, 0x3F, 0xF7};
+  /* M1 p. 55: 3/8 + 2/8 in one bar, Delayed: ln nn dd cc bb nn dd. */
+  static const uint8_t compound[] = {0xF0, 0x7F, 0x10, 0x03, 0x42, 0x06, 0x03,
+                                     0x03, 0x0C, 0x08, 0x02, 0x03, 0xF7};
+  static const uint8_t pair[] = {0x02, 0x03};
+  uint8_t dev = 0;
+  int16_t bar = 0;
+  ZmidiTimeSignature t;
+  CHECK(zmidi_bar_marker_read(unknown, sizeof unknown, &dev, &bar) == ZMIDI_STATUS_OK);
+  CHECK(dev == 0x7F && bar == ZMIDI_BAR_UNKNOWN);
+  CHECK(zmidi_bar_marker_write(0x7F, ZMIDI_BAR_UNKNOWN, out, sizeof out, &len) == ZMIDI_STATUS_OK);
+  CHECK(len == sizeof unknown && memcmp(out, unknown, len) == 0);
+  CHECK(zmidi_bar_marker_write(0x7F, -8191, out, sizeof out, &len) == ZMIDI_STATUS_OK);
+  CHECK(out[5] == 0x01 && out[6] == 0x40);
+  CHECK(zmidi_bar_marker_read(out, len, &dev, &bar) == ZMIDI_STATUS_OK && bar == -8191);
+  CHECK(zmidi_bar_marker_write(0x7F, ZMIDI_BAR_UNKNOWN + 1, out, sizeof out, &len) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_bar_marker_read(compound, sizeof compound, &dev, &bar) == ZMIDI_STATUS_NO_PENDING);
+  CHECK(zmidi_time_signature_read(compound, sizeof compound, &t) == ZMIDI_STATUS_OK);
+  CHECK(t.device_id == 0x10 && t.delayed && t.numerator == 3 && t.denominator_power == 3);
+  CHECK(t.clocks_per_click == 12 && t.thirty_seconds_per_quarter == 8);
+  CHECK(t.additional_length == 2 && memcmp(compound + t.additional_offset, pair, 2) == 0);
+  CHECK(zmidi_time_signature_write(0x10, true, 3, 3, 12, 8, pair, 2, out, sizeof out, &len) == ZMIDI_STATUS_OK);
+  CHECK(len == sizeof compound && memcmp(out, compound, len) == 0);
+  CHECK(zmidi_time_signature_write(0x10, true, 3, 3, 12, 8, pair, 1, out, sizeof out, &len) == ZMIDI_STATUS_INVALID_ARGUMENT);
+  CHECK(zmidi_time_signature_write(0x10, false, 4, 2, 24, 8, NULL, 0, NULL, 0, &len) == ZMIDI_STATUS_BUFFER_TOO_SMALL && len == 11);
+  CHECK(zmidi_time_signature_read(unknown, sizeof unknown, &t) == ZMIDI_STATUS_NO_PENDING);
 }
 
 static void test_tuning(void) {
@@ -254,6 +285,7 @@ int main(void) {
   test_tuning();
   test_mtc();
   test_mmc();
+  test_notation();
   if (failures) {
     printf("%d failures\n", failures);
     return 1;

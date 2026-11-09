@@ -18,7 +18,7 @@ module:
 | `zmidi::net` | [`zmidi-net`](../zmidi-net) | Network MIDI 2.0 (UDP) |
 | `zmidi::usb` | [`zmidi-usb`](../zmidi-usb) | USB-MIDI 2.0 and 1.0 |
 | `zmidi::ble` | [`zmidi-ble`](../zmidi-ble) | BLE-MIDI |
-| `zmidi::sysex` | [`zmidi-sysex`](../zmidi-sysex) | Universal System Exclusive, MIDI Time Code, MIDI Machine Control (transport) |
+| `zmidi::sysex` | [`zmidi-sysex`](../zmidi-sysex) | Universal System Exclusive, MIDI Time Code, MIDI Machine Control (transport), Notation Information |
 
 For the smallest firmware, turn off the default features (`default-features = false`) and select
 the parts, or depend on the individual crates and select their features.

@@ -268,6 +268,72 @@ ZmidiStatus zmidi_bank_program_messages(
   );
 }
 
+/// Reads a Bar Marker: the Device ID and the signed bar number, -8192 to 8191
+/// (REQ-FFI-SX-011).
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `device_id` and `bar` are null or
+/// writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Pointer<ffi.Int16>,
+  )
+>(symbol: 'zmidi_bar_marker_read')
+external int _zmidi_bar_marker_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Uint8> device_id,
+  ffi.Pointer<ffi.Int16> bar,
+);
+
+ZmidiStatus zmidi_bar_marker_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ffi.Uint8> device_id,
+  ffi.Pointer<ffi.Int16> bar,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_bar_marker_read(bytes, length, device_id, bar),
+  );
+}
+
+/// Writes a Bar Marker (REQ-FFI-SX-011). A bar number outside -8192 to 8191 gives
+/// [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Int16,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_bar_marker_write')
+external int _zmidi_bar_marker_write(
+  int device_id,
+  int bar,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_bar_marker_write(
+  int device_id,
+  int bar,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_bar_marker_write(device_id, bar, out, capacity, length),
+  );
+}
+
 /// Reads one packet (`len` bytes) and writes each UMP of it into `out` (`capacity` records), the
 /// record count into `count` and the count of dropped parts into `dropped`. A `capacity` below
 /// `len` gives [`ZmidiStatus::BufferTooSmall`] before the packet is read.
@@ -6925,6 +6991,97 @@ ZmidiStatus zmidi_time_code_with_short(
   return ZmidiStatus.fromValue(_zmidi_time_code_with_short(last, bytes, code));
 }
 
+/// Reads a Time Signature, Immediate or Delayed (REQ-FFI-SX-011).
+///
+/// # Safety
+/// `bytes` is null or points to `length` readable bytes; `out` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ZmidiTimeSignature>,
+  )
+>(symbol: 'zmidi_time_signature_read')
+external int _zmidi_time_signature_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ZmidiTimeSignature> out,
+);
+
+ZmidiStatus zmidi_time_signature_read(
+  ffi.Pointer<ffi.Uint8> bytes,
+  int length,
+  ffi.Pointer<ZmidiTimeSignature> out,
+) {
+  return ZmidiStatus.fromValue(_zmidi_time_signature_read(bytes, length, out));
+}
+
+/// Writes a Time Signature with `additional_length` bytes of additional `nn dd` pairs; ln is 4 +
+/// the additional length (REQ-FFI-SX-011). An odd length, more than 61 pairs or a value above 7FH
+/// gives [`ZmidiStatus::InvalidArgument`].
+///
+/// # Safety
+/// `additional` is null or points to `additional_length` readable bytes; `out` is null or points
+/// to `capacity` writable bytes; `length` is null or writable.
+@ffi.Native<
+  ffi.UnsignedInt Function(
+    ffi.Uint8,
+    ffi.Bool,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Uint8,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.UintPtr,
+    ffi.Pointer<ffi.UintPtr>,
+  )
+>(symbol: 'zmidi_time_signature_write')
+external int _zmidi_time_signature_write(
+  int device_id,
+  bool delayed,
+  int numerator,
+  int denominator_power,
+  int clocks_per_click,
+  int thirty_seconds_per_quarter,
+  ffi.Pointer<ffi.Uint8> additional,
+  int additional_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+);
+
+ZmidiStatus zmidi_time_signature_write(
+  int device_id,
+  bool delayed,
+  int numerator,
+  int denominator_power,
+  int clocks_per_click,
+  int thirty_seconds_per_quarter,
+  ffi.Pointer<ffi.Uint8> additional,
+  int additional_length,
+  ffi.Pointer<ffi.Uint8> out,
+  int capacity,
+  ffi.Pointer<ffi.UintPtr> length,
+) {
+  return ZmidiStatus.fromValue(
+    _zmidi_time_signature_write(
+      device_id,
+      delayed,
+      numerator,
+      denominator_power,
+      clocks_per_click,
+      thirty_seconds_per_quarter,
+      additional,
+      additional_length,
+      out,
+      capacity,
+      length,
+    ),
+  );
+}
+
 /// Gives the checksum of `bytes`: the XOR of the bytes, masked to 7 bits (M1 MIDI Tuning;
 /// REQ-FFI-SX-006).
 ///
@@ -8416,7 +8573,7 @@ ZmidiStatus zmidi_usb_link_write_packet(
 
 const int ZMIDI_ABI_MAJOR = 0;
 
-const int ZMIDI_ABI_MINOR = 11;
+const int ZMIDI_ABI_MINOR = 12;
 
 const int ZMIDI_ACTIVE_SENSING_INTERVAL_US = 270000;
 
@@ -8425,6 +8582,10 @@ const int ZMIDI_ACTIVE_SENSING_MONITOR_WORDS = 2;
 const int ZMIDI_ACTIVE_SENSING_SENDER_WORDS = 2;
 
 const int ZMIDI_ACTIVE_SENSING_TIMEOUT_US = 330000;
+
+const int ZMIDI_BAR_NOT_RUNNING = -8192;
+
+const int ZMIDI_BAR_UNKNOWN = 8191;
 
 const int ZMIDI_BLE_READER_WORDS = 25;
 
@@ -11607,6 +11768,61 @@ final class ZmidiTimeCode extends ffi.Struct {
   /// n: no time code, of the {st} form.
   @ffi.Bool()
   external bool no_time_code;
+}
+
+/// One Time Signature message as flat values (REQ-FFI-SX-011).
+final class ZmidiTimeSignature extends ffi.Struct {
+  /// The Device ID; 7FH addresses all devices.
+  @ffi.Uint8()
+  external int device_id;
+
+  /// False for Immediate (02H), true for Delayed (42H).
+  @ffi.Bool()
+  external bool delayed;
+
+  /// `nn`: the numerator.
+  @ffi.Uint8()
+  external int numerator;
+
+  /// `dd`: the denominator as a negative power of 2 (2 = quarter note).
+  @ffi.Uint8()
+  external int denominator_power;
+
+  /// `cc`: MIDI clocks in a metronome click.
+  @ffi.Uint8()
+  external int clocks_per_click;
+
+  /// `bb`: notated 32nd notes in a MIDI quarter note.
+  @ffi.Uint8()
+  external int thirty_seconds_per_quarter;
+
+  /// The offset in the input of the additional `nn dd` pairs.
+  @ffi.Uint32()
+  external int additional_offset;
+
+  /// The length of the additional pairs in bytes, an even number.
+  @ffi.Uint32()
+  external int additional_length;
+
+  static ffi.Pointer<ZmidiTimeSignature> $allocate(
+    ffi.Allocator $allocator, {
+    required int device_id,
+    required bool delayed,
+    required int numerator,
+    required int denominator_power,
+    required int clocks_per_click,
+    required int thirty_seconds_per_quarter,
+    required int additional_offset,
+    required int additional_length,
+  }) => $allocator<ZmidiTimeSignature>()
+    ..ref.device_id = device_id
+    ..ref.delayed = delayed
+    ..ref.numerator = numerator
+    ..ref.denominator_power = denominator_power
+    ..ref.clocks_per_click = clocks_per_click
+    ..ref.thirty_seconds_per_quarter = thirty_seconds_per_quarter
+    ..ref.additional_offset = additional_offset
+    ..ref.additional_length = additional_length;
 }
 
 /// One MIDI Tuning message as flat values; the fields that the kind does not have are 0

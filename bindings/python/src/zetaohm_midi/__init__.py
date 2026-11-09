@@ -1,9 +1,12 @@
 """MIDI 2.0 for Python: the Rust crates of zetaohm-midi through PyO3 (DEC-019)."""
 
 from zetaohm_midi._native import (
+    BAR_NOT_RUNNING,
+    BAR_UNKNOWN,
     PITCH_UNITS_PER_SEMITONE,
     ActiveSensingMonitor,
     ActiveSensingSender,
+    BarMarker,
     BleReader,
     BleWriter,
     BytesToUmp,
@@ -50,6 +53,7 @@ from zetaohm_midi._native import (
     SyncReceiver,
     SysexInfo,
     TimeCode,
+    TimeSignature,
     TuningMessage,
     Ump,
     UmpToBytes,
@@ -99,6 +103,7 @@ from zetaohm_midi._native import (
     parse_sysex,
     pitch_bend_value,
     pitch_offset,
+    read_bar_marker,
     read_clip,
     read_device_control,
     read_gm_system,
@@ -107,6 +112,7 @@ from zetaohm_midi._native import (
     read_mmc_fields,
     read_mtc_full,
     read_mtc_user_bits,
+    read_time_signature,
     read_tuning,
     reset_value,
     respond_identity,
@@ -130,9 +136,12 @@ from zetaohm_midi._native import (
 )
 
 __all__ = [
+    "BAR_NOT_RUNNING",
+    "BAR_UNKNOWN",
     "PITCH_UNITS_PER_SEMITONE",
     "ActiveSensingMonitor",
     "ActiveSensingSender",
+    "BarMarker",
     "BleReader",
     "BleWriter",
     "BytesToUmp",
@@ -179,6 +188,7 @@ __all__ = [
     "SyncReceiver",
     "SysexInfo",
     "TimeCode",
+    "TimeSignature",
     "TuningMessage",
     "Ump",
     "UmpToBytes",
@@ -228,6 +238,7 @@ __all__ = [
     "parse_sysex",
     "pitch_bend_value",
     "pitch_offset",
+    "read_bar_marker",
     "read_clip",
     "read_device_control",
     "read_gm_system",
@@ -236,6 +247,7 @@ __all__ = [
     "read_mmc_fields",
     "read_mtc_full",
     "read_mtc_user_bits",
+    "read_time_signature",
     "read_tuning",
     "reset_value",
     "respond_identity",

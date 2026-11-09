@@ -122,10 +122,11 @@ mpe_tx = ["io", "zmidi-io/mpe"]
 # The General MIDI receiver of 16 channels with a controller state each (zmidi-io gm, DEC-022).
 gm_rx = ["io", "zmidi-io/gm"]
 # zmidi-sysex (DEC-022): the Identity Request responder; the General MIDI and Device Control readers;
-# the MIDI Tuning reader and the Scale/Octave Tuning writer.
+# the MIDI Tuning reader and the Scale/Octave Tuning writer; the Notation readers and the Bar Marker writer.
 sx_inquiry = ["dep:zmidi-sysex", "zmidi-sysex/inquiry"]
 sx_gm_dc = ["dep:zmidi-sysex", "zmidi-sysex/gm", "zmidi-sysex/device-control"]
 sx_tuning = ["dep:zmidi-sysex", "zmidi-sysex/tuning"]
+sx_notation = ["dep:zmidi-sysex", "zmidi-sysex/notation"]
 # The MIDI Time Code reader (Quarter Frames and the Full Message) and the generator (zmidi-sysex mtc).
 mtc_rx = ["dep:zmidi-sysex", "zmidi-sysex/mtc"]
 mtc_tx = ["dep:zmidi-sysex", "zmidi-sysex/mtc"]

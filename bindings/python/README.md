@@ -22,8 +22,8 @@ typed package over the Rust crates of [zetaohm-midi](../../README.md).
   `gm2_controller_default` and `rhythm_ignores_message` (RP-024).
 - Universal System Exclusive: `parse_sysex`, Device Inquiry (`read_inquiry`, `respond_identity`), the
   GM System messages, Device Control, MIDI Tuning (`read_tuning` and the dump writers), MIDI Time Code
-  (`MtcGenerator`, `MtcReader`, the Full Message) and the MMC transport tier (`read_mmc`,
-  `mmc_commands`, `mmc_responses`).
+  (`MtcGenerator`, `MtcReader`, the Full Message), the MMC transport tier (`read_mmc`,
+  `mmc_commands`, `mmc_responses`) and Notation Information (`read_bar_marker`, `read_time_signature`).
 - MIDI-CI: `CiDevice`, with Profiles, Property Exchange and Process Inquiry.
 - Network MIDI 2.0: `NetHost` and `NetClient`, with authentication.
 - USB-MIDI: `UsbLink`. BLE-MIDI: `BleReader` and `BleWriter`.

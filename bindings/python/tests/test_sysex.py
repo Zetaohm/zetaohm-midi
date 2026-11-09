@@ -1,5 +1,5 @@
-"""Universal System Exclusive, MIDI Time Code and MMC (REQ-PY-SX-*): M1 v4.2.1, RP-024, CA-025, the
-MIDI Tuning specification, RP-004 and RP-013."""
+"""Universal System Exclusive, MIDI Time Code, MMC and Notation (REQ-PY-SX-*): M1 v4.2.1, RP-024,
+CA-025, the MIDI Tuning specification, RP-004 and RP-013."""
 
 import pytest
 
@@ -181,3 +181,33 @@ def test_mmc_transport_rp013_examples() -> None:
         )
     w = zm.MmcCommand("write", data=zm.mmc_fields([f]))
     assert [x.field for x in zm.read_mmc_fields(w.data)] == [0x01]
+
+
+def test_notation_m1_examples() -> None:
+    # M1 p. 54: 7FH 3FH is the running state with no known bar number; 01H 40H is the first
+    # count-in bar.
+    unknown = bytes([0xF0, 0x7F, 0x7F, 0x03, 0x01, 0x7F, 0x3F, 0xF7])
+    b = zm.read_bar_marker(unknown)
+    assert b is not None and (b.device_id, b.bar) == (0x7F, zm.BAR_UNKNOWN)
+    assert b == zm.BarMarker(0x7F, 8191) and b.to_bytes() == unknown
+    assert zm.BarMarker(0x7F, -8191).to_bytes()[5:7] == bytes([0x01, 0x40])
+    assert zm.BarMarker(0, zm.BAR_NOT_RUNNING).to_bytes()[5:7] == bytes([0x00, 0x40])
+    with pytest.raises(zm.InvalidValueError):
+        zm.BarMarker(0x7F, 8192)
+    # M1 p. 55: 3/8 + 2/8 in one bar, Delayed: ln nn dd cc bb nn dd.
+    compound = bytes([0xF0, 0x7F, 0x10, 0x03, 0x42, 0x06, 0x03, 0x03, 0x0C, 0x08, 0x02, 0x03, 0xF7])
+    t = zm.read_time_signature(compound)
+    assert t is not None and t.delayed and (t.numerator, t.denominator_power) == (3, 3)
+    assert (t.clocks_per_click, t.thirty_seconds_per_quarter) == (12, 8)
+    assert t.pairs == [(2, 3)] and t.additional == bytes([2, 3])
+    assert t == zm.TimeSignature(0x10, 3, 3, 12, 8, bytes([2, 3]), delayed=True)
+    assert t.to_bytes() == compound
+    four = zm.TimeSignature(0x7F, 4, 2, 24, 8)
+    assert four.to_bytes() == bytes(
+        [0xF0, 0x7F, 0x7F, 0x03, 0x02, 0x04, 0x04, 0x02, 0x18, 0x08, 0xF7]
+    )
+    assert zm.read_bar_marker(compound) is None and zm.read_time_signature(unknown) is None
+    with pytest.raises(zm.InvalidValueError):
+        zm.TimeSignature(0x7F, 4, 2, 24, 8, bytes([2]))
+    with pytest.raises(zm.MalformedError):
+        zm.read_time_signature(bytes([0xF0, 0x7F, 0x7F, 0x03, 0x02, 0x05, 4, 2, 24, 8, 2, 0xF7]))

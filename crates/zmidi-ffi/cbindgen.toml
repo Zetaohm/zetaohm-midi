@@ -85,6 +85,9 @@ after_includes = """
 #ifndef ZMIDI_MMC_TRANSPORT
 #define ZMIDI_MMC_TRANSPORT
 #endif
+#ifndef ZMIDI_NOTATION
+#define ZMIDI_NOTATION
+#endif
 #endif
 /* The General MIDI receiver needs the mode, controller and parameter parts, and the GM System
  * messages need the sysex base, as the Cargo feature gm does. */
@@ -104,7 +107,8 @@ after_includes = """
 #define ZMIDI_MTC
 #endif
 #if !defined(ZMIDI_SYSEX) && (defined(ZMIDI_GM) || defined(ZMIDI_INQUIRY) || \
-    defined(ZMIDI_DEVICE_CONTROL) || defined(ZMIDI_TUNING) || defined(ZMIDI_MTC))
+    defined(ZMIDI_DEVICE_CONTROL) || defined(ZMIDI_TUNING) || defined(ZMIDI_MTC) || \
+    defined(ZMIDI_NOTATION))
 #define ZMIDI_SYSEX
 #endif
 /* The MPE receiver takes the events of the parameter receiver, as the Cargo feature mpe does. */
@@ -155,6 +159,7 @@ aligned_n = "ZMIDI_ALIGNED"
 "feature = tuning" = "ZMIDI_TUNING"
 "feature = mtc" = "ZMIDI_MTC"
 "feature = mmc-transport" = "ZMIDI_MMC_TRANSPORT"
+"feature = notation" = "ZMIDI_NOTATION"
 "feature = midi1" = "ZMIDI_MIDI1"
 "target_pointer_width = 64" = "ZMIDI_PTR64"
 

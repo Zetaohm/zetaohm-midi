@@ -120,8 +120,11 @@ export {
 } from "./ump.js";
 export type { Ump } from "./ump.js";
 export {
+  BAR_NOT_RUNNING,
+  BAR_UNKNOWN,
   MtcGenerator,
   MtcReader,
+  barMarkerBytes,
   coarseTuningSemitones,
   deviceControlBytes,
   fineTuningOffset,
@@ -145,6 +148,7 @@ export {
   mtcToFrameCount,
   mtcUserBits,
   parseSysex,
+  readBarMarker,
   readDeviceControl,
   readGmSystem,
   readInquiry,
@@ -152,6 +156,7 @@ export {
   readMmcFields,
   readMtcFull,
   readMtcUserBits,
+  readTimeSignature,
   readTuning,
   respondIdentity,
   sysexAddressed,
@@ -162,6 +167,8 @@ export {
   timeCodeToStatusForm,
   timeCodeToSubframesForm,
   timeCodeWithShort,
+  timeSignatureBytes,
+  timeSignaturePairs,
   tuningChecksum,
   tuningDumpRequest,
   tuningKeyDump,
@@ -171,6 +178,7 @@ export {
   universalSysex,
 } from "./sysex.js";
 export type {
+  BarMarker,
   DeviceControl,
   DeviceControlKind,
   FrequencyWord,
@@ -187,6 +195,7 @@ export type {
   SysexClass,
   SysexInfo,
   TimeCode,
+  TimeSignature,
   TuningKind,
   TuningMessage,
   TuningNote,

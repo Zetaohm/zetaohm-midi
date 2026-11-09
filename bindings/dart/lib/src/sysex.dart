@@ -1,6 +1,6 @@
-/// Universal System Exclusive, MIDI Time Code and the MIDI Machine Control transport tier
-/// (zmidi-sysex through the C ABI, module Sysex of zmidi-ffi): M1 v4.2.1, RP-024, CA-025, MIDI
-/// Tuning, RP-004, RP-013. A reader takes one whole message, with or without F0H and F7H, and gives
+/// Universal System Exclusive, MIDI Time Code, the MIDI Machine Control transport tier and Notation
+/// Information (zmidi-sysex through the C ABI, module Sysex of zmidi-ffi): M1 v4.2.1, RP-024, CA-025,
+/// MIDI Tuning, RP-004, RP-013. A reader takes one whole message, with or without F0H and F7H, and gives
 /// null for a message of another part; a bad message of its part throws [MalformedException]. A
 /// writer gives the bytes of the whole message; a value out of range throws
 /// [InvalidValueException].
@@ -1123,3 +1123,150 @@ Uint8List mmcResponses(int deviceId, List<MmcField> fields) => be.mmcResponses(
 /// The name and data bytes of Information Fields, for the data of a WRITE command.
 Uint8List mmcFields(List<MmcField> fields) =>
     be.mmcFields([for (final f in fields) f._raw]);
+
+// --- Notation ---
+
+/// The Bar Marker bar number Not Running: -8192 (M1 Notation Information).
+const barNotRunning = -8192;
+
+/// The Bar Marker bar number Running with an unknown bar number: 8191.
+const barUnknown = 8191;
+
+/// One Bar Marker message: the signed bar number, [barNotRunning] to [barUnknown]; -8191 to 0 are
+/// count-in bars.
+final class BarMarker {
+  /// A Bar Marker; a bar number out of range throws [InvalidValueException].
+  BarMarker(int deviceId, this.bar)
+    : deviceId = checkInt('deviceId', deviceId, 255) {
+    if (bar < barNotRunning || bar > barUnknown) {
+      throw InvalidValueException('bar must be -8192 to 8191, not $bar');
+    }
+  }
+
+  /// The Device ID.
+  final int deviceId;
+
+  /// The signed bar number.
+  final int bar;
+
+  @override
+  bool operator ==(Object other) =>
+      other is BarMarker && other.deviceId == deviceId && other.bar == bar;
+
+  @override
+  int get hashCode => Object.hash(deviceId, bar);
+}
+
+/// Reads a Bar Marker, or gives null.
+BarMarker? readBarMarker(List<int> data) {
+  final r = be.readBarMarker(_bytes('data', data));
+  return r == null ? null : BarMarker(r.$1, r.$2);
+}
+
+/// The bytes of a Bar Marker.
+Uint8List barMarkerBytes(BarMarker marker) =>
+    be.barMarkerBytes(marker.deviceId, marker.bar);
+
+/// One Time Signature message, Immediate or [delayed] (at the next Bar Marker). [denominatorPower]
+/// is a negative power of 2 (2 = quarter note); [additional] holds the numerator and
+/// denominator-power pairs of a compound time signature, at most 61 pairs.
+final class TimeSignature {
+  /// A Time Signature; the C layer checks the 7-bit fields and the pairs.
+  TimeSignature(
+    int deviceId,
+    int numerator,
+    int denominatorPower,
+    int clocksPerClick,
+    int thirtySecondsPerQuarter, {
+    List<int> additional = const [],
+    this.delayed = false,
+  }) : deviceId = checkInt('deviceId', deviceId, 255),
+       numerator = checkInt('numerator', numerator, 255),
+       denominatorPower = checkInt('denominatorPower', denominatorPower, 255),
+       clocksPerClick = checkInt('clocksPerClick', clocksPerClick, 255),
+       thirtySecondsPerQuarter = checkInt(
+         'thirtySecondsPerQuarter',
+         thirtySecondsPerQuarter,
+         255,
+       ),
+       additional = _bytes('additional', additional);
+
+  /// The Device ID.
+  final int deviceId;
+
+  /// True for the Delayed form (42H).
+  final bool delayed;
+
+  /// `nn`: the numerator.
+  final int numerator;
+
+  /// `dd`: the denominator as a negative power of 2.
+  final int denominatorPower;
+
+  /// `cc`: MIDI clocks in a metronome click.
+  final int clocksPerClick;
+
+  /// `bb`: notated 32nd notes in a MIDI quarter note.
+  final int thirtySecondsPerQuarter;
+
+  /// The additional pairs as bytes.
+  final Uint8List additional;
+
+  /// The additional pairs, (numerator, denominatorPower).
+  List<(int, int)> get pairs => [
+    for (var i = 0; i + 1 < additional.length; i += 2)
+      (additional[i], additional[i + 1]),
+  ];
+
+  be.RawTimeSignature get _raw => (
+    deviceId,
+    delayed,
+    numerator,
+    denominatorPower,
+    clocksPerClick,
+    thirtySecondsPerQuarter,
+    additional,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is TimeSignature &&
+      other.deviceId == deviceId &&
+      other.delayed == delayed &&
+      other.numerator == numerator &&
+      other.denominatorPower == denominatorPower &&
+      other.clocksPerClick == clocksPerClick &&
+      other.thirtySecondsPerQuarter == thirtySecondsPerQuarter &&
+      _same(other.additional, additional);
+
+  @override
+  int get hashCode => Object.hash(
+    deviceId,
+    delayed,
+    numerator,
+    denominatorPower,
+    clocksPerClick,
+    thirtySecondsPerQuarter,
+    Object.hashAll(additional),
+  );
+}
+
+/// Reads a Time Signature, Immediate or Delayed, or gives null.
+TimeSignature? readTimeSignature(List<int> data) {
+  final r = be.readTimeSignature(_bytes('data', data));
+  return r == null
+      ? null
+      : TimeSignature(
+          r.$1,
+          r.$3,
+          r.$4,
+          r.$5,
+          r.$6,
+          additional: r.$7,
+          delayed: r.$2,
+        );
+}
+
+/// The bytes of a Time Signature.
+Uint8List timeSignatureBytes(TimeSignature signature) =>
+    be.timeSignatureBytes(signature._raw);

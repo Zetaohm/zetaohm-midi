@@ -20,9 +20,10 @@ export const ABI_MAJOR = 0;
  * gives the sync receiver and Active Sensing (zmidi_sync_*, zmidi_active_sensing_*); 10 gives MPE
  * (zmidi_mpe_*); 11 gives the General MIDI receiver and the Universal System Exclusive parts (zmidi_gm_*,
  * zmidi_sysex_*, zmidi_inquiry_*, zmidi_device_control_*, zmidi_tuning_*, zmidi_mtc_*, zmidi_time_code_*,
- * zmidi_mmc_*). 6 adds only a C call that the package does not use.
+ * zmidi_mmc_*); 12 gives Notation Information (zmidi_bar_marker_*, zmidi_time_signature_*). 6 adds
+ * only a C call that the package does not use.
  */
-export const ABI_MINOR = 11;
+export const ABI_MINOR = 12;
 
 interface State {
   exports: Record<string, CFn>;

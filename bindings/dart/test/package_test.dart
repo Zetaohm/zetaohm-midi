@@ -22,8 +22,8 @@ void main() {
     ]);
   });
 
-  test('refuses a native library of C ABI 0.1 to 0.10 or 1.x', () {
-    // REQ-DART-PKG-002: the package needs C ABI 0.11 or a later 0.x.
+  test('refuses a native library of C ABI 0.1 to 0.11 or 1.x', () {
+    // REQ-DART-PKG-002: the package needs C ABI 0.12 or a later 0.x.
     expect(() => checkAbiVersion(0x00000001), throwsA(isA<MidiException>()));
     expect(() => checkAbiVersion(0x00010002), throwsA(isA<MidiException>()));
     expect(() => checkAbiVersion(0x00000002), throwsA(isA<MidiException>()));
@@ -35,8 +35,9 @@ void main() {
     expect(() => checkAbiVersion(0x00000008), throwsA(isA<MidiException>()));
     expect(() => checkAbiVersion(0x00000009), throwsA(isA<MidiException>()));
     expect(() => checkAbiVersion(0x0000000A), throwsA(isA<MidiException>()));
-    checkAbiVersion(0x0000000B);
+    expect(() => checkAbiVersion(0x0000000B), throwsA(isA<MidiException>()));
     checkAbiVersion(0x0000000C);
+    checkAbiVersion(0x0000000D);
   });
 
   test('the UMP split table is the word count of the library', () {

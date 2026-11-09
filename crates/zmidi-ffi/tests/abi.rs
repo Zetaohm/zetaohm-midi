@@ -1899,8 +1899,9 @@ mod sysex {
     use zmidi::status::ZmidiStatus;
     use zmidi::sysex::*;
     use zmidi_sysex::{
-        DeviceControl, GeneralMidi, InfoField, InfoFields, InquiryMessage, MmcCommand, MmcMessage,
-        MtcGenerator, MtcReader, MtcTime, Sysex, SysexId, TimeCodeType, TuningMessage, Universal,
+        BarMarker, DeviceControl, GeneralMidi, InfoField, InfoFields, InquiryMessage, MmcCommand,
+        MmcMessage, MtcGenerator, MtcReader, MtcTime, Sysex, SysexId, TimeCodeType, TimeSignature,
+        TuningMessage, Universal,
     };
 
     fn universal(bytes: &[u8]) -> Option<Universal<'_>> {
@@ -2010,6 +2011,57 @@ mod sysex {
                 for (c, (k, w)) in notes.iter().zip(changes) {
                     prop_assert_eq!((c.key, c.word.semitone, c.word.fraction), (k, w.semitone, w.fraction));
                 }
+            }
+        });
+    }
+
+    #[test]
+    fn prop_notation_equals_rust() {
+        // REQ-FFI-SX-011: the Notation readers and writers give what zmidi-sysex gives.
+        proptest!(|(
+            rt in any::<bool>(),
+            dev in 0u8..0x80,
+            sub2 in prop::sample::select(vec![0x01u8, 0x02, 0x42, 0x03]),
+            data in proptest::collection::vec(0u8..0x80, 0..12),
+            ln_ok in any::<bool>(),
+        )| {
+            let mut bytes = vec![0xF0, if rt { 0x7F } else { 0x7E }, dev, 0x03, sub2];
+            let mut data = data;
+            if ln_ok && !data.is_empty() {
+                data[0] = data.len() as u8 - 1;
+            }
+            bytes.extend(&data);
+            bytes.push(0xF7);
+            let u = universal(&bytes);
+            let (p, n) = (bytes.as_ptr(), bytes.len());
+            let mut out = [0u8; 40];
+            let mut rust = [0u8; 40];
+            let mut len = 0usize;
+            let want = u.as_ref().map(BarMarker::from_universal);
+            let (mut d, mut bar) = (0u8, 0i16);
+            prop_assert_eq!(unsafe { zmidi_bar_marker_read(p, n, &mut d, &mut bar) }, class(&want));
+            if let Some(Ok(Some(m))) = want {
+                prop_assert_eq!((d, bar), (m.device_id, m.bar.value()));
+                prop_assert_eq!(unsafe { zmidi_bar_marker_write(d, bar, out.as_mut_ptr(), out.len(), &mut len) }, ZmidiStatus::Ok);
+                let k = m.write(&mut rust).unwrap();
+                prop_assert_eq!(&out[..len], &rust[..k]);
+            }
+            let want = u.as_ref().map(TimeSignature::from_universal);
+            let mut t = core::mem::MaybeUninit::<ZmidiTimeSignature>::zeroed();
+            prop_assert_eq!(unsafe { zmidi_time_signature_read(p, n, t.as_mut_ptr()) }, class(&want));
+            if let Some(Ok(Some(m))) = want {
+                let t = unsafe { t.assume_init() };
+                let at = t.additional_offset as usize;
+                let extra = &bytes[at..at + t.additional_length as usize];
+                prop_assert_eq!(extra, m.additional);
+                prop_assert_eq!((t.device_id, t.delayed, t.numerator, t.denominator_power), (m.device_id, m.delayed, m.numerator, m.denominator_power));
+                prop_assert_eq!((t.clocks_per_click, t.thirty_seconds_per_quarter), (m.clocks_per_click, m.thirty_seconds_per_quarter));
+                let got = unsafe {
+                    zmidi_time_signature_write(t.device_id, t.delayed, t.numerator, t.denominator_power, t.clocks_per_click, t.thirty_seconds_per_quarter, extra.as_ptr(), extra.len(), out.as_mut_ptr(), out.len(), &mut len)
+                };
+                prop_assert_eq!(got, ZmidiStatus::Ok);
+                let k = m.write(&mut rust).unwrap();
+                prop_assert_eq!(&out[..len], &rust[..k]);
             }
         });
     }

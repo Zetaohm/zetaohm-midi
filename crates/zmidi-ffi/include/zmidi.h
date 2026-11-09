@@ -85,6 +85,9 @@
 #ifndef ZMIDI_MMC_TRANSPORT
 #define ZMIDI_MMC_TRANSPORT
 #endif
+#ifndef ZMIDI_NOTATION
+#define ZMIDI_NOTATION
+#endif
 #endif
 /* The General MIDI receiver needs the mode, controller and parameter parts, and the GM System
  * messages need the sysex base, as the Cargo feature gm does. */
@@ -103,7 +106,7 @@
 #if defined(ZMIDI_MMC_TRANSPORT) && !defined(ZMIDI_MTC)
 #define ZMIDI_MTC
 #endif
-#if !defined(ZMIDI_SYSEX) && (defined(ZMIDI_GM) || defined(ZMIDI_INQUIRY) || defined(ZMIDI_DEVICE_CONTROL) || defined(ZMIDI_TUNING) || defined(ZMIDI_MTC))
+#if !defined(ZMIDI_SYSEX) && (defined(ZMIDI_GM) || defined(ZMIDI_INQUIRY) || defined(ZMIDI_DEVICE_CONTROL) || defined(ZMIDI_TUNING) || defined(ZMIDI_MTC) || defined(ZMIDI_NOTATION))
 #define ZMIDI_SYSEX
 #endif
 /* The MPE receiver takes the events of the parameter receiver, as the Cargo feature mpe does. */
@@ -533,7 +536,21 @@
 /**
  * Minor version of the C ABI. It changes when a function or a status value is added.
  */
-#define ZMIDI_ABI_MINOR 11
+#define ZMIDI_ABI_MINOR 12
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+/**
+ * The Bar Marker value Not Running, -8192 (00H 40H; REQ-FFI-SX-011).
+ */
+#define ZMIDI_BAR_NOT_RUNNING -8192
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+/**
+ * The Bar Marker value Running with an unknown bar number, 8191 (7FH 3FH; REQ-FFI-SX-011).
+ */
+#define ZMIDI_BAR_UNKNOWN 8191
+#endif
 
 #if (defined(ZMIDI_SYSEX) && defined(ZMIDI_MTC))
 /**
@@ -3696,6 +3713,46 @@ typedef struct ZmidiDeviceControl {
    */
   uint16_t value;
 } ZmidiDeviceControl;
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+/**
+ * One Time Signature message as flat values (REQ-FFI-SX-011).
+ */
+typedef struct ZmidiTimeSignature {
+  /**
+   * The Device ID; 7FH addresses all devices.
+   */
+  uint8_t device_id;
+  /**
+   * False for Immediate (02H), true for Delayed (42H).
+   */
+  bool delayed;
+  /**
+   * `nn`: the numerator.
+   */
+  uint8_t numerator;
+  /**
+   * `dd`: the denominator as a negative power of 2 (2 = quarter note).
+   */
+  uint8_t denominator_power;
+  /**
+   * `cc`: MIDI clocks in a metronome click.
+   */
+  uint8_t clocks_per_click;
+  /**
+   * `bb`: notated 32nd notes in a MIDI quarter note.
+   */
+  uint8_t thirty_seconds_per_quarter;
+  /**
+   * The offset in the input of the additional `nn dd` pairs.
+   */
+  uint32_t additional_offset;
+  /**
+   * The length of the additional pairs in bytes, an even number.
+   */
+  uint32_t additional_length;
+} ZmidiTimeSignature;
 #endif
 
 #if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))
@@ -7308,6 +7365,71 @@ enum ZmidiStatus zmidi_fine_tuning_offset(uint16_t value, int16_t *offset);
  * `semitones` is null or writable.
  */
 enum ZmidiStatus zmidi_coarse_tuning_semitones(uint8_t msb, int8_t *semitones);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+/**
+ * Reads a Bar Marker: the Device ID and the signed bar number, -8192 to 8191
+ * (REQ-FFI-SX-011).
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `device_id` and `bar` are null or
+ * writable.
+ */
+enum ZmidiStatus zmidi_bar_marker_read(const uint8_t *bytes,
+                                       uintptr_t length,
+                                       uint8_t *device_id,
+                                       int16_t *bar);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+/**
+ * Writes a Bar Marker (REQ-FFI-SX-011). A bar number outside -8192 to 8191 gives
+ * [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `out` is null or points to `capacity` writable bytes; `length` is null or writable.
+ */
+enum ZmidiStatus zmidi_bar_marker_write(uint8_t device_id,
+                                        int16_t bar,
+                                        uint8_t *out,
+                                        uintptr_t capacity,
+                                        uintptr_t *length);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+/**
+ * Reads a Time Signature, Immediate or Delayed (REQ-FFI-SX-011).
+ *
+ * # Safety
+ * `bytes` is null or points to `length` readable bytes; `out` is null or writable.
+ */
+enum ZmidiStatus zmidi_time_signature_read(const uint8_t *bytes,
+                                           uintptr_t length,
+                                           struct ZmidiTimeSignature *out);
+#endif
+
+#if (defined(ZMIDI_SYSEX) && defined(ZMIDI_NOTATION))
+/**
+ * Writes a Time Signature with `additional_length` bytes of additional `nn dd` pairs; ln is 4 +
+ * the additional length (REQ-FFI-SX-011). An odd length, more than 61 pairs or a value above 7FH
+ * gives [`ZmidiStatus::InvalidArgument`].
+ *
+ * # Safety
+ * `additional` is null or points to `additional_length` readable bytes; `out` is null or points
+ * to `capacity` writable bytes; `length` is null or writable.
+ */
+enum ZmidiStatus zmidi_time_signature_write(uint8_t device_id,
+                                            bool delayed,
+                                            uint8_t numerator,
+                                            uint8_t denominator_power,
+                                            uint8_t clocks_per_click,
+                                            uint8_t thirty_seconds_per_quarter,
+                                            const uint8_t *additional,
+                                            uintptr_t additional_length,
+                                            uint8_t *out,
+                                            uintptr_t capacity,
+                                            uintptr_t *length);
 #endif
 
 #if (defined(ZMIDI_SYSEX) && defined(ZMIDI_TUNING))

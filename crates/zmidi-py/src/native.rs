@@ -69,16 +69,20 @@ pub mod _native {
     #[pymodule_export]
     use crate::pe::{PeEngine, PeEvent, PeResource, PeSubscription};
     #[pymodule_export]
+    const BAR_NOT_RUNNING: i16 = -8192;
+    #[pymodule_export]
+    const BAR_UNKNOWN: i16 = 8191;
+    #[pymodule_export]
     use crate::sysex::{
         coarse_tuning_semitones, fine_tuning_offset, frequency_word, frequency_word_bytes,
         gm_system, identity_reply, identity_request, manufacturer_sysex, mmc_commands, mmc_fields,
         mmc_full_name, mmc_responses, mmc_short_name, mtc_full, mtc_user_bits, parse_sysex,
-        read_device_control, read_gm_system, read_inquiry, read_mmc, read_mmc_fields,
-        read_mtc_full, read_mtc_user_bits, read_tuning, respond_identity, sysex_addressed,
-        tuning_checksum, tuning_dump_request, tuning_key_dump, tuning_note_change,
-        tuning_scale_dump, tuning_scale_octave, universal_sysex, DeviceControl, Identity,
-        InquiryMessage, MmcCommand, MmcField, MmcMessage, MtcEvent, MtcGenerator, MtcReader,
-        MtcTime, SysexInfo, TimeCode, TuningMessage,
+        read_bar_marker, read_device_control, read_gm_system, read_inquiry, read_mmc,
+        read_mmc_fields, read_mtc_full, read_mtc_user_bits, read_time_signature, read_tuning,
+        respond_identity, sysex_addressed, tuning_checksum, tuning_dump_request, tuning_key_dump,
+        tuning_note_change, tuning_scale_dump, tuning_scale_octave, universal_sysex, BarMarker,
+        DeviceControl, Identity, InquiryMessage, MmcCommand, MmcField, MmcMessage, MtcEvent,
+        MtcGenerator, MtcReader, MtcTime, SysexInfo, TimeCode, TimeSignature, TuningMessage,
     };
     #[pymodule_export]
     use crate::ump::{

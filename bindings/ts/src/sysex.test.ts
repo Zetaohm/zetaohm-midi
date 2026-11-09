@@ -1,12 +1,15 @@
-// Universal System Exclusive, MIDI Time Code and MMC (REQ-TS-SX-*): M1 v4.2.1, RP-024, CA-025, MIDI
-// Tuning, RP-004, RP-013.
+// Universal System Exclusive, MIDI Time Code, MMC and Notation (REQ-TS-SX-*): M1 v4.2.1, RP-024,
+// CA-025, MIDI Tuning, RP-004, RP-013.
 import { beforeAll, describe, expect, test } from "vitest";
 
 import {
+  BAR_NOT_RUNNING,
+  BAR_UNKNOWN,
   InvalidValueError,
   MalformedError,
   MtcGenerator,
   MtcReader,
+  barMarkerBytes,
   coarseTuningSemitones,
   deviceControlBytes,
   fineTuningOffset,
@@ -30,6 +33,7 @@ import {
   mtcToFrameCount,
   mtcUserBits,
   parseSysex,
+  readBarMarker,
   readDeviceControl,
   readGmSystem,
   readInquiry,
@@ -37,6 +41,7 @@ import {
   readMmcFields,
   readMtcFull,
   readMtcUserBits,
+  readTimeSignature,
   readTuning,
   respondIdentity,
   sysexAddressed,
@@ -45,12 +50,14 @@ import {
   timeCodeFromBytes,
   timeCodeToStatusForm,
   timeCodeToSubframesForm,
+  timeSignatureBytes,
+  timeSignaturePairs,
   tuningKeyDump,
   tuningNoteChange,
   tuningScaleOctave,
   universalSysex,
 } from "./index.js";
-import type { Identity, MtcTime } from "./index.js";
+import type { Identity, MtcTime, TimeSignature } from "./index.js";
 
 beforeAll(async () => {
   await init();
@@ -187,5 +194,35 @@ describe("sysex", () => {
     const neg = timeCode(t(1, 0, 0, 0, 3), { negative: true, statusForm: true });
     expect(() => mmcFields([{ kind: "timeCode", field: 0x01, code: neg }])).toThrow(InvalidValueError);
     expect(readMmcFields(mmcFields([f])).map((x) => x.field)).toEqual([0x01]);
+  });
+
+  test("Notation Information: M1 examples", () => {
+    // M1 p. 54: 7FH 3FH is the running state with no known bar number; 01H 40H is the first count-in bar.
+    const unknown = b(0xf0, 0x7f, 0x7f, 0x03, 0x01, 0x7f, 0x3f, 0xf7);
+    expect(readBarMarker(unknown)).toEqual({ deviceId: 0x7f, bar: BAR_UNKNOWN });
+    expect(barMarkerBytes({ deviceId: 0x7f, bar: 8191 })).toEqual(unknown);
+    expect(barMarkerBytes({ deviceId: 0x7f, bar: -8191 }).slice(5, 7)).toEqual(b(0x01, 0x40));
+    expect(barMarkerBytes({ deviceId: 0, bar: BAR_NOT_RUNNING }).slice(5, 7)).toEqual(b(0x00, 0x40));
+    expect(() => barMarkerBytes({ deviceId: 0x7f, bar: 8192 })).toThrow(InvalidValueError);
+    // M1 p. 55: 3/8 + 2/8 in one bar, Delayed: ln nn dd cc bb nn dd.
+    const compound = b(0xf0, 0x7f, 0x10, 0x03, 0x42, 0x06, 0x03, 0x03, 0x0c, 0x08, 0x02, 0x03, 0xf7);
+    const sig: TimeSignature = {
+      deviceId: 0x10,
+      delayed: true,
+      numerator: 3,
+      denominatorPower: 3,
+      clocksPerClick: 12,
+      thirtySecondsPerQuarter: 8,
+      additional: b(2, 3),
+    };
+    expect(readTimeSignature(compound)).toEqual(sig);
+    expect(timeSignaturePairs(sig)).toEqual([[2, 3]]);
+    expect(timeSignatureBytes(sig)).toEqual(compound);
+    const four = { ...sig, deviceId: 0x7f, delayed: false, numerator: 4, denominatorPower: 2, clocksPerClick: 24, additional: b() };
+    expect(timeSignatureBytes(four)).toEqual(b(0xf0, 0x7f, 0x7f, 0x03, 0x02, 0x04, 0x04, 0x02, 0x18, 0x08, 0xf7));
+    expect(readBarMarker(compound)).toBeNull();
+    expect(readTimeSignature(unknown)).toBeNull();
+    expect(() => timeSignatureBytes({ ...sig, additional: b(2) })).toThrow(InvalidValueError);
+    expect(() => readTimeSignature(b(0xf0, 0x7f, 0x7f, 0x03, 0x02, 0x05, 4, 2, 24, 8, 2, 0xf7))).toThrow(MalformedError);
   });
 });

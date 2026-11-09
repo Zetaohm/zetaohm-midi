@@ -177,11 +177,12 @@ with LTO, so the linker removes the functions that the program does not call.
 | `tuning` | `ZMIDI_TUNING` | MIDI Tuning: the dumps and their request, Single Note Tuning Change and Scale/Octave Tuning. |
 | `mtc` | `ZMIDI_MTC` | MIDI Time Code: the time functions, the Quarter Frame generator and reader, Full Message and User Bits. |
 | `mmc-transport` | `ZMIDI_MMC_TRANSPORT` | MIDI Machine Control transport tier: the Set 1 commands with PLAY and PAUSE, the Standard Time Code and the response fields. Turns on `mtc`. |
+| `notation` | `ZMIDI_NOTATION` | Notation Information: the Bar Marker and the Time Signature (Immediate and Delayed, with compound pairs). |
 | `midi1` | `ZMIDI_MIDI1` | All MIDI 1.0 parts above, with no MIDI 2.0 code. |
 | `std` | – | Host builds. |
 | `panic-handler` | – | Bare-metal and WebAssembly builds: a panic handler for the library. |
 
-`ZMIDI_CI` also defines the five `ZMIDI_CI_*` macros. `ZMIDI_MIDI1` defines the sixteen MIDI 1.0 macros, `ZMIDI_MPE` also
+`ZMIDI_CI` also defines the five `ZMIDI_CI_*` macros. `ZMIDI_MIDI1` defines the seventeen MIDI 1.0 macros, `ZMIDI_MPE` also
 defines `ZMIDI_PARAMETERS`, `ZMIDI_GM` defines `ZMIDI_CHANNEL_MODE`, `ZMIDI_CONTROLLERS` and `ZMIDI_PARAMETERS`,
 `ZMIDI_MMC_TRANSPORT` defines `ZMIDI_MTC`, each System Exclusive part defines `ZMIDI_SYSEX`, and `ZMIDI_IO`, `ZMIDI_USB` and `ZMIDI_BLE` also define their `*_MIDI1` macro. Define the macros of the features of
 your library build: with neither `io` nor `ble`, the readers of `io-midi1` and `ble-midi1` have a smaller storage size. `ZMIDI_ABI_MAJOR` and `ZMIDI_ABI_MINOR` give

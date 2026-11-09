@@ -1,6 +1,6 @@
 //! The Python API of zmidi-sysex (DEC-022): the Universal System Exclusive reader and writers,
-//! Device Inquiry, the General MIDI System messages, Device Control, MIDI Tuning, MIDI Time Code
-//! and the MIDI Machine Control transport tier. A reader takes one whole message, with or without
+//! Device Inquiry, the General MIDI System messages, Device Control, MIDI Tuning, MIDI Time Code,
+//! the MIDI Machine Control transport tier and Notation Information. A reader takes one whole message, with or without
 //! F0H and F7H, and gives None for a message of another part; a bad message of its part raises
 //! MalformedError. A writer gives the bytes of the whole message; a value out of range raises
 //! InvalidValueError. Kinds are strings.
@@ -378,6 +378,176 @@ pub fn coarse_tuning_semitones(msb: u8) -> PyResult<i8> {
         return Err(invalid("msb must be 0 to 127"));
     }
     Ok(sx::coarse_tuning_semitones(msb))
+}
+
+/// One Bar Marker message (M1 Notation Information): the Device ID and the signed bar number,
+/// -8192 (BAR_NOT_RUNNING) to 8191 (BAR_UNKNOWN); -8191 to 0 are count-in bars.
+#[pyclass(frozen, eq, module = "zetaohm_midi._native")]
+#[derive(Clone, PartialEq, Eq)]
+pub struct BarMarker(sx::BarMarker);
+
+#[pymethods]
+impl BarMarker {
+    #[new]
+    fn new(device_id: u8, bar: i16) -> PyResult<Self> {
+        let bar = sx::Bar::from_value(bar).ok_or_else(|| invalid("bar must be -8192 to 8191"))?;
+        let m = sx::BarMarker { device_id, bar };
+        m.write(&mut [0u8; 8]).map_err(error)?;
+        Ok(Self(m))
+    }
+
+    /// The Device ID.
+    #[getter]
+    fn device_id(&self) -> u8 {
+        self.0.device_id
+    }
+
+    /// The signed bar number.
+    #[getter]
+    fn bar(&self) -> i16 {
+        self.0.bar.value()
+    }
+
+    /// The bytes of the message.
+    fn to_bytes(&self) -> PyResult<Bytes> {
+        write(|o| self.0.write(o))
+    }
+}
+
+/// Reads a Bar Marker; None for another message.
+#[pyfunction]
+pub fn read_bar_marker(data: &[u8]) -> PyResult<Option<BarMarker>> {
+    Ok(read(data, sx::BarMarker::from_universal)?.map(BarMarker))
+}
+
+/// One Time Signature message, Immediate or Delayed (M1 Notation Information).
+#[pyclass(frozen, eq, module = "zetaohm_midi._native")]
+#[derive(Clone, PartialEq, Eq)]
+pub struct TimeSignature {
+    device_id: u8,
+    delayed: bool,
+    fields: [u8; 4],
+    additional: Vec<u8>,
+}
+
+impl TimeSignature {
+    fn message(&self) -> sx::TimeSignature<'_> {
+        let [numerator, denominator_power, clocks_per_click, thirty_seconds_per_quarter] =
+            self.fields;
+        sx::TimeSignature {
+            device_id: self.device_id,
+            delayed: self.delayed,
+            numerator,
+            denominator_power,
+            clocks_per_click,
+            thirty_seconds_per_quarter,
+            additional: &self.additional,
+        }
+    }
+
+    fn of(m: &sx::TimeSignature<'_>) -> Self {
+        Self {
+            device_id: m.device_id,
+            delayed: m.delayed,
+            fields: [
+                m.numerator,
+                m.denominator_power,
+                m.clocks_per_click,
+                m.thirty_seconds_per_quarter,
+            ],
+            additional: m.additional.to_vec(),
+        }
+    }
+}
+
+#[pymethods]
+impl TimeSignature {
+    /// `denominator_power` is a negative power of 2 (2 = quarter note); `additional` holds the
+    /// numerator and denominator-power pairs of a compound time signature, at most 61 pairs.
+    #[new]
+    #[pyo3(signature = (device_id, numerator, denominator_power, clocks_per_click, thirty_seconds_per_quarter, additional=Vec::new(), delayed=false))]
+    fn new(
+        device_id: u8,
+        numerator: u8,
+        denominator_power: u8,
+        clocks_per_click: u8,
+        thirty_seconds_per_quarter: u8,
+        additional: Vec<u8>,
+        delayed: bool,
+    ) -> PyResult<Self> {
+        let t = Self {
+            device_id,
+            delayed,
+            fields: [
+                numerator,
+                denominator_power,
+                clocks_per_click,
+                thirty_seconds_per_quarter,
+            ],
+            additional,
+        };
+        t.message().write(&mut [0u8; 140]).map_err(error)?;
+        Ok(t)
+    }
+
+    /// The Device ID.
+    #[getter]
+    fn device_id(&self) -> u8 {
+        self.device_id
+    }
+
+    /// True for the Delayed form (42H), which takes effect at the next Bar Marker.
+    #[getter]
+    fn delayed(&self) -> bool {
+        self.delayed
+    }
+
+    /// `nn`: the numerator.
+    #[getter]
+    fn numerator(&self) -> u8 {
+        self.fields[0]
+    }
+
+    /// `dd`: the denominator as a negative power of 2.
+    #[getter]
+    fn denominator_power(&self) -> u8 {
+        self.fields[1]
+    }
+
+    /// `cc`: MIDI clocks in a metronome click.
+    #[getter]
+    fn clocks_per_click(&self) -> u8 {
+        self.fields[2]
+    }
+
+    /// `bb`: notated 32nd notes in a MIDI quarter note.
+    #[getter]
+    fn thirty_seconds_per_quarter(&self) -> u8 {
+        self.fields[3]
+    }
+
+    /// The additional pairs as bytes.
+    #[getter]
+    fn additional(&self) -> Bytes {
+        Cow::Owned(self.additional.clone())
+    }
+
+    /// The additional pairs, `(numerator, denominator_power)`.
+    #[getter]
+    fn pairs(&self) -> Vec<(u8, u8)> {
+        self.message().pairs().collect()
+    }
+
+    /// The bytes of the message.
+    fn to_bytes(&self) -> PyResult<Bytes> {
+        write(|o| self.message().write(o))
+    }
+}
+
+/// Reads a Time Signature; None for another message.
+#[pyfunction]
+pub fn read_time_signature(data: &[u8]) -> PyResult<Option<TimeSignature>> {
+    Ok(read(data, sx::TimeSignature::from_universal)?.map(|m| TimeSignature::of(&m)))
 }
 
 /// One MIDI Tuning message (M1 MIDI Tuning, CA-020, CA-021).

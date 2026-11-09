@@ -34,6 +34,10 @@ typedef RawCommand = (int, int, int, int, RawTimeCode?, Uint8List, Uint8List);
 /// (kind, field, code, name, data).
 typedef RawField = (int, int, RawTimeCode?, Uint8List, Uint8List);
 
+/// (Device ID, delayed, numerator, denominator power, clocks per click, 32nd notes per quarter note,
+/// additional pairs).
+typedef RawTimeSignature = (int, bool, int, int, int, int, Uint8List);
+
 /// The TypeScript kinds, at the index of their C value.
 const _classes = ['manufacturer', 'nonCommercial', 'nonRealTime', 'realTime'];
 const _dcKinds = [
@@ -613,5 +617,49 @@ Uint8List mmcResponses(int deviceId, List<RawField> fields) => bytes(
 Uint8List mmcFields(List<RawField> fields) => bytes(
   tsCall('mmcFields', [
     [for (final f in fields) _fieldIn(f)].toJS,
+  ]),
+);
+
+// --- Notation ---
+
+/// (Device ID, bar number), or null.
+(int, int)? readBarMarker(Uint8List data) => _orNull(
+  tsCall('readBarMarker', [jsBytes(data)]),
+  (o) => (intOf(prop(o, 'deviceId')), intOf(prop(o, 'bar'))),
+);
+
+/// The bytes of a Bar Marker.
+Uint8List barMarkerBytes(int deviceId, int bar) => bytes(
+  tsCall('barMarkerBytes', [
+    jsObject({'deviceId': deviceId.toJS, 'bar': bar.toJS}),
+  ]),
+);
+
+/// The fields of a Time Signature, or null.
+RawTimeSignature? readTimeSignature(Uint8List data) => _orNull(
+  tsCall('readTimeSignature', [jsBytes(data)]),
+  (o) => (
+    intOf(prop(o, 'deviceId')),
+    boolOf(prop(o, 'delayed')),
+    intOf(prop(o, 'numerator')),
+    intOf(prop(o, 'denominatorPower')),
+    intOf(prop(o, 'clocksPerClick')),
+    intOf(prop(o, 'thirtySecondsPerQuarter')),
+    bytes(prop(o, 'additional')),
+  ),
+);
+
+/// The bytes of a Time Signature.
+Uint8List timeSignatureBytes(RawTimeSignature t) => bytes(
+  tsCall('timeSignatureBytes', [
+    jsObject({
+      'deviceId': t.$1.toJS,
+      'delayed': t.$2.toJS,
+      'numerator': t.$3.toJS,
+      'denominatorPower': t.$4.toJS,
+      'clocksPerClick': t.$5.toJS,
+      'thirtySecondsPerQuarter': t.$6.toJS,
+      'additional': jsBytes(t.$7),
+    }),
   ]),
 );

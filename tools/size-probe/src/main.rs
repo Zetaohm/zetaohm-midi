@@ -75,7 +75,7 @@ fn main() -> ! {
         remote::run(&w);
         #[cfg(feature = "inject")]
         inject::run(&w);
-        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx", feature = "gm_rx", feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning", feature = "mtc_rx", feature = "mtc_tx", feature = "mmc_device", feature = "mmc_controller"))]
+        #[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx", feature = "gm_rx", feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning", feature = "sx_notation", feature = "mtc_rx", feature = "mtc_tx", feature = "mmc_device", feature = "mmc_controller"))]
         lean::run(&w);
         #[cfg(any(feature = "ble_rx", feature = "ble_rx_words", feature = "ble_tx", feature = "ble_rx_midi1", feature = "ble_rx_words_midi1", feature = "ble_tx_midi1", feature = "net_client", feature = "net_host", feature = "smf_read", feature = "clip_read", feature = "clip_write"))]
         transport::run(&w);
@@ -786,7 +786,7 @@ mod inject {
 }
 
 // ---------------------------------------------------------------- lean variants
-#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx", feature = "gm_rx", feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning", feature = "mtc_rx", feature = "mtc_tx", feature = "mmc_device", feature = "mmc_controller"))]
+#[cfg(any(feature = "rx_lean", feature = "down", feature = "up", feature = "bytes1", feature = "bytes_out", feature = "rx_assign", feature = "down_words", feature = "bytes_core", feature = "bytes_feed", feature = "bytes_out_each", feature = "up_lean", feature = "up_words", feature = "msg_in", feature = "msg_out", feature = "mode_state", feature = "ctl_state", feature = "param_state", feature = "sync_state", feature = "active_sensing", feature = "mpe_rx", feature = "mpe_tx", feature = "gm_rx", feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning", feature = "sx_notation", feature = "mtc_rx", feature = "mtc_tx", feature = "mmc_device", feature = "mmc_controller"))]
 mod lean {
     use super::*;
     #[allow(unused_imports)]
@@ -1045,7 +1045,7 @@ mod lean {
                 }
             }
         }
-        #[cfg(any(feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning"))]
+        #[cfg(any(feature = "sx_inquiry", feature = "sx_gm_dc", feature = "sx_tuning", feature = "sx_notation"))]
         {
             // One whole System Exclusive message from the byte reader.
             let bytes: [u8; 60] = core::array::from_fn(|i| w[i] as u8);
@@ -1082,7 +1082,23 @@ mod lean {
                             black_box(m.ok());
                         }
                     }
+                    #[cfg(feature = "sx_notation")]
+                    {
+                        black_box(zmidi_sysex::BarMarker::from_universal(&u).ok());
+                        if let Ok(Some(t)) = zmidi_sysex::TimeSignature::from_universal(&u) {
+                            black_box(t.pairs().fold(t.numerator, |a, (n, d)| a ^ n ^ d));
+                            black_box(t);
+                        }
+                    }
                 }
+            }
+            #[cfg(feature = "sx_notation")]
+            {
+                // A sequencer sends one Bar Marker each bar.
+                let mut out = [0u8; 8];
+                let bar = zmidi_sysex::Bar::from_value(w[1] as i16 >> 2).unwrap_or(zmidi_sysex::Bar::Unknown);
+                black_box(zmidi_sysex::BarMarker { device_id: 0x7F, bar }.write(&mut out).ok());
+                black_box(&out);
             }
             #[cfg(feature = "sx_tuning")]
             {
